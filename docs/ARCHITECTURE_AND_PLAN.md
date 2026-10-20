@@ -1,0 +1,519 @@
+# InfraNexus 具体系统架构与工程实现方案 (Architecture & Implementation Plan)
+
+本文档详细阐述 **InfraNexus** 全栈企业脚手架的系统架构、模块分层、数据库表结构、安全认证模型、接口定义以及前端组件与状态流转设计。
+
+---
+
+## 1. 总体架构拓扑图
+
+```mermaid
+graph TD
+    subgraph ClientLayer["前端呈现层 (React 19 + Vite + Tailwind v4 + Base UI)"]
+        UI_Desktop["桌面端全宽工作台 (Full-width Fluid Canvas)"]
+        UI_Mobile["移动端抽屉导航 (Responsive Drawer)"]
+        DataTable["TanStack Table v9 数据表格组件群"]
+        AxiosClient["Axios 客户端 (Cookie 会话)"]
+    end
+
+    subgraph GatewayLayer["GoFiber v3 中间件流水线"]
+        MW_Recover["recover.New()"]
+        MW_ReqID["requestid.New()"]
+        MW_RespTime["responsetime.New()"]
+        MW_CORS["cors.New()"]
+        MW_Logger["logger.New() + slog 桥接"]
+        MW_JWT["jwt.New() Token 鉴权"]
+        MW_Casbin["casbin.New() RBAC 鉴权"]
+        MW_SSE["sse.New() 实时推送"]
+    end
+
+    subgraph AppLayer["业务三层架构 (Interface Injected)"]
+        Handler["HTTP Handler 接入层 (DTO 校验, 响应封包)"]
+        Service["Domain Service 业务逻辑层 (事务, 加密, 规则)"]
+        Repository["Repository 数据访问层 (GORM / Redis / Storage)"]
+    end
+
+    subgraph DataLayer["持久化与存储引擎层"]
+        DB_PG[("PostgreSQL 15+ (高并发生产)")]
+        DB_SQLite[("SQLite 3 (单机/本地/边缘)")]
+        Cache_Redis[("Redis 7 (Session 与令牌族)")]
+        UnifiedStorage["Fiber Storage 抽象工厂 (S3 / Postgres / SQLite3 / Redis / Memory)"]
+    end
+
+    ClientLayer --> GatewayLayer
+    GatewayLayer --> AppLayer
+    AppLayer --> DataLayer
+```
+
+---
+
+## 2. 后端工程架构设计 (Backend Architecture)
+
+### 2.1 极简薄入口 `main.go` 模式
+`main.go` 严格遵循控制反转与装配器模式，代码行数精简在 80 行以内，不含任何业务逻辑：
+```go
+package main
+
+import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"infranexus/internal/bootstrap"
+	"infranexus/internal/config"
+	"infranexus/internal/core/logger"
+)
+
+func main() {
+	// 1. 初始化 Viper 配置
+	cfg := config.MustLoad()
+
+	// 2. 初始化 slog 全局结构化日志
+	log := logger.Init(cfg.App.Debug)
+
+	// 3. 构建依赖注入上下文 (DB, Redis, Storage, Repos, Services, Handlers)
+	appContainer := bootstrap.NewAppContainer(cfg, log)
+	defer appContainer.Close()
+
+	// 4. 构建并装配 GoFiber v3 引擎 (全局中间件 + 路由)
+	fiberApp := bootstrap.NewFiberApp(appContainer)
+
+	// 5. 优雅启动与平滑退出 (Graceful Shutdown)
+	go func() {
+		if err := fiberApp.Listen(":" + cfg.App.Port); err != nil {
+			log.Error("Fiber listen failed", "error", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Info("Shutting down InfraNexus server gracefully...")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := fiberApp.ShutdownWithContext(ctx); err != nil {
+		log.Error("Server forced to shutdown", "error", err)
+	}
+	log.Info("Server exited cleanly.")
+}
+```
+
+### 2.2 泛型仓储契约与领域模型 (Go 1.27+ Generics & JSONB)
+在 `internal/domain` 目录中声明纯粹的契约接口，解耦实现细节，并全面拥抱泛型与 `datatypes.JSONType[T]`：
+
+```go
+// internal/domain/base.go
+package domain
+
+import (
+	"context"
+	"time"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+// 全局基础实体，主键统一使用 UUID
+type BaseEntity struct {
+	ID        uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (b *BaseEntity) BeforeCreate(tx *gorm.DB) error {
+	if b.ID == uuid.Nil {
+		b.ID = uuid.New() // 优先使用有序 UUIDv7 或标准 UUID
+	}
+	return nil
+}
+
+// 泛型仓储通用接口定义 (Go 1.27+)
+type Repository[T any, ID comparable] interface {
+	GetByID(ctx context.Context, id ID) (*T, error)
+	List(ctx context.Context, page, pageSize int, filters map[string]any) ([]T, int64, error)
+	Create(ctx context.Context, entity *T) error
+	Update(ctx context.Context, entity *T) error
+	Delete(ctx context.Context, id ID) error
+}
+
+// internal/domain/user.go
+package domain
+
+import (
+	"context"
+	"github.com/google/uuid"
+	"gorm.io/datatypes"
+)
+
+type UserPreferences struct {
+	Theme         string   `json:"theme"`         // "dark" | "light" | "system"
+	Locale        string   `json:"locale"`        // "zh-CN" | "en-US"
+	PinnedRoutes  []string `json:"pinned_routes"` // 侧栏常用图钉快捷路由
+}
+
+type User struct {
+	BaseEntity
+	Username    string                              `gorm:"size:64;uniqueIndex;not null" json:"username"`
+	Email       string                              `gorm:"size:128;uniqueIndex;not null" json:"email"`
+	Password    string                              `gorm:"size:255;not null" json:"-"`
+	Nickname    string                              `gorm:"size:64" json:"nickname"`
+	Avatar      string                              `gorm:"size:255" json:"avatar"`
+	Status      int                                 `gorm:"default:1" json:"status"` // 1: 启用, 2: 禁用
+	Preferences datatypes.JSONType[UserPreferences] `gorm:"type:jsonb" json:"preferences"`
+	ExtraData   datatypes.JSON                      `gorm:"type:jsonb" json:"extra_data"`
+	Roles       []Role                              `gorm:"many2many:sys_user_roles;foreignKey:ID;joinForeignKey:UserID;References:ID;joinReferences:RoleID" json:"roles"`
+}
+
+type UserRepository interface {
+	Repository[User, uuid.UUID]
+	GetByUsername(ctx context.Context, username string) (*User, error)
+	GetByEmail(ctx context.Context, email string) (*User, error)
+	AssignRoles(ctx context.Context, userID uuid.UUID, roleIDs []uuid.UUID) error
+}
+
+type UserService interface {
+	Authenticate(ctx context.Context, username, password string) (*User, error)
+	CreateUser(ctx context.Context, req CreateUserRequest) (*User, error)
+	UpdateUser(ctx context.Context, id uuid.UUID, req UpdateUserRequest) (*User, error)
+	DeleteUser(ctx context.Context, id uuid.UUID) error
+	ToggleStatus(ctx context.Context, id uuid.UUID, status int) error
+	UpdatePreferences(ctx context.Context, id uuid.UUID, pref UserPreferences) error
+}
+```
+
+### 2.3 数据库模型与双驱动支持 (SQLite / PostgreSQL)
+系统通过统一的 GORM 初始化器，自动根据 `cfg.Database.Driver` 执行切换，并设置标准连接池参数：
+
+```go
+// internal/bootstrap/database.go
+package bootstrap
+
+import (
+	"fmt"
+	"log/slog"
+	"time"
+
+	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
+
+	"infranexus/internal/config"
+	"infranexus/internal/domain"
+)
+
+func InitDatabase(cfg *config.Config, log *slog.Logger) (*gorm.DB, error) {
+	var dialector gorm.Dialector
+
+	switch cfg.Database.Driver {
+	case "sqlite":
+		dialector = sqlite.Open(cfg.Database.SQLite.DBPath)
+	case "postgres":
+		dsn := fmt.Sprintf(
+			"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+			cfg.Database.Postgres.Host,
+			cfg.Database.Postgres.Port,
+			cfg.Database.Postgres.User,
+			cfg.Database.Postgres.Password,
+			cfg.Database.Postgres.DBName,
+			cfg.Database.Postgres.SSLMode,
+		)
+		dialector = postgres.Open(dsn)
+	default:
+		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Database.Driver)
+	}
+
+	db, err := gorm.Open(dialector, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+
+	sqlDB.SetMaxIdleConns(cfg.Database.Pool.MaxIdleConns)
+	sqlDB.SetMaxOpenConns(cfg.Database.Pool.MaxOpenConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(cfg.Database.Pool.ConnMaxLifetime) * time.Second)
+
+	// 自动运行迁移
+	if err := db.AutoMigrate(
+		&domain.User{},
+		&domain.Role{},
+		&domain.Permission{},
+	); err != nil {
+		return nil, fmt.Errorf("auto migration failed: %w", err)
+	}
+
+	return db, nil
+}
+```
+
+### 2.4 可插拔 Fiber Storage 工厂
+GoFiber 官方提供了多种统一抽象的存储驱动，本脚手架通过统一接口工厂统一提供 `fiber.Storage`：
+```go
+// internal/storage/factory.go
+package storage
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/storage/memory/v2"
+	"github.com/gofiber/storage/postgres/v3"
+	"github.com/gofiber/storage/redis/v3"
+	"github.com/gofiber/storage/s3/v2"
+	"github.com/gofiber/storage/sqlite3/v2"
+
+	"infranexus/internal/config"
+)
+
+func NewStorage(cfg *config.Config) (fiber.Storage, error) {
+	switch cfg.Storage.Driver {
+	case "memory":
+		return memory.New(memory.Config{
+			GCInterval: 10 * time.Minute,
+		}), nil
+	case "redis":
+		return redis.New(redis.Config{
+			Host:     cfg.Redis.Host,
+			Port:     cfg.Redis.Port,
+			Password: cfg.Redis.Password,
+			Database: cfg.Redis.DB,
+		}), nil
+	case "sqlite3":
+		return sqlite3.New(sqlite3.Config{
+			Database: cfg.Database.SQLite.DBPath,
+			Table:    "fiber_storage",
+		}), nil
+	case "postgres":
+		return postgres.New(postgres.Config{
+			Host:     cfg.Database.Postgres.Host,
+			Port:     cfg.Database.Postgres.Port,
+			Username: cfg.Database.Postgres.User,
+			Password: cfg.Database.Postgres.Password,
+			Database: cfg.Database.Postgres.DBName,
+			Table:    "fiber_storage",
+		}), nil
+	case "s3":
+		return s3.New(s3.Config{
+			Bucket:    cfg.Storage.S3.Bucket,
+			Endpoint:  cfg.Storage.S3.Endpoint,
+			Region:    cfg.Storage.S3.Region,
+			AccessKey: cfg.Storage.S3.AccessKey,
+			SecretKey: cfg.Storage.S3.SecretKey,
+		}), nil
+	default:
+		return memory.New(), nil
+	}
+}
+```
+
+### 2.5 统一验证器、泛型响应与业务状态码映射 (Validation & Generic Response Envelope)
+按照 Fiber 官方指引，创建结合 `go-playground/validator/v10` 的统一校验管道，并在全局 ErrorHandler 中将错误转换为强类型的标准业务响应：
+
+```go
+// internal/core/response/response.go
+package response
+
+import (
+	"time"
+	"github.com/gofiber/fiber/v3"
+)
+
+// 业务状态码枚举
+type BusinessCode int
+
+const (
+	CodeSuccess            BusinessCode = 200000 // 成功
+	CodeParamInvalid       BusinessCode = 400001 // 请求参数错误
+	CodeTokenExpired       BusinessCode = 401001 // 会话或Token过期
+	CodeInvalidCredentials BusinessCode = 401002 // 凭证无效
+	CodePermissionDenied   BusinessCode = 403001 // 权限不足
+	CodeAccountDisabled    BusinessCode = 403002 // 账号停用
+	CodeUserNotFound       BusinessCode = 404001 // 用户未找到
+	CodeRoleNotFound       BusinessCode = 404002 // 角色未找到
+	CodeDatabaseError      BusinessCode = 500001 // 数据库异常
+	CodeInternalError      BusinessCode = 500002 // 内部未知错误
+)
+
+// Go 1.27+ 泛型响应结构体
+type Envelope[T any] struct {
+	Code      BusinessCode `json:"code"`
+	Message   string       `json:"message"`
+	Data      T            `json:"data"`
+	RequestID string       `json:"request_id"`
+	Timestamp int64        `json:"timestamp"`
+}
+
+type PageData[T any] struct {
+	Items    []T   `json:"items"`
+	Total    int64 `json:"total"`
+	Page     int   `json:"page"`
+	PageSize int   `json:"page_size"`
+}
+
+func Success[T any](c fiber.Ctx, data T) error {
+	reqID, _ := c.Locals("requestid").(string)
+	return c.Status(fiber.StatusOK).JSON(Envelope[T]{
+		Code:      CodeSuccess,
+		Message:   "success",
+		Data:      data,
+		RequestID: reqID,
+		Timestamp: time.Now().Unix(),
+	})
+}
+
+func Page[T any](c fiber.Ctx, items []T, total int64, page, pageSize int) error {
+	reqID, _ := c.Locals("requestid").(string)
+	return c.Status(fiber.StatusOK).JSON(Envelope[PageData[T]]{
+		Code:    CodeSuccess,
+		Message: "success",
+		Data: PageData[T]{
+			Items:    items,
+			Total:    total,
+			Page:     page,
+			PageSize: pageSize,
+		},
+		RequestID: reqID,
+		Timestamp: time.Now().Unix(),
+	})
+}
+
+func Error(c fiber.Ctx, httpStatus int, bizCode BusinessCode, message string, extra ...any) error {
+	reqID, _ := c.Locals("requestid").(string)
+	var data any
+	if len(extra) > 0 {
+		data = extra[0]
+	}
+	return c.Status(httpStatus).JSON(Envelope[any]{
+		Code:      bizCode,
+		Message:   message,
+		Data:      data,
+		RequestID: reqID,
+		Timestamp: time.Now().Unix(),
+	})
+}
+```
+
+### 2.6 认证双通道体系实现架构
+Web `POST /auth/login` 设置 HttpOnly Session Cookie，只返回用户；Session 具有空闲与绝对有效期，续期同步更新 Cookie。`GET /auth/me` 从 Service 读取当前用户。外部客户端 `POST /auth/token` 获取 Access/Refresh JWT；`POST /auth/refresh` 以原子比较交换轮换 Refresh JTI，令牌族保留初始绝对 TTL，新 Refresh 的 exp 不超过初始族到期时间。Bearer 存在时严格校验，失败不回退 Cookie。两种凭据均在每次访问时读取当前用户状态及角色。注销撤销当前 Session 或令牌族；存储故障拒绝请求。Redis 生产不可用时启动失败，内存模式适合单实例开发。
+
+---
+
+## 3. 前端工程架构、Base UI 网格与流式布局设计 (Frontend Architecture)
+
+### 3.1 Base UI 原语与 12 列代码网格规范
+系统前端组件库基于 `@base-ui/react` 封装：
+- **无头原语解构**：采用语义化的 Parts 架构（例如 `<Dialog.Root>`, `<Dialog.Backdrop>`, `<Dialog.Popup>`, `<Popover.Root>`, `<Select.Root>`）。
+- **12 列流式自适应网格规范**：
+  工作台页面统一遵循 12 列响应式流式布局，不锁定固定像素宽：
+  ```tsx
+  // 示例：标准 SaaS 模块页面网格骨架
+  export const DashboardGrid = () => (
+    <div className="grid grid-cols-12 gap-4 md:gap-6 w-full">
+      {/* 顶部关键指标 KPI 统计卡片 (在大屏上平铺 4 列，在移动端自动单列折叠) */}
+      <div className="col-span-12 sm:col-span-6 lg:col-span-3">...</div>
+      <div className="col-span-12 sm:col-span-6 lg:col-span-3">...</div>
+      <div className="col-span-12 sm:col-span-6 lg:col-span-3">...</div>
+      <div className="col-span-12 sm:col-span-6 lg:col-span-3">...</div>
+
+      {/* 主数据分析区 (8 列) 与 快捷操作侧栏 (4 列) */}
+      <div className="col-span-12 lg:col-span-8">...</div>
+      <div className="col-span-12 lg:col-span-4">...</div>
+    </div>
+  );
+  ```
+
+### 3.2 目录组织与数据表格模块集成
+将 `@[/Users/liangyx/Documents/GoProject/storage-net/frontend/src/components/data-table]` 整体无缝接入前端核心组件库：
+```
+src/
+├── components/
+│   ├── data-table/
+│   │   ├── data-table.tsx                 # 核心 Table 容器
+│   │   ├── data-table-column-header.tsx    # 具备升降序切换的列头
+│   │   ├── data-table-pagination.tsx       # 现代化分页工具栏
+│   │   ├── data-table-toolbar.tsx          # 过滤、批量操作和工具栏
+│   │   ├── data-table-faceted-filter.tsx   # 多值筛选标签组
+│   │   ├── data-table-date-range-filter.tsx# 时间范围选择器
+│   │   ├── data-table-view-options.tsx     # 列动态显隐切换菜单
+│   │   ├── data-table-skeleton.tsx         # 骨架加载屏
+│   │   ├── data-table-empty.tsx            # 空状态渲染组件
+│   │   └── types.ts                        # 完整 DataTable 类型声明
+```
+
+### 3.2 SaaS 全宽流式布局组件 (`layouts/admin-layout.tsx`)
+主工作区采用 **全宽度响应式设计**，在 1920px、2K、4K 超宽屏幕下不缩水受限：
+```tsx
+import React, { useState } from "react";
+import { Outlet } from "react-router-dom";
+import { Sidebar } from "./sidebar";
+import { Header } from "./header";
+
+export const AdminLayout: React.FC = () => {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
+  return (
+    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+      {/* 桌面端侧边栏 */}
+      <Sidebar 
+        isOpen={sidebarOpen} 
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        isMobileDrawerOpen={mobileDrawerOpen}
+        onMobileClose={() => setMobileDrawerOpen(false)}
+      />
+
+      {/* 主工作区外容器 */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* 顶部功能区 */}
+        <Header 
+          onOpenMobileSidebar={() => setMobileDrawerOpen(true)}
+          sidebarCollapsed={!sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        />
+
+        {/* 主内容区域：全宽度流式铺满，不随大屏幕收窄，支持纵向自适应滚动 */}
+        <main className="flex-1 w-full overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+};
+```
+
+### 3.3 Web Axios Cookie 客户端 (`services/api.ts`)
+浏览器使用 `withCredentials: true`，登录后只将用户资料保存在内存。启动时通过 `/auth/me` 恢复身份；401 清理内存身份，登录失败保留表单错误，网络与 500 错误显示重试。浏览器不保存 Access/Refresh Token，也不排队或自动重放请求。外部 API 客户端自行管理 JWT。
+
+---
+
+## 4. API 路由与 Casbin 权限矩阵规划
+
+### 4.1 核心 RESTful 端点
+| 模块 | 方法 | 路径 | 权限标识 / Casbin 规则 | 描述 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Auth** | POST | `/api/v1/auth/login` | 公开 | Web 登录：设置 Session Cookie，仅返回用户 |
+| **Auth** | POST | `/api/v1/auth/token` | 公开 | 外部客户端换取 JWT TokenPair |
+| **Auth** | GET | `/api/v1/auth/me` | Session/JWT | 获取当前用户 |
+| **Auth** | POST | `/api/v1/auth/refresh` | 公开 (需有效 RefreshToken) | 原子轮换 Refresh Token |
+| **Auth** | POST | `/api/v1/auth/logout` | Session/JWT | 撤销当前会话或令牌族 |
+| **User** | GET | `/api/v1/users` | `(role, /api/v1/users, GET)` | 分页查询用户列表 |
+| **User** | POST | `/api/v1/users` | `(role, /api/v1/users, POST)` | 新建用户 |
+| **User** | PUT | `/api/v1/users/:id` | `(role, /api/v1/users/:id, PUT)` | 更新用户基本信息与角色 |
+| **User** | PATCH | `/api/v1/users/:id/status` | `(role, /api/v1/users/:id/status, PATCH)` | 启用/禁用用户 |
+| **User** | DELETE | `/api/v1/users/:id` | `(role, /api/v1/users/:id, DELETE)` | 软删除用户 |
+| **Role** | GET | `/api/v1/roles` | `(role, /api/v1/roles, GET)` | 获取所有角色列表 |
+| **Role** | POST | `/api/v1/roles` | `(role, /api/v1/roles, POST)` | 新增角色与关联权限 |
+| **Role** | PUT | `/api/v1/roles/:id` | `(role, /api/v1/roles/:id, PUT)` | 修改角色及其权限 |
+| **Role** | DELETE | `/api/v1/roles/:id` | `(role, /api/v1/roles/:id, DELETE)` | 删除角色 |
+| **Perm** | GET | `/api/v1/permissions` | `(role, /api/v1/permissions, GET)` | 获取所有菜单与操作权限树 |
+| **SSE**  | GET | `/api/v1/sse/notifications` | JWT 校验 | 实时系统通知长链接通道 |

@@ -1,0 +1,55 @@
+app:
+  name: "InfraNexus"
+  env: "development" # development | test | production
+  port: "8080"
+  debug: true
+
+database:
+  driver: "sqlite" # "sqlite" | "postgres"
+  sqlite:
+    dbpath: "./data/infranexus.db"
+  postgres:
+    host: "127.0.0.1"
+    port: 5432
+    user: "postgres"
+    password: "your_password"
+    dbname: "infranexus_db"
+    sslmode: "disable"
+  pool:
+    max_idle_conns: 10
+    max_open_conns: 100
+    conn_max_lifetime: 3600 # 秒
+
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 50
+
+session:
+  cookie_name: "infranexus_session"
+  max_age: 1800 # 空闲有效期 30 分钟
+  absolute_max_age: 604800 # 绝对有效期 7 天
+  domain: ""
+  secure: false # 生产环境下为 true
+  same_site: "Lax"
+
+jwt:
+  secret: "infranexus-super-secret-jwt-key-32chars!"
+  access_token_expire: 900     # 15分钟
+  refresh_token_expire: 604800 # 7天
+  issuer: "infranexus-platform"
+
+storage:
+  driver: "memory" # "memory" | "sqlite3" | "postgres" | "redis" | "s3"
+  s3:
+    bucket: "infranexus-assets"
+    endpoint: "s3.amazonaws.com"
+    region: "us-east-1"
+    access_key: ""
+    secret_key: ""
+
+security:
+  trusted_origins: ["http://localhost:5173", "http://127.0.0.1:5173"]
+  login_rate_limit: 10 # 每 IP 每分钟（单进程）
