@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
@@ -49,9 +50,31 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 
 	deptRepo := repository.NewDepartmentRepository(app.DB)
 
+	ldapRepo := repository.NewLDAPRepository(app.DB)
+
 	authRepo := repository.NewAuthRepository(app.Redis)
 	authzSvc := service.NewAuthorizationService(enforcer, roleRepo, permRepo)
-	authSvc := service.NewAuthService(app.Config, userRepo, authRepo, authzSvc)
+	ldapSvc := service.NewLDAPService(service.LDAPServiceDeps{
+		Repo:        ldapRepo,
+		Users:       userRepo,
+		Roles:       roleRepo,
+		Departments: deptRepo,
+		Gateway:     repository.NewLDAPGateway(),
+		Cipher:      app.Cipher,
+		Events:      handler.GlobalSSEHub,
+		Logger:      app.Logger,
+	})
+	app.OnClose(ldapSvc.Close)
+	if scheduler := app.Config.Directory.Scheduler; scheduler.Enabled {
+		tick := time.Duration(scheduler.TickSeconds) * time.Second
+		if tick <= 0 {
+			tick = time.Minute
+		}
+		app.AddBackground(func(ctx context.Context) {
+			service.RunDirectoryScheduler(ctx, ldapSvc, tick, app.Logger)
+		})
+	}
+	authSvc := service.NewAuthService(app.Config, userRepo, authRepo, authzSvc, ldapSvc)
 	userSvc := service.NewUserService(userRepo, roleRepo, deptRepo)
 	roleSvc := service.NewRoleService(roleRepo, authzSvc)
 	permSvc := service.NewPermissionService(permRepo, authzSvc, func() []domain.RouteInfo { return discoverAPIRoutes(fiberApp) })
@@ -67,6 +90,8 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 		permissions: handler.NewPermissionHandler(permSvc),
 		departments: handler.NewDepartmentHandler(deptSvc),
 		options:     handler.NewOptionsHandler(roleSvc, deptSvc),
+		ldap:        handler.NewLDAPHandler(ldapSvc),
+		dashboard:   handler.NewDashboardHandler(service.NewDashboardService(userRepo, deptRepo, roleRepo, permRepo, ldapRepo)),
 	})
 
 	if _, _, err := authzSvc.SyncAllPolicies(context.Background()); err != nil {

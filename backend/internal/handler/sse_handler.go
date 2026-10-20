@@ -45,6 +45,10 @@ func (h *SSEHub) Broadcast(event string, data any) {
 	}
 }
 
+func (h *SSEHub) Publish(event string, data any) {
+	h.Broadcast(event, data)
+}
+
 func (h *SSEHub) AddClient(ch chan SSEEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

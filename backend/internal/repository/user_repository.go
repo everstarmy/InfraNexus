@@ -235,3 +235,18 @@ func (r *userRepository) Stats(ctx context.Context) (*domain.UserStats, error) {
 	}
 	return &stats, nil
 }
+
+func (r *userRepository) EmailOwners(ctx context.Context) (map[string]uuid.UUID, error) {
+	var rows []struct {
+		ID    uuid.UUID
+		Email string
+	}
+	if err := r.DB(ctx).Model(&domain.User{}).Select("id, email").Where("email <> ''").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	owners := make(map[string]uuid.UUID, len(rows))
+	for _, row := range rows {
+		owners[strings.ToLower(row.Email)] = row.ID
+	}
+	return owners, nil
+}

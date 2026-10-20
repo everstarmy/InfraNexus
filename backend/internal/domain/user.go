@@ -116,6 +116,7 @@ type UserRepository interface {
 	CountByDepartmentIDs(ctx context.Context, deptIDs []uuid.UUID) (int64, error)
 	MemberCounts(ctx context.Context) (map[uuid.UUID]int64, error)
 	Stats(ctx context.Context) (*UserStats, error)
+	EmailOwners(ctx context.Context) (map[string]uuid.UUID, error)
 }
 
 type UserService interface {

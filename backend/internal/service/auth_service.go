@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -24,15 +25,34 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 type authService struct {
-	cfg   *config.Config
-	users domain.UserRepository
-	store domain.AuthRepository
-	authz domain.AuthorizationService
-	now   func() time.Time
+	cfg       *config.Config
+	users     domain.UserRepository
+	store     domain.AuthRepository
+	authz     domain.AuthorizationService
+	directory domain.DirectoryAuthenticator
+	now       func() time.Time
 }
 
-func NewAuthService(cfg *config.Config, users domain.UserRepository, store domain.AuthRepository, authz domain.AuthorizationService) domain.AuthService {
-	return &authService{cfg: cfg, users: users, store: store, authz: authz, now: time.Now}
+func NewAuthService(cfg *config.Config, users domain.UserRepository, store domain.AuthRepository, authz domain.AuthorizationService, directory domain.DirectoryAuthenticator) domain.AuthService {
+	return &authService{cfg: cfg, users: users, store: store, authz: authz, directory: directory, now: time.Now}
+}
+
+func (s *authService) Domains(ctx context.Context) ([]domain.AuthDomain, error) {
+	if s.directory == nil {
+		return []domain.AuthDomain{}, nil
+	}
+	return s.directory.ListLoginDomains(ctx)
+}
+
+func (s *authService) authenticate(ctx context.Context, in domain.LoginInput) (*domain.User, error) {
+	authDomain := strings.ToLower(strings.TrimSpace(in.Domain))
+	if authDomain == "" || authDomain == "local" {
+		return s.credentials(ctx, in.Username, in.Password)
+	}
+	if s.directory == nil {
+		return nil, coreerrors.ErrDomainNotFound
+	}
+	return s.directory.AuthenticateDomain(ctx, authDomain, in.Username, in.Password)
 }
 
 func (s *authService) Profile(ctx context.Context, id uuid.UUID) (*domain.CurrentUser, error) {
@@ -81,8 +101,8 @@ func (s *authService) credentials(ctx context.Context, username, password string
 	}
 	return user, nil
 }
-func (s *authService) Login(ctx context.Context, username, password, oldID string) (*domain.User, *domain.Session, error) {
-	user, err := s.credentials(ctx, username, password)
+func (s *authService) Login(ctx context.Context, in domain.LoginInput, oldID string) (*domain.User, *domain.Session, error) {
+	user, err := s.authenticate(ctx, in)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -144,8 +164,8 @@ func principal(user *domain.User, sessionID, familyID string) *domain.Principal 
 	}
 	return p
 }
-func (s *authService) IssueTokens(ctx context.Context, username, password string) (*domain.TokenPair, error) {
-	user, err := s.credentials(ctx, username, password)
+func (s *authService) IssueTokens(ctx context.Context, in domain.LoginInput) (*domain.TokenPair, error) {
+	user, err := s.authenticate(ctx, in)
 	if err != nil {
 		return nil, err
 	}

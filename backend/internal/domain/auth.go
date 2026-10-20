@@ -35,9 +35,16 @@ type CurrentUser struct {
 	IsAdmin     bool     `json:"is_admin"`
 }
 
+type LoginInput struct {
+	Username string
+	Password string
+	Domain   string
+}
+
 type AuthService interface {
-	Login(ctx context.Context, username, password, oldSessionID string) (*User, *Session, error)
-	IssueTokens(ctx context.Context, username, password string) (*TokenPair, error)
+	Login(ctx context.Context, in LoginInput, oldSessionID string) (*User, *Session, error)
+	IssueTokens(ctx context.Context, in LoginInput) (*TokenPair, error)
+	Domains(ctx context.Context) ([]AuthDomain, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error)
 	AuthenticateSession(ctx context.Context, sessionID string) (*Principal, time.Time, error)
 	AuthenticateBearer(ctx context.Context, token string) (*Principal, error)

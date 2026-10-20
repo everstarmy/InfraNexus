@@ -1,8 +1,10 @@
 package bootstrap
 
 import (
+	"context"
 	"errors"
 	"log/slog"
+	"sync"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
@@ -20,6 +22,31 @@ type AppContainer struct {
 	Redis   *redis.Client
 	Storage fiber.Storage
 	Cipher  *secret.Cipher
+
+	closers    []func()
+	background []func(ctx context.Context)
+	stop       context.CancelFunc
+	wg         sync.WaitGroup
+}
+
+func (a *AppContainer) OnClose(fn func()) {
+	a.closers = append(a.closers, fn)
+}
+
+func (a *AppContainer) AddBackground(job func(ctx context.Context)) {
+	a.background = append(a.background, job)
+}
+
+func (a *AppContainer) StartBackground() {
+	ctx, cancel := context.WithCancel(context.Background())
+	a.stop = cancel
+	for _, job := range a.background {
+		a.wg.Add(1)
+		go func(run func(context.Context)) {
+			defer a.wg.Done()
+			run(ctx)
+		}(job)
+	}
 }
 
 func NewCipher(cfg *config.Config, log *slog.Logger) (*secret.Cipher, error) {
@@ -66,6 +93,13 @@ func NewAppContainer(cfg *config.Config, log *slog.Logger) (*AppContainer, error
 }
 
 func (a *AppContainer) Close() {
+	if a.stop != nil {
+		a.stop()
+		a.wg.Wait()
+	}
+	for i := len(a.closers) - 1; i >= 0; i-- {
+		a.closers[i]()
+	}
 	if a.DB != nil {
 		if sqlDB, err := a.DB.DB(); err == nil {
 			_ = sqlDB.Close()

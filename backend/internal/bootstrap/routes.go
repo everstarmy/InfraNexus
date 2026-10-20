@@ -24,6 +24,8 @@ type routeDeps struct {
 	permissions *handler.PermissionHandler
 	departments *handler.DepartmentHandler
 	options     *handler.OptionsHandler
+	ldap        *handler.LDAPHandler
+	dashboard   *handler.DashboardHandler
 }
 
 var authOnlyPrefixes = []string{
@@ -80,6 +82,7 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	authPublic.Post("/login", middleware.TrustedOrigin(d.cfg.Security.TrustedOrigins), middleware.LoginRateLimit(d.cfg.Security.LoginRateLimit), d.auth.Login)
 	authPublic.Post("/token", middleware.LoginRateLimit(d.cfg.Security.LoginRateLimit), d.auth.Token)
 	authPublic.Post("/refresh", d.auth.Refresh)
+	authPublic.Get("/domains", d.auth.Domains)
 
 	authRequired := api.Group("", middleware.DualAuth(d.authSvc, d.cfg))
 	authRequired.Use(middleware.TrustedOrigin(d.cfg.Security.TrustedOrigins))
@@ -91,6 +94,8 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	authRequired.Get("/sse/notifications", handler.StreamNotifications)
 
 	rbac := authRequired.Group("", d.casbin.RoutePermission())
+
+	rbac.Get("/dashboard/overview", d.dashboard.Overview)
 
 	users := rbac.Group("/users")
 	users.Get("", d.users.List)
@@ -127,4 +132,15 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	permissions.Post("/sync", d.permissions.Sync)
 	permissions.Put("/:id", d.permissions.Update)
 	permissions.Delete("/:id", d.permissions.Delete)
+
+	ldap := rbac.Group("/ldap")
+	ldap.Get("/configs", d.ldap.ListConfigs)
+	ldap.Post("/configs", d.ldap.CreateConfig)
+	ldap.Get("/configs/:id", d.ldap.GetConfig)
+	ldap.Put("/configs/:id", d.ldap.UpdateConfig)
+	ldap.Delete("/configs/:id", d.ldap.DeleteConfig)
+	ldap.Post("/test", d.ldap.Test)
+	ldap.Post("/preview", d.ldap.Preview)
+	ldap.Post("/sync", d.ldap.Sync)
+	ldap.Get("/sync-logs", d.ldap.SyncLogs)
 }

@@ -22,8 +22,13 @@ func NewAuthHandler(cfg *config.Config, authSvc domain.AuthService) *AuthHandler
 }
 
 type LoginRequest struct {
-	Username string `json:"username" validate:"required,min=3,max=64"`
-	Password string `json:"password" validate:"required,min=6,max=64"`
+	Username string `json:"username" validate:"required,max=256"`
+	Password string `json:"password" validate:"required,max=256"`
+	Domain   string `json:"domain" validate:"max=128"`
+}
+
+func (r LoginRequest) input() domain.LoginInput {
+	return domain.LoginInput{Username: strings.TrimSpace(r.Username), Password: r.Password, Domain: r.Domain}
 }
 type LoginResponse struct {
 	User *domain.CurrentUser `json:"user"`
@@ -34,7 +39,7 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 	if err := bindBody(c, &req); err != nil {
 		return err
 	}
-	user, sess, err := h.authSvc.Login(c.Context(), req.Username, req.Password, c.Cookies(h.cfg.Session.CookieName))
+	user, sess, err := h.authSvc.Login(c.Context(), req.input(), c.Cookies(h.cfg.Session.CookieName))
 	if err != nil {
 		return err
 	}
@@ -50,7 +55,7 @@ func (h *AuthHandler) Token(c fiber.Ctx) error {
 	if err := bindBody(c, &req); err != nil {
 		return err
 	}
-	tokens, err := h.authSvc.IssueTokens(c.Context(), req.Username, req.Password)
+	tokens, err := h.authSvc.IssueTokens(c.Context(), req.input())
 	if err != nil {
 		return err
 	}
@@ -98,4 +103,12 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 		return err
 	}
 	return response.Success(c, profile)
+}
+
+func (h *AuthHandler) Domains(c fiber.Ctx) error {
+	domains, err := h.authSvc.Domains(c.Context())
+	if err != nil {
+		return err
+	}
+	return response.Success(c, domains)
 }

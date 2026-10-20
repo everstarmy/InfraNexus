@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,7 +31,7 @@ const (
 )
 
 type LDAPAttributeMapping struct {
-	Username   string `json:"username" validate:"required,max=64"`
+	Username   string `json:"username" validate:"max=64"`
 	Email      string `json:"email" validate:"max=64"`
 	Nickname   string `json:"nickname" validate:"max=64"`
 	Department string `json:"department" validate:"max=64"`
@@ -107,4 +109,156 @@ type LDAPSyncLog struct {
 	Report     datatypes.JSONType[SyncReport] `gorm:"type:jsonb" json:"report"`
 	Message    string                         `gorm:"size:1024" json:"message"`
 	OperatorID *uuid.UUID                     `gorm:"type:uuid" json:"operator_id"`
+}
+
+const (
+	SyncActionCreate    = "create"
+	SyncActionUpdate    = "update"
+	SyncActionUnchanged = "unchanged"
+	SyncActionDisable   = "disable"
+	SyncActionSkip      = "skip"
+	SyncActionConflict  = "conflict"
+)
+
+var (
+	ErrDirectoryUnavailable        = errors.New("directory: server unavailable")
+	ErrDirectoryBindFailed         = errors.New("directory: service account bind failed")
+	ErrDirectoryInvalidCredentials = errors.New("directory: invalid user credentials")
+	ErrDirectoryAccountDisabled    = errors.New("directory: account disabled")
+)
+
+type LDAPConfigRequest struct {
+	Name                string               `json:"name" validate:"required,min=1,max=64"`
+	Type                string               `json:"type" validate:"required,oneof=ad ldap"`
+	Domain              string               `json:"domain" validate:"required,max=128,hostname_rfc1123"`
+	ServerHost          string               `json:"server_host" validate:"required,max=255"`
+	Port                int                  `json:"port" validate:"required,min=1,max=65535"`
+	UseSSL              bool                 `json:"use_ssl"`
+	StartTLS            bool                 `json:"start_tls"`
+	InsecureSkipVerify  bool                 `json:"insecure_skip_verify"`
+	BindDN              string               `json:"bind_dn" validate:"required,max=512"`
+	BindPassword        string               `json:"bind_password" validate:"max=256"`
+	BaseDN              string               `json:"base_dn" validate:"required,max=512"`
+	UserFilter          string               `json:"user_filter" validate:"required,max=512,contains=%s"`
+	AttributeMapping    LDAPAttributeMapping `json:"attribute_mapping"`
+	DepartmentSync      LDAPDepartmentSync   `json:"department_sync"`
+	DefaultRoleID       *uuid.UUID           `json:"default_role_id"`
+	Enabled             bool                 `json:"enabled"`
+	SyncEnabled         bool                 `json:"sync_enabled"`
+	SyncIntervalMinutes int                  `json:"sync_interval_minutes" validate:"min=0,max=10080"`
+	DisableMissingUsers bool                 `json:"disable_missing_users"`
+	TimeoutSeconds      int                  `json:"timeout_seconds" validate:"min=0,max=60"`
+}
+
+type LDAPTestRequest struct {
+	ConfigID *uuid.UUID `json:"config_id"`
+	LDAPConfigRequest
+}
+
+type LDAPTestResult struct {
+	Success     bool     `json:"success"`
+	Stage       string   `json:"stage"`
+	Message     string   `json:"message"`
+	LatencyMs   int64    `json:"latency_ms"`
+	ServerURL   string   `json:"server_url"`
+	SampleUsers []string `json:"sample_users"`
+}
+
+type LDAPSyncRequest struct {
+	ConfigID uuid.UUID `json:"config_id" validate:"required"`
+	Mode     string    `json:"mode" validate:"omitempty,oneof=full incremental"`
+}
+
+type DirectoryUser struct {
+	DN         string
+	ExternalID string
+	Username   string
+	Email      string
+	Nickname   string
+	Department string
+	Disabled   bool
+}
+
+type SyncPlanItem struct {
+	Action     string     `json:"action"`
+	Username   string     `json:"username"`
+	Nickname   string     `json:"nickname"`
+	Email      string     `json:"email"`
+	DN         string     `json:"dn"`
+	Department string     `json:"department"`
+	UserID     *uuid.UUID `json:"user_id,omitempty"`
+	Changes    []string   `json:"changes,omitempty"`
+	Reason     string     `json:"reason,omitempty"`
+}
+
+type SyncSummary struct {
+	Total               int `json:"total"`
+	Create              int `json:"create"`
+	Update              int `json:"update"`
+	Unchanged           int `json:"unchanged"`
+	Disable             int `json:"disable"`
+	Skip                int `json:"skip"`
+	Conflict            int `json:"conflict"`
+	DepartmentsToCreate int `json:"departments_to_create"`
+}
+
+type SyncPlan struct {
+	ConfigID            uuid.UUID      `json:"config_id"`
+	Domain              string         `json:"domain"`
+	Mode                string         `json:"mode"`
+	GeneratedAt         time.Time      `json:"generated_at"`
+	Summary             SyncSummary    `json:"summary"`
+	Items               []SyncPlanItem `json:"items"`
+	DepartmentsToCreate []string       `json:"departments_to_create"`
+	Truncated           bool           `json:"truncated"`
+}
+
+type DirectoryGateway interface {
+	Test(ctx context.Context, cfg *LDAPConfig, bindPassword string) (*LDAPTestResult, error)
+	Authenticate(ctx context.Context, cfg *LDAPConfig, bindPassword, username, password string) (*DirectoryUser, error)
+	SearchUsers(ctx context.Context, cfg *LDAPConfig, bindPassword string, changedSince *time.Time) ([]DirectoryUser, error)
+}
+
+type LDAPRepository interface {
+	ListConfigs(ctx context.Context) ([]LDAPConfig, error)
+	GetConfig(ctx context.Context, id uuid.UUID) (*LDAPConfig, error)
+	GetConfigByDomain(ctx context.Context, domainName string) (*LDAPConfig, error)
+	CreateConfig(ctx context.Context, cfg *LDAPConfig) error
+	SaveConfig(ctx context.Context, cfg *LDAPConfig) error
+	DeleteConfig(ctx context.Context, id uuid.UUID) error
+	TryAcquireSync(ctx context.Context, id uuid.UUID, now, staleBefore time.Time) (bool, error)
+	ReleaseSync(ctx context.Context, id uuid.UUID, status string, finishedAt time.Time, successAt *time.Time) error
+	CreateLog(ctx context.Context, log *LDAPSyncLog) error
+	SaveLog(ctx context.Context, log *LDAPSyncLog) error
+	ListLogs(ctx context.Context, configID *uuid.UUID, page, pageSize int) ([]LDAPSyncLog, int64, error)
+}
+
+type AuthDomain struct {
+	Domain string `json:"domain"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+}
+
+type DirectoryAuthenticator interface {
+	AuthenticateDomain(ctx context.Context, domainName, username, password string) (*User, error)
+	ListLoginDomains(ctx context.Context) ([]AuthDomain, error)
+}
+
+type EventPublisher interface {
+	Publish(event string, data any)
+}
+
+type LDAPService interface {
+	DirectoryAuthenticator
+	ListConfigs(ctx context.Context) ([]LDAPConfig, error)
+	GetConfig(ctx context.Context, id uuid.UUID) (*LDAPConfig, error)
+	CreateConfig(ctx context.Context, req LDAPConfigRequest) (*LDAPConfig, error)
+	UpdateConfig(ctx context.Context, id uuid.UUID, req LDAPConfigRequest) (*LDAPConfig, error)
+	DeleteConfig(ctx context.Context, id uuid.UUID) error
+	TestConnection(ctx context.Context, req LDAPTestRequest) (*LDAPTestResult, error)
+	Preview(ctx context.Context, configID uuid.UUID, mode string) (*SyncPlan, error)
+	StartSync(ctx context.Context, configID uuid.UUID, mode, trigger string, operatorID *uuid.UUID) (*LDAPSyncLog, error)
+	RunDueSyncs(ctx context.Context, now time.Time) int
+	ListSyncLogs(ctx context.Context, configID *uuid.UUID, page, pageSize int) ([]LDAPSyncLog, int64, error)
+	Close()
 }

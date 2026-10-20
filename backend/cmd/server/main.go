@@ -44,6 +44,7 @@ func main() {
 		log.Error("Failed to assemble HTTP application", "error", err)
 		os.Exit(1)
 	}
+	container.StartBackground()
 
 	// 6. 优雅启动与平滑退出 (Graceful Shutdown)
 	go func() {
