@@ -135,13 +135,13 @@ export default function DashboardPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {can("users:create") && (
-            <Button variant="outline" render={<Link to="/users" />}>
+            <Button variant="outline" nativeButton={false} render={<Link to="/users?create=1" />}>
               <UserPlus />
               添加成员
             </Button>
           )}
           {can("ldap") && (
-            <Button render={<Link to="/ldap" />}>
+            <Button nativeButton={false} render={<Link to="/ldap" />}>
               <FolderSync />
               目录同步
             </Button>
@@ -217,7 +217,7 @@ export default function DashboardPage() {
               <CardDescription className="text-xs">AD / LDAP 接入与同步状态</CardDescription>
             </div>
             {can("ldap") && (
-              <Button variant="ghost" size="icon-sm" render={<Link to="/ldap" aria-label="前往目录同步" />}>
+              <Button variant="ghost" size="icon-sm" nativeButton={false} render={<Link to="/ldap" aria-label="前往目录同步" />}>
                 <ArrowUpRight />
               </Button>
             )}
@@ -248,53 +248,40 @@ export default function DashboardPage() {
                 ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
-
-        <Card className="col-span-12 xl:col-span-8">
-          <CardHeader>
-            <CardTitle className="text-sm">最近同步</CardTitle>
-            <CardDescription className="text-xs">最近 5 次目录同步的执行结果</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {query.isLoading ? (
-              <Skeleton className="h-32 w-full" />
-            ) : !data?.recent_syncs.length ? (
-              <p className="rounded-xl border border-dashed py-8 text-center text-xs text-muted-foreground">暂无同步记录</p>
-            ) : (
-              <ul className="divide-y">
-                {data.recent_syncs.map((log) => (
-                  <li key={log.id} className="flex flex-wrap items-center gap-3 py-2.5">
-                    <SyncStatusBadge status={log.status} />
-                    <code className="font-mono text-xs">{log.domain}</code>
-                    <span className="text-xs text-muted-foreground">
-                      {log.trigger === "schedule" ? "定时" : "手动"} · {log.mode === "full" ? "全量" : "增量"}
-                    </span>
-                    <span className="ml-auto flex items-center gap-3 text-xs">
-                      <span>
-                        新增 <strong className="tabular-nums">{log.report.created}</strong>
-                      </span>
-                      <span>
-                        更新 <strong className="tabular-nums">{log.report.updated}</strong>
-                      </span>
-                      <span>
-                        失败 <strong className={cn("tabular-nums", log.report.failed > 0 && "text-destructive")}>{log.report.failed}</strong>
-                      </span>
-                      <span className="text-muted-foreground">{formatRelative(log.started_at)}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
+            {!!data?.recent_syncs.length && (
+              <div className="mt-5 space-y-2">
+                <h3 className="text-xs font-medium text-muted-foreground">最近同步</h3>
+                <ol className="relative space-y-3 border-l border-border pl-4">
+                  {data.recent_syncs.slice(0, 4).map((log) => (
+                    <li key={log.id} className="relative">
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "absolute top-1.5 -left-[21px] size-2.5 rounded-full ring-4 ring-card",
+                          log.status === "success" ? "bg-emerald-500" : log.status === "partial" ? "bg-amber-500" : log.status === "failed" ? "bg-rose-500" : "bg-sky-500",
+                        )}
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <code className="truncate font-mono text-xs">{log.domain}</code>
+                        <SyncStatusBadge status={log.status} />
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {log.trigger === "schedule" ? "定时" : "手动"}{log.mode === "full" ? "全量" : "增量"} · 新增 {log.report.created} · 更新 {log.report.updated} · 失败 {log.report.failed} · {formatRelative(log.started_at)}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+              </div>
             )}
           </CardContent>
         </Card>
 
-        <Card className="col-span-12 xl:col-span-4">
+        <Card className="col-span-12">
           <CardHeader>
             <CardTitle className="text-sm">快捷入口</CardTitle>
-            <CardDescription className="text-xs">按你的角色授权展示</CardDescription>
+            <CardDescription className="text-xs">按你的角色授权展示可访问的模块</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-2">
+          <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {shortcuts.length === 0 ? (
               <p className="text-xs text-muted-foreground">暂无其他可访问的模块</p>
             ) : (
@@ -302,14 +289,18 @@ export default function DashboardPage() {
                 <Link
                   key={item.url}
                   to={item.url}
-                  className="group flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors hover:border-primary/30 hover:bg-primary/[0.03] focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                  className="group flex items-start gap-3 rounded-xl border bg-card px-3.5 py-3 transition-[border-color,background-color,transform] hover:-translate-y-px hover:border-primary/30 hover:bg-primary/[0.03] focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                 >
-                  <item.icon className="size-4 text-muted-foreground group-hover:text-primary" />
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+                    <item.icon className="size-4" />
+                  </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{item.title}</p>
+                    <p className="flex items-center gap-1 text-sm font-medium">
+                      {item.title}
+                      <ArrowUpRight className="size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                    </p>
                     <p className="truncate text-[11px] text-muted-foreground">{item.description}</p>
                   </div>
-                  <ArrowUpRight className="size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
                 </Link>
               ))
             )}

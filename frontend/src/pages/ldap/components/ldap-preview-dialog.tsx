@@ -131,7 +131,7 @@ export function LdapPreviewDialog({
   return (
     <Dialog open={!!config} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90svh] flex-col gap-0 p-0 sm:max-w-4xl">
-        <DialogHeader className="border-b p-5">
+        <DialogHeader className="border-b p-5 pr-12">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <DialogTitle>同步预览 · {config?.name}</DialogTitle>

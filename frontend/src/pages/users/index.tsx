@@ -74,7 +74,7 @@ export default function UsersPage() {
   const navigate = useNavigate()
   const confirm = useConfirm()
   const queryClient = useQueryClient()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [deptKey, setDeptKey] = useState<string>(ALL_KEY)
   const [includeChildren, setIncludeChildren] = useState(true)
@@ -100,6 +100,19 @@ export default function UsersPage() {
   useEffect(() => {
     setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }))
   }, [debouncedKeyword, statuses, authTypes, roleIds, deptKey, includeChildren, sorting])
+
+  useEffect(() => {
+    if (searchParams.get("create") !== "1") return
+    if (can("users:create")) setFormUser("new")
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete("create")
+        return next
+      },
+      { replace: true },
+    )
+  }, [searchParams, setSearchParams, can])
 
   const params = useMemo<UserListParams>(
     () => ({
@@ -213,9 +226,8 @@ export default function UsersPage() {
                   {u.id === me?.id && <Badge variant="secondary" className="h-4.5 px-1.5 text-[10px]">我</Badge>}
                   {u.built_in && <BuiltinBadge />}
                 </div>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                <p className="truncate font-mono text-[11px] text-muted-foreground" title={u.email || undefined}>
                   {u.username}
-                  {u.email ? ` · ${u.email}` : ""}
                 </p>
               </div>
             </div>

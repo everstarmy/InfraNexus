@@ -128,7 +128,7 @@ export default function PermissionsPage() {
                 }}
                 aria-label={row.getIsExpanded() ? "收起" : "展开"}
               >
-                <ChevronRight className={cn("transition-transform duration-200", row.getIsExpanded() && "rotate-90")} />
+                <ChevronRight className={cn("size-3.5 transition-transform duration-200", row.getIsExpanded() && "rotate-90")} />
               </Button>
               <Icon className={cn("size-4 shrink-0", p.type === "menu" ? "text-primary" : "text-muted-foreground")} />
               <span className={cn("truncate text-sm", p.type === "menu" && "font-medium")}>{p.name}</span>
@@ -288,6 +288,7 @@ export default function PermissionsPage() {
             searchPlaceholder="搜索名称、编码或接口路径"
             facetedFilters={facetedFilters}
             columnLabels={{ name: "权限点", code: "权限编码", type: "类型", path: "路由 / 接口", sort_order: "排序" }}
+            initialColumnVisibility={{ sort_order: false }}
             defaultPageSize={50}
             pageSizeOptions={[20, 50, 100]}
             onRefresh={() => void query.refetch()}

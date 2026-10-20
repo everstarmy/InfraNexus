@@ -351,6 +351,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
     enableRowSelection: true,
     getSubRows,
     onExpandedChange: setExpanded,
+    autoResetExpanded: false,
     paginateExpandedRows: false,
     filterFromLeafRows: true,
     onSortingChange: (updater) => {

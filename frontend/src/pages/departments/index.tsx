@@ -66,7 +66,7 @@ export default function DepartmentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [form, setForm] = useState<FormState>(null)
   const [moving, setMoving] = useState<DepartmentNode | null>(null)
-  const [includeChildren, setIncludeChildren] = useState(false)
+  const [includeChildren, setIncludeChildren] = useState(true)
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 10 })
 
   const treeQuery = useQuery({ queryKey: queryKeys.departmentTree, queryFn: async () => (await departmentsService.tree()).data })

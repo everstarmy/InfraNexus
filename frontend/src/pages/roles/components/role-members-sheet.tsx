@@ -66,7 +66,7 @@ export function RoleMembersSheet({ role, onOpenChange }: { role: RoleDTO | null;
                     <p className="truncate font-mono text-[11px] text-muted-foreground">{u.department?.name ?? "未分配部门"}</p>
                   </div>
                   <AuthSourceBadge authType={u.auth_type} domain={u.domain} />
-                  <StatusDot active={u.status === 1} activeText="" inactiveText="" />
+                  <StatusDot active={u.status === 1} />
                 </li>
               ))}
             </ul>
