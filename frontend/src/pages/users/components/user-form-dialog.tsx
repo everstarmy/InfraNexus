@@ -1,0 +1,215 @@
+import { useEffect, useState } from "react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Info, RefreshCw, ShieldCheck, UserPlus, UserRoundPen } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group"
+import { Spinner } from "@/components/ui/spinner"
+import { DepartmentSelect } from "@/components/common/department-select"
+import { PasswordStrength } from "@/components/common/password-strength"
+import { getErrorMessage, getFieldErrors } from "@/lib/api-error"
+import { notify } from "@/lib/notify"
+import { generatePassword, meetsPolicy } from "@/lib/password"
+import { cn } from "@/lib/utils"
+import type { DepartmentNode } from "@/services/departments"
+import type { RoleRef, UserDTO } from "@/services/types"
+import { usersService } from "@/services/users"
+
+interface UserFormDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  user?: UserDTO | null
+  departments: DepartmentNode[]
+  roles: RoleRef[]
+  defaultDepartmentId?: string | null
+}
+
+export function UserFormDialog({ open, onOpenChange, user, departments, roles, defaultDepartmentId }: UserFormDialogProps) {
+  const queryClient = useQueryClient()
+  const editing = !!user
+  const [username, setUsername] = useState("")
+  const [email, setEmail] = useState("")
+  const [nickname, setNickname] = useState("")
+  const [password, setPassword] = useState("")
+  const [departmentId, setDepartmentId] = useState<string | null>(null)
+  const [roleIds, setRoleIds] = useState<string[]>([])
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [formError, setFormError] = useState("")
+
+  useEffect(() => {
+    if (!open) return
+    setUsername(user?.username ?? "")
+    setEmail(user?.email ?? "")
+    setNickname(user?.nickname ?? "")
+    setPassword("")
+    setDepartmentId(user ? (user.department_id ?? null) : (defaultDepartmentId ?? null))
+    setRoleIds([])
+    setFieldErrors({})
+    setFormError("")
+  }, [open, user, defaultDepartmentId])
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (editing && user) {
+        return usersService.update(user.id, {
+          nickname: nickname.trim(),
+          email: email.trim(),
+          department_id: departmentId,
+        })
+      }
+      return usersService.create({
+        username: username.trim(),
+        email: email.trim(),
+        password,
+        nickname: nickname.trim() || undefined,
+        department_id: departmentId,
+        role_ids: roleIds,
+      })
+    },
+    onSuccess: (res) => {
+      notify.success(editing ? "用户资料已更新" : "用户已创建", res.data.nickname || res.data.username)
+      void queryClient.invalidateQueries({ queryKey: ["users"] })
+      void queryClient.invalidateQueries({ queryKey: ["options"] })
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      onOpenChange(false)
+    },
+    onError: (error) => {
+      setFieldErrors(getFieldErrors(error))
+      setFormError(getErrorMessage(error, editing ? "更新用户失败" : "创建用户失败"))
+    },
+  })
+
+  const directoryManaged = editing && user?.auth_type !== "local"
+  const canSubmit = editing ? !!email.trim() : !!username.trim() && !!email.trim() && meetsPolicy(password)
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !mutation.isPending && onOpenChange(next)}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {editing ? <UserRoundPen className="size-4.5 text-primary" /> : <UserPlus className="size-4.5 text-primary" />}
+            {editing ? "编辑用户" : "新建用户"}
+          </DialogTitle>
+          <DialogDescription>{editing ? `修改 ${user?.nickname || user?.username} 的基础资料与所属部门` : "创建本地账号，并指定初始部门与角色"}</DialogDescription>
+        </DialogHeader>
+
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (canSubmit) mutation.mutate()
+          }}
+        >
+          {formError && (
+            <Alert variant="destructive">
+              <Info />
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
+          {directoryManaged && (
+            <Alert>
+              <Info />
+              <AlertDescription>该账号来自目录域 {user?.domain}，昵称、邮箱与部门可能在下次目录同步时被覆盖。</AlertDescription>
+            </Alert>
+          )}
+
+          <FieldGroup className="gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field data-invalid={!!fieldErrors.username || undefined}>
+                <FieldLabel htmlFor="user-username">用户名</FieldLabel>
+                <Input
+                  id="user-username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="如 zhangsan"
+                  disabled={editing}
+                  autoComplete="off"
+                />
+                {fieldErrors.username && <FieldError>用户名需为 3-32 个字符</FieldError>}
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="user-nickname">姓名 / 昵称</FieldLabel>
+                <Input id="user-nickname" value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="如 张三" />
+              </Field>
+            </div>
+            <Field data-invalid={!!fieldErrors.email || undefined}>
+              <FieldLabel htmlFor="user-email">电子邮箱</FieldLabel>
+              <Input id="user-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" />
+              {fieldErrors.email && <FieldError>请输入有效的邮箱地址</FieldError>}
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="user-department">所属部门</FieldLabel>
+              <DepartmentSelect id="user-department" nodes={departments} value={departmentId} onChange={setDepartmentId} placeholder="暂不分配部门" allowClear />
+            </Field>
+
+            {!editing && (
+              <>
+                <Field>
+                  <FieldLabel htmlFor="user-password">初始密码</FieldLabel>
+                  <InputGroup>
+                    <InputGroupInput
+                      id="user-password"
+                      type="text"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="至少 8 位，含 3 类字符"
+                      autoComplete="new-password"
+                      className="font-mono"
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupButton size="xs" onClick={() => setPassword(generatePassword())}>
+                        <RefreshCw />
+                        随机生成
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  </InputGroup>
+                  <PasswordStrength password={password} />
+                </Field>
+                <Field>
+                  <FieldLabel>初始角色</FieldLabel>
+                  <FieldDescription>可多选，角色的权限取并集</FieldDescription>
+                  <div className="grid max-h-40 gap-1.5 overflow-y-auto sm:grid-cols-2">
+                    {roles.map((role) => {
+                      const checked = roleIds.includes(role.id)
+                      return (
+                        <label
+                          key={role.id}
+                          className={cn(
+                            "flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-sm transition-colors",
+                            checked ? "border-primary/40 bg-primary/5" : "hover:bg-muted/50",
+                          )}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(v) => setRoleIds((prev) => (v ? [...prev, role.id] : prev.filter((id) => id !== role.id)))}
+                          />
+                          <ShieldCheck className="size-3.5 text-muted-foreground" />
+                          <span className="truncate">{role.name}</span>
+                          <code className="ml-auto font-mono text-[10px] text-muted-foreground">{role.code}</code>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </Field>
+              </>
+            )}
+          </FieldGroup>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={mutation.isPending}>
+              取消
+            </Button>
+            <Button type="submit" disabled={!canSubmit || mutation.isPending}>
+              {mutation.isPending && <Spinner />}
+              {editing ? "保存修改" : "创建用户"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}

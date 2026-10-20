@@ -1,176 +1,295 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react"
+import { useLocation, useNavigate } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
 import {
-  Layers,
-  Lock,
-  User,
+  AlertCircle,
+  ArrowRight,
+  Building2,
   Eye,
   EyeOff,
-  Loader2,
-  ArrowRight,
-  AlertCircle,
-} from "lucide-react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { authService } from "@/services/auth";
-import { useAuth } from "@/stores/auth-context";
+  Fingerprint,
+  Info,
+  KeyRound,
+  Layers,
+  Lock,
+  Network,
+  ShieldCheck,
+  User,
+} from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupText } from "@/components/ui/input-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { getErrorCode, getErrorMessage, BizCode } from "@/lib/api-error"
+import { queryKeys } from "@/lib/query-keys"
+import { authService } from "@/services/auth"
+import { useAuth } from "@/stores/auth-context"
+
+type Mode = "local" | "domain"
+
+const MODE_KEY = "infranexus_login_mode"
+
+const features = [
+  { icon: Building2, title: "企业域统一登录", text: "AD / LDAP 凭证直连校验，首次登录自动建档" },
+  { icon: Network, title: "组织架构同步", text: "OU 自动映射部门树，全量与增量定时同步" },
+  { icon: ShieldCheck, title: "细粒度权限", text: "菜单、按钮、API 三级权限，Casbin 实时鉴权" },
+]
 
 export default function LoginPage() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { isAuthenticated, login } = useAuth();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin123456");
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { isAuthenticated, login } = useAuth()
+  const [mode, setMode] = useState<Mode>(() => (localStorage.getItem(MODE_KEY) === "domain" ? "domain" : "local"))
+  const [domain, setDomain] = useState("")
+  const [username, setUsername] = useState(import.meta.env.DEV && mode === "local" ? "admin" : "")
+  const [password, setPassword] = useState(import.meta.env.DEV && mode === "local" ? "admin123456" : "")
+  const [showPassword, setShowPassword] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState("")
+  const [touched, setTouched] = useState(false)
 
-  // 获取登录前的来源路由
-  const searchParams = new URLSearchParams(location.search);
-  const redirectUrl = searchParams.get("redirect") || "/dashboard";
+  const redirect = new URLSearchParams(location.search).get("redirect") || "/"
+  const domainsQuery = useQuery({
+    queryKey: queryKeys.loginDomains,
+    queryFn: async () => (await authService.domains()).data,
+    staleTime: 60 * 1000,
+  })
+  const domains = domainsQuery.data ?? []
 
-  // 若已登录，直接重定向回目标页或控制台
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate(redirectUrl, { replace: true });
-    }
-  }, [isAuthenticated, navigate, redirectUrl]);
+    if (!domain && domains.length > 0) setDomain(domains[0].domain)
+  }, [domain, domains])
+
+  useEffect(() => {
+    if (isAuthenticated) navigate(redirect, { replace: true })
+  }, [isAuthenticated, navigate, redirect])
+
+  const switchMode = (next: Mode) => {
+    setMode(next)
+    localStorage.setItem(MODE_KEY, next)
+    setUsername("")
+    setPassword("")
+    setError("")
+    setTouched(false)
+  }
+
+  const domainMode = mode === "domain"
+  const noDomains = domainMode && !domainsQuery.isLoading && domains.length === 0
+  const usernameMissing = touched && !username.trim()
+  const passwordMissing = touched && !password
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username.trim() || !password) {
-      setErrorMsg("请输入用户名和密码");
-      return;
-    }
-
-    setLoading(true);
-    setErrorMsg("");
-
+    e.preventDefault()
+    setTouched(true)
+    if (!username.trim() || !password || noDomains) return
+    setSubmitting(true)
+    setError("")
     try {
-      const res = await authService.login({ username, password });
-      if (res.data?.user) {
-        login(res.data.user);
-        navigate(redirectUrl, { replace: true });
-      } else {
-        throw new Error("登录返回数据异常");
-      }
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { message?: string } } };
-      setErrorMsg(
-        axiosErr.response?.data?.message || "登录失败，请检查账号密码",
-      );
+      const res = await authService.login({
+        username: username.trim(),
+        password,
+        domain: domainMode ? domain : undefined,
+      })
+      login(res.data.user)
+      navigate(redirect, { replace: true })
+    } catch (err) {
+      const code = getErrorCode(err)
+      if (code === BizCode.DirectoryUnavailable) setError("企业目录服务暂时不可用，请稍后重试或改用本地账号登录")
+      else setError(getErrorMessage(err, "登录失败，请检查账号和密码"))
     } finally {
-      setLoading(false);
+      setSubmitting(false)
     }
-  };
+  }
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-muted/40 p-4 md:p-8">
-      {/* 渐变装饰背景 */}
-      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-background to-accent/10 -z-10" />
-
-      <Card className="w-full max-w-md border-border/80 shadow-xl backdrop-blur-xs">
-        <CardHeader className="space-y-2 text-center pb-6">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-md">
-            <Layers className="h-6 w-6" />
+    <div className="grid min-h-svh w-full bg-background lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+      <aside className="relative hidden overflow-hidden bg-zinc-950 p-10 text-zinc-50 lg:flex lg:flex-col lg:justify-between">
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          <div className="absolute -top-40 -left-32 size-[34rem] rounded-full bg-violet-600/30 blur-3xl" />
+          <div className="absolute -right-24 bottom-0 size-[28rem] rounded-full bg-sky-500/20 blur-3xl" />
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,rgb(255_255_255/0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgb(255_255_255/0.04)_1px,transparent_1px)] bg-[size:44px_44px] [mask-image:radial-gradient(ellipse_at_center,black_40%,transparent_75%)]" />
+        </div>
+        <div className="relative flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-sky-500 shadow-lg shadow-violet-500/30">
+            <Layers className="size-5" />
           </div>
-          <CardTitle className="text-2xl font-bold tracking-tight text-foreground">
-            欢迎登录 InfraNexus
-          </CardTitle>
-          <CardDescription className="text-xs text-muted-foreground">
-            GoFiber v3 + React 19 云原生 SaaS 企业平台
-          </CardDescription>
-        </CardHeader>
+          <div>
+            <p className="text-base font-semibold tracking-tight">InfraNexus</p>
+            <p className="font-mono text-[11px] text-zinc-400">Enterprise Identity Console</p>
+          </div>
+        </div>
+        <div className="relative max-w-lg space-y-8">
+          <div className="space-y-3">
+            <h2 className="text-4xl leading-tight font-semibold tracking-tight">
+              一个入口，
+              <br />
+              管好每一位员工的身份与权限
+            </h2>
+            <p className="text-sm leading-relaxed text-zinc-400">
+              本地账号与企业 AD / LDAP 域账号统一认证，组织架构自动同步，权限变更即时生效。
+            </p>
+          </div>
+          <ul className="space-y-4">
+            {features.map(({ icon: Icon, title, text }) => (
+              <li key={title} className="flex gap-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/5 ring-1 ring-white/10">
+                  <Icon className="size-4.5 text-violet-300" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">{title}</p>
+                  <p className="text-xs text-zinc-400">{text}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <p className="relative text-xs text-zinc-500">© {new Date().getFullYear()} InfraNexus · 会话由 HttpOnly Cookie 保护</p>
+      </aside>
 
-        <form onSubmit={handleSubmit}>
-          <CardContent className="space-y-4">
-            {errorMsg && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{errorMsg}</AlertDescription>
+      <section className="flex items-center justify-center p-6 sm:p-10">
+        <div className="w-full max-w-sm space-y-7">
+          <div className="space-y-2">
+            <div className="mb-6 flex items-center gap-2.5 lg:hidden">
+              <div className="flex size-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-violet-500 text-primary-foreground">
+                <Layers className="size-4.5" />
+              </div>
+              <span className="text-base font-semibold">InfraNexus</span>
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight">欢迎回来</h1>
+            <p className="text-sm text-muted-foreground">选择登录方式，进入企业管理控制台</p>
+          </div>
+
+          <Tabs value={mode} onValueChange={(v) => switchMode(v as Mode)}>
+            <TabsList className="grid h-9 w-full grid-cols-2">
+              <TabsTrigger value="local" className="gap-1.5">
+                <KeyRound />
+                本地管理员账号
+              </TabsTrigger>
+              <TabsTrigger value="domain" className="gap-1.5">
+                <Building2 />
+                企业 AD 域账号
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            {error && (
+              <Alert variant="destructive" className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1">
+                <AlertCircle />
+                <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
 
-            <div className="space-y-1.5">
-              <Label htmlFor="login-username">用户名</Label>
-              <div className="relative">
-                <User className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
+            {domainMode && noDomains && (
+              <Alert>
+                <Info />
+                <AlertDescription>尚未配置可用的企业域，请联系管理员在「集成中心 · 目录同步」中启用域登录。</AlertDescription>
+              </Alert>
+            )}
+
+            {domainMode && domains.length > 1 && (
+              <Field>
+                <FieldLabel htmlFor="login-domain">认证域</FieldLabel>
+                <Select
+                  value={domain}
+                  onValueChange={(v) => setDomain(String(v))}
+                  items={domains.map((d) => ({ value: d.domain, label: `${d.name}（${d.domain}）` }))}
+                >
+                  <SelectTrigger id="login-domain" className="w-full">
+                    <SelectValue placeholder="选择认证域" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {domains.map((d) => (
+                      <SelectItem key={d.domain} value={d.domain}>
+                        <Building2 className="text-muted-foreground" />
+                        {d.name}（{d.domain}）
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+
+            <Field data-invalid={usernameMissing || undefined}>
+              <FieldLabel htmlFor="login-username">{domainMode ? "域账号" : "用户名"}</FieldLabel>
+              <InputGroup>
+                <InputGroupAddon>
+                  {domainMode ? <Fingerprint /> : <User />}
+                </InputGroupAddon>
+                <InputGroupInput
                   id="login-username"
-                  type="text"
-                  placeholder="请输入用户名"
+                  autoComplete="username"
+                  autoFocus
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="pl-9 text-sm"
-                  disabled={loading}
+                  placeholder={domainMode ? "工号 / 统一通行证账号，如 zhangsan" : "请输入用户名"}
+                  aria-invalid={usernameMissing || undefined}
+                  disabled={submitting}
                 />
-              </div>
-            </div>
+                {domainMode && domain && (
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupText className="font-mono text-xs">@{domain}</InputGroupText>
+                  </InputGroupAddon>
+                )}
+              </InputGroup>
+              {domainMode && <FieldDescription>支持企业域工号 / 统一通行证登录，使用域账号密码验证，首次登录将自动建档。</FieldDescription>}
+              {usernameMissing && <FieldError>请输入{domainMode ? "域账号" : "用户名"}</FieldError>}
+            </Field>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="login-password">登录密码</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
+            <Field data-invalid={passwordMissing || undefined}>
+              <FieldLabel htmlFor="login-password">{domainMode ? "域密码" : "登录密码"}</FieldLabel>
+              <InputGroup>
+                <InputGroupAddon>
+                  <Lock />
+                </InputGroupAddon>
+                <InputGroupInput
                   id="login-password"
                   type={showPassword ? "text" : "password"}
-                  placeholder="请输入登录密码"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-9 pr-9 text-sm"
-                  disabled={loading}
+                  placeholder={domainMode ? "请输入域账号密码" : "请输入登录密码"}
+                  aria-invalid={passwordMissing || undefined}
+                  disabled={submitting}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-            </div>
+                <InputGroupAddon align="inline-end">
+                  <InputGroupButton
+                    size="icon-xs"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                  >
+                    {showPassword ? <EyeOff /> : <Eye />}
+                  </InputGroupButton>
+                </InputGroupAddon>
+              </InputGroup>
+              {passwordMissing && <FieldError>请输入密码</FieldError>}
+            </Field>
 
-            <div className="rounded-md bg-muted/60 p-2.5 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">
-                默认演示账号：
-              </span>
-              <code className="text-primary font-mono ml-1">admin</code> /
-              密码：
-              <code className="text-primary font-mono ml-1">admin123456</code>
-            </div>
-          </CardContent>
-
-          <CardFooter className="pt-2">
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? (
+            <Button type="submit" size="lg" className="h-10 w-full" disabled={submitting || noDomains}>
+              {submitting ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  <span>正在登录中...</span>
+                  <Spinner />
+                  正在验证身份…
                 </>
               ) : (
                 <>
-                  <span>立即进入工作台</span>
-                  <ArrowRight className="ml-2 h-4 w-4" />
+                  {domainMode ? "使用域账号登录" : "登录控制台"}
+                  <ArrowRight />
                 </>
               )}
             </Button>
-          </CardFooter>
-        </form>
-      </Card>
+          </form>
+
+          {import.meta.env.DEV && !domainMode && (
+            <p className="rounded-lg border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              开发环境演示账号：<code className="font-mono text-foreground">admin</code> / <code className="font-mono text-foreground">admin123456</code>
+            </p>
+          )}
+        </div>
+      </section>
     </div>
-  );
+  )
 }

@@ -15,6 +15,7 @@ import {
   type ColumnVisibilityState,
   type RowSelectionState,
   type PaginationState,
+  type ExpandedState,
 } from "@tanstack/react-table"
 import {
   appTableFeatures,
@@ -109,6 +110,10 @@ export interface DataTableProps<TData extends RowData, TValue = unknown> {
   stickyActionColumn?: boolean
   /** Default hidden columns; users may show them from View Options. */
   initialColumnVisibility?: ColumnVisibilityState
+  /** Tree data: returns the children of a row to render expandable sub rows. */
+  getSubRows?: (row: TData, index: number) => TData[] | undefined
+  /** Initial expansion for tree data (true expands every level). */
+  defaultExpanded?: ExpandedState
   /** Controlled server pagination; the data prop contains one page. */
   serverPagination?: {
     pageIndex: number
@@ -270,6 +275,8 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   serverSorting,
   savedSelection,
   saveSelection,
+  getSubRows,
+  defaultExpanded = {},
 }: DataTableProps<TData, TValue> & {
   urlState?: TableUrlState
   savedSelection?: RowSelectionState
@@ -287,6 +294,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   )
   const rowSelection = savedSelection ?? localSelection
   const [localGlobalFilter, setGlobalFilter] = React.useState<string>("")
+  const [expanded, setExpanded] = React.useState<ExpandedState>(defaultExpanded)
   const [pagination, setPagination] = React.useState<PaginationState>({
     pageIndex: 0,
     pageSize: defaultPageSize,
@@ -338,8 +346,14 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
       rowSelection,
       globalFilter,
       pagination: currentPagination,
+      expanded,
     },
     enableRowSelection: true,
+    getSubRows,
+    onExpandedChange: setExpanded,
+    autoResetExpanded: false,
+    paginateExpandedRows: false,
+    filterFromLeafRows: true,
     onSortingChange: (updater) => {
       if (serverSorting)
         serverSorting.onChange(

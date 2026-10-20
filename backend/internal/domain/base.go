@@ -8,6 +8,11 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	StatusEnabled  = 1
+	StatusDisabled = 2
+)
+
 // BaseEntity 领域模型通用基类，全表主键统一使用 UUID
 type BaseEntity struct {
 	ID        uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`

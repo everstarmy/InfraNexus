@@ -28,16 +28,17 @@ type tokenFamily struct {
 type sessionWire struct {
 	ID                string `json:"id"`
 	UserID            string `json:"user_id"`
+	CreatedAt         int64  `json:"created_at"`
 	ExpiresAt         int64  `json:"expires_at"`
 	AbsoluteExpiresAt int64  `json:"absolute_expires_at"`
 }
 
 func toWire(s domain.Session) sessionWire {
-	return sessionWire{s.ID, s.UserID.String(), s.ExpiresAt.UnixMilli(), s.AbsoluteExpiresAt.UnixMilli()}
+	return sessionWire{s.ID, s.UserID.String(), s.CreatedAt.UnixMilli(), s.ExpiresAt.UnixMilli(), s.AbsoluteExpiresAt.UnixMilli()}
 }
 func fromWire(w sessionWire) (domain.Session, error) {
 	id, err := uuid.Parse(w.UserID)
-	return domain.Session{ID: w.ID, UserID: id, ExpiresAt: time.UnixMilli(w.ExpiresAt), AbsoluteExpiresAt: time.UnixMilli(w.AbsoluteExpiresAt)}, err
+	return domain.Session{ID: w.ID, UserID: id, CreatedAt: time.UnixMilli(w.CreatedAt), ExpiresAt: time.UnixMilli(w.ExpiresAt), AbsoluteExpiresAt: time.UnixMilli(w.AbsoluteExpiresAt)}, err
 }
 func NewAuthRepository(rdb *redis.Client) domain.AuthRepository {
 	return &authRepository{redis: rdb, sessions: make(map[string]domain.Session), families: make(map[string]tokenFamily)}

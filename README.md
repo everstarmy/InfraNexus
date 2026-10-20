@@ -25,7 +25,9 @@
 - **统一响应模型与领域业务状态码**：
   - 泛型包装 `response.Success[T](c, data)`、`response.Page[T](c, items, total, page, pageSize)` 与 `response.Error`。
   - 业务 `code` 与领域状态强挂钩（如 `200000` 成功，`400001` 参数错误，`401001` 凭据过期，`403001` Casbin 权限阻断等）。
-- **细粒度 Casbin RBAC**：基于 `(Role, Path, Method)` 动态策略模型与 GORM 适配器，授权变动实时生效。
+- **细粒度 Casbin RBAC**：基于 `(Role, Path, Method)` 动态策略模型与 GORM 适配器，授权变动实时生效；菜单 → 按钮 → API 三级权限点差量同步为策略，`POST /api/v1/permissions/sync` 扫描已注册路由并修复策略漂移。
+- **组织架构与人员调动**：部门树（TreePath 物化路径，最多 15 级）、负责人与排序、子部门/成员删除保护；`POST /api/v1/users/batch-move-department` 事务化批量调岗。
+- **AD / LDAP 目录集成与多源认证**：基于 `go-ldap/v3` 的连接测试、同步预览、手动全量/增量同步与按间隔定时全量同步，OU 自动映射部门树；登录支持本地账号与企业域账号，首次域登录自动建档（JIT），域认证失败统一返回 `401002`。
 - **实时事件推送 (SSE)**：基于 GoFiber v3 `SendStreamWriter` 实现 Server-Sent Events 长连接通知中心。
 
 ### 2. 前端工程 (React 19 / Tailwind CSS v4 / Base UI)
@@ -50,11 +52,11 @@ InfraNexus/
 │   │   ├── bootstrap/              # 启动器 (DB 双驱动, Redis, Casbin, Fiber 装配)
 │   │   ├── config/                 # Viper 集中配置
 │   │   ├── core/                   # 核心通用设施 (logger, response, errors, validator)
-│   │   ├── domain/                 # 领域实体模型与接口定义 (User, Role, Permission)
-│   │   ├── handler/                # HTTP 接入层 (Auth, Users, Roles, SSE)
+│   │   ├── domain/                 # 领域实体模型与接口定义 (User, Department, Role, Permission, LDAP)
+│   │   ├── handler/                # HTTP 接入层 (Auth, Users, Departments, Roles, Permissions, LDAP, SSE)
 │   │   ├── middleware/             # 中间件 (RequestLog, DualAuth, CasbinRBAC)
 │   │   ├── repository/             # 持久化层 (BaseRepository 泛型仓储, UserRepo, RoleRepo)
-│   │   ├── service/                # 业务逻辑层 (Auth, Users, Roles)
+│   │   ├── service/                # 业务逻辑层 (Auth, Users, Departments, Roles, Authz, LDAP)
 │   │   └── storage/                # Fiber Storage 统一驱动工厂
 │   ├── config.yaml                 # 默认配置文件
 │   └── go.mod
@@ -64,7 +66,7 @@ InfraNexus/
 │   │   │   ├── ui/                 # Base UI 原子组件 (Button, Input, Dialog, DropdownMenu...)
 │   │   │   └── data-table/         # TanStack Table v9 企业级数据表格套件
 │   │   ├── layouts/                # SaaS 工作台布局 (Sidebar, Header, Full-width Main)
-│   │   ├── pages/                  # 业务路由页面 (Login, Dashboard, Users, Roles, Permissions)
+│   │   ├── pages/                  # 业务路由页面 (Login, Dashboard, Users, Departments, Roles, Permissions, LDAP)
 │   │   ├── services/               # Axios 实例与 API (Cookie 会话请求)
 │   │   └── App.tsx
 │   ├── package.json
@@ -124,9 +126,10 @@ cd backend
 go test -v ./internal/bootstrap
 ```
 
-构建前端生产 Bundle：
+构建前端生产 Bundle 并运行前端单元测试：
 ```bash
 make build-frontend
+npm --prefix frontend test
 ```
 
 ---
@@ -139,3 +142,5 @@ make build-frontend
 
 ## 认证部署配置
 `security.trusted_origins` 是可携带凭据的精确 Web 来源列表，同时用于 Cookie 写请求的 Origin/Referer 校验；不得使用 `*`。生产 `session.secure` 强制为 true，建议经 HTTPS 同源部署。`session.max_age` 为空闲有效期，`session.absolute_max_age` 为绝对有效期。登录/Token 获取限流为单进程实现，多实例需另行部署分布式限流。浏览器只使用 Cookie；CLI 使用 `/api/v1/auth/token`、`/api/v1/auth/refresh` 和 Bearer Header。注销只撤销当前会话或令牌族。
+
+`security.encryption_key` 用于 AES-GCM 加密 AD/LDAP 绑定密码，production 环境拒绝空值或默认开发密钥（可用 `APP_SECURITY_ENCRYPTION_KEY` 注入），更换密钥后需重新录入绑定密码。`ldap.scheduler.enabled` / `ldap.scheduler.tick_seconds` 控制定时同步调度器；同步任务通过数据库条件更新（CAS）抢占 `sync_status`，多实例共享数据库时同一配置不会并发同步，超过 2 小时未结束的锁视为失效。

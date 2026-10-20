@@ -40,7 +40,7 @@ InfraNexus/
 │   │   │   └── casbin_repository.go
 │   │   ├── middleware/             # 认证、鉴权、全局拦截器
 │   │   │   ├── auth_jwt.go         # gofiber/contrib/jwt 适配
-│   │   │   ├── casbin_rbac.go      # gofiber/contrib/casbin 适配
+│   │   │   ├── casbin.go           # contrib 同形 Casbin 中间件（casbin/v3 SyncedEnforcer；gofiber/contrib/casbin 依赖 casbin/v2，不可混用）
 │   │   │   ├── request_log.go      # 请求链路日志与 RequestID 关联
 │   │   │   └── error_handler.go    # 全局异常捕获与格式化转换
 │   │   ├── storage/                # Fiber Storage 统一驱动工厂
@@ -200,8 +200,8 @@ return response.Error(c, fiber.StatusNotFound, response.CodeUserNotFound, "用�
    - 严禁书写固定宽度（如 `w-[900px]`），所有断点遵循 Tailwind 规范 (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`)。
 
 ### 3.2 布局与样式要求
-1. **全宽流式画布**：
-   - 管理后台主区域外层容器必须是 `w-full min-h-[calc(100vh-4rem)] flex-1 overflow-x-hidden`。
+1. **固定视口外壳 + 全宽流式画布**：
+   - `SidebarProvider` 与 `SidebarInset` 使用 `h-svh overflow-hidden`，Header 固定 `h-14 shrink-0`，只有 `<main>` 以 `overflow-y-auto` 纵向滚动。
    - 严禁在页面外层随意添加 `container` 或 `max-w-7xl mx-auto` 等强行把内容限定在小盒子的类名。
 2. **移动端优先与抽屉导航**：
    - 导航栏使用折叠与响应式抽屉，在小屏下由顶部汉堡菜单唤出；在宽屏下保留固定侧栏。
@@ -224,6 +224,8 @@ return response.Error(c, fiber.StatusNotFound, response.CodeUserNotFound, "用�
   - `DataTableDateRangeFilter`: 日期区间选择器。
   - `DataTableViewOptions`: 动态列显隐控制菜单。
 - 所有表格列配置必须使用强类型 `ColumnDef<TData, TValue>`。
+- `src/components/ui/` 为 shadcn 生成的原子组件，业务需求不得修改；禁止 `window.confirm` / `window.alert`，危险操作使用 `useConfirm()`（AlertDialog），结果反馈使用 `notify`（Toast）。
+- 按钮级权限使用 `can("<code>")` / `<Can>`，页面级使用 `RequirePermission`；权限编码来自 `/auth/me` 返回的有效权限（含祖先节点，超级管理员为 `*`）。
 
 ### 3.3 Web Cookie 会话请求规范
 - Axios 设置 `withCredentials: true`，不从 localStorage 注入 Token，也不进行浏览器端 Token 刷新。

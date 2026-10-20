@@ -1,104 +1,135 @@
-import React, { Suspense, lazy } from "react";
-import {
-  BrowserRouter,
-  Routes,
-  Route,
-  Navigate,
-  useLocation,
-} from "react-router-dom";
-import { Layers, Loader2 } from "lucide-react";
-import { AdminLayout } from "@/layouts/admin-layout";
-import { AuthProvider, useAuth } from "@/stores/auth-context";
+import React, { Suspense, lazy } from "react"
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
+import { Layers, RotateCcw, WifiOff } from "lucide-react"
+import { AdminLayout } from "@/layouts/admin-layout"
+import { navItems } from "@/layouts/nav-config"
+import { AuthProvider, useAuth } from "@/stores/auth-context"
+import { NotificationsProvider } from "@/stores/notifications"
+import { RequirePermission } from "@/components/common/require-permission"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import ForbiddenPage from "@/pages/errors/forbidden"
 
-// 路由代码分割按需懒加载 (Code Splitting)
-const DashboardPage = lazy(() => import("@/pages/dashboard/index"));
-const UsersPage = lazy(() => import("@/pages/users/index"));
-const RolesPage = lazy(() => import("@/pages/roles/index"));
-const PermissionsPage = lazy(() => import("@/pages/permissions/index"));
-const LoginPage = lazy(() => import("@/pages/auth/login"));
+const DashboardPage = lazy(() => import("@/pages/dashboard/index"))
+const UsersPage = lazy(() => import("@/pages/users/index"))
+const DepartmentsPage = lazy(() => import("@/pages/departments/index"))
+const RolesPage = lazy(() => import("@/pages/roles/index"))
+const PermissionsPage = lazy(() => import("@/pages/permissions/index"))
+const LdapPage = lazy(() => import("@/pages/ldap/index"))
+const LoginPage = lazy(() => import("@/pages/auth/login"))
+
+const pages: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
+  "/dashboard": DashboardPage,
+  "/users": UsersPage,
+  "/departments": DepartmentsPage,
+  "/roles": RolesPage,
+  "/permissions": PermissionsPage,
+  "/ldap": LdapPage,
+}
 
 function PageLoader() {
   return (
-    <div className="flex h-64 w-full flex-col items-center justify-center gap-2">
-      <Loader2 className="h-6 w-6 animate-spin text-primary" />
-      <span className="text-xs text-muted-foreground">正在加载模块视图...</span>
+    <div className="flex h-64 w-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+      <Spinner className="size-5 text-primary" />
+      正在加载模块…
     </div>
-  );
+  )
 }
 
-// 权限路由守卫：拦截未登录访问，校验通过前渲染优雅加载屏，未登录自动跳转 /login 并记录来源
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, loading, authError, checkAuth } = useAuth();
-  const location = useLocation();
+  const { isAuthenticated, loading, authError, checkAuth } = useAuth()
+  const location = useLocation()
 
   if (loading) {
     return (
-      <div className="flex min-h-screen w-full flex-col items-center justify-center gap-3 bg-background text-foreground">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground animate-pulse shadow-md">
-          <Layers className="h-6 w-6" />
+      <div className="flex min-h-svh w-full flex-col items-center justify-center gap-4 bg-background">
+        <div className="flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-violet-500 text-primary-foreground shadow-lg motion-safe:animate-pulse">
+          <Layers className="size-6" />
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-          <span>正在校验凭据安全会话...</span>
+          <Spinner className="text-primary" />
+          正在校验安全会话…
         </div>
       </div>
-    );
+    )
   }
 
   if (authError) {
     return (
-      <div className="p-6" role="alert">
-        {authError}{" "}
-        <button onClick={() => void checkAuth()} className="underline">
-          重试
-        </button>
+      <div className="flex min-h-svh items-center justify-center p-6">
+        <Empty className="max-w-md border bg-card">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <WifiOff />
+            </EmptyMedia>
+            <EmptyTitle>无法验证登录状态</EmptyTitle>
+            <EmptyDescription>{authError}</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button onClick={() => void checkAuth()}>
+              <RotateCcw />
+              重试
+            </Button>
+          </EmptyContent>
+        </Empty>
       </div>
-    );
+    )
   }
 
   if (!isAuthenticated) {
-    return (
-      <Navigate
-        to={`/login?redirect=${encodeURIComponent(location.pathname)}`}
-        replace
-      />
-    );
+    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`} replace />
   }
 
-  return <>{children}</>;
+  return <>{children}</>
+}
+
+function HomeRedirect() {
+  const { can } = useAuth()
+  const first = navItems.find((item) => can(item.permission))
+  if (!first) return <ForbiddenPage description="当前账号尚未分配任何菜单权限，请联系管理员为你的角色授权。" />
+  return <Navigate to={first.url} replace />
 }
 
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            {/* 公开登录页 */}
-            <Route path="/login" element={<LoginPage />} />
-
-            {/* 根路径默认重定向 */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-
-            {/* SaaS 受保护主工作区 */}
-            <Route
-              element={
-                <ProtectedRoute>
-                  <AdminLayout />
-                </ProtectedRoute>
-              }
-            >
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/users" element={<UsersPage />} />
-              <Route path="/roles" element={<RolesPage />} />
-              <Route path="/permissions" element={<PermissionsPage />} />
-            </Route>
-
-            {/* 404 兜底路由 */}
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </Suspense>
-      </BrowserRouter>
+      <NotificationsProvider>
+        <BrowserRouter>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route
+                element={
+                  <ProtectedRoute>
+                    <AdminLayout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route path="/" element={<HomeRedirect />} />
+                {navItems.map((item) => {
+                  const Page = pages[item.url]
+                  return (
+                    <Route
+                      key={item.url}
+                      path={item.url}
+                      element={
+                        <RequirePermission code={item.permission}>
+                          <Suspense fallback={<PageLoader />}>
+                            <Page />
+                          </Suspense>
+                        </RequirePermission>
+                      }
+                    />
+                  )
+                })}
+                <Route path="/403" element={<ForbiddenPage />} />
+                <Route path="*" element={<HomeRedirect />} />
+              </Route>
+            </Routes>
+          </Suspense>
+        </BrowserRouter>
+      </NotificationsProvider>
     </AuthProvider>
-  );
+  )
 }

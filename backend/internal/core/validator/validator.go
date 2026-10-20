@@ -1,13 +1,15 @@
 package validator
 
 import (
+	"errors"
 	"fmt"
+	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/gofiber/fiber/v3"
 
-	"infranexus/internal/core/response"
+	coreerrors "infranexus/internal/core/errors"
 )
 
 type StructValidator struct {
@@ -30,24 +32,44 @@ type FieldError struct {
 	Message string `json:"message"`
 }
 
-// ValidateRequest 业务层统一便捷校验工具函数
-func ValidateRequest(c fiber.Ctx, req any) error {
+var slugPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.:-]*$`)
+
+var shared = newShared()
+
+func newShared() *validator.Validate {
 	v := validator.New()
-	err := v.Struct(req)
+	v.RegisterTagNameFunc(func(f reflect.StructField) string {
+		name := strings.SplitN(f.Tag.Get("json"), ",", 2)[0]
+		if name == "-" {
+			return ""
+		}
+		if name == "" {
+			return f.Name
+		}
+		return name
+	})
+	_ = v.RegisterValidation("slug", func(fl validator.FieldLevel) bool {
+		return slugPattern.MatchString(fl.Field().String())
+	})
+	return v
+}
+
+func Validate(req any) error {
+	err := shared.Struct(req)
 	if err == nil {
 		return nil
 	}
-
-	var fieldErrors []FieldError
-	if validationErrors, ok := err.(validator.ValidationErrors); ok {
-		for _, e := range validationErrors {
-			fieldErrors = append(fieldErrors, FieldError{
-				Field:   strings.ToLower(e.Field()),
-				Tag:     e.Tag(),
-				Message: fmt.Sprintf("字段 %s 校验未通过 (%s)", e.Field(), e.Tag()),
-			})
-		}
+	var verrs validator.ValidationErrors
+	if !errors.As(err, &verrs) {
+		return coreerrors.ErrParamInvalid
 	}
-
-	return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "请求参数校验失败", fieldErrors)
+	fields := make([]FieldError, 0, len(verrs))
+	for _, e := range verrs {
+		fields = append(fields, FieldError{
+			Field:   e.Field(),
+			Tag:     e.Tag(),
+			Message: fmt.Sprintf("字段 %s 校验未通过 (%s)", e.Field(), e.Tag()),
+		})
+	}
+	return coreerrors.ErrParamInvalid.WithData(fields)
 }

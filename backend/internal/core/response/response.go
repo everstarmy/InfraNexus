@@ -11,19 +11,33 @@ import (
 type BusinessCode int
 
 const (
-	CodeSuccess            BusinessCode = 200000 // 成功
-	CodeParamInvalid       BusinessCode = 400001 // 请求参数错误
-	CodeTokenExpired       BusinessCode = 401001 // 会话或Token过期
-	CodeInvalidCredentials BusinessCode = 401002 // 账号或密码错误
-	CodeSessionRevoked     BusinessCode = 401003 // 会话已被注销
-	CodePermissionDenied   BusinessCode = 403001 // 权限不足 (Casbin拦截)
-	CodeAccountDisabled    BusinessCode = 403002 // 账号已被禁用
-	CodeUserNotFound       BusinessCode = 404001 // 用户未找到
-	CodeRoleNotFound       BusinessCode = 404002 // 角色未找到
-	CodeResourceConflict   BusinessCode = 409001
-	CodeRateLimited        BusinessCode = 429001 // 唯一约束冲突
-	CodeDatabaseError      BusinessCode = 500001 // 数据库异常
-	CodeInternalError      BusinessCode = 500002 // 系统未知故障
+	CodeSuccess                 BusinessCode = 200000 // 成功
+	CodeParamInvalid            BusinessCode = 400001 // 请求参数错误
+	CodePasswordTooWeak         BusinessCode = 400002 // 密码强度不足
+	CodeDomainNotFound          BusinessCode = 400003 // 认证域不存在或未启用
+	CodeTokenExpired            BusinessCode = 401001 // 会话或Token过期
+	CodeInvalidCredentials      BusinessCode = 401002 // 账号或密码错误
+	CodeSessionRevoked          BusinessCode = 401003 // 会话已被注销
+	CodePermissionDenied        BusinessCode = 403001 // 权限不足 (Casbin拦截)
+	CodeAccountDisabled         BusinessCode = 403002 // 账号已被禁用
+	CodeBuiltinProtected        BusinessCode = 403003 // 内置资源受保护
+	CodeSelfOperationDenied     BusinessCode = 403004 // 不能对当前登录账号执行该操作
+	CodeUserNotFound            BusinessCode = 404001 // 用户未找到
+	CodeRoleNotFound            BusinessCode = 404002 // 角色未找到
+	CodeDepartmentNotFound      BusinessCode = 404003 // 部门未找到
+	CodePermissionNotFound      BusinessCode = 404004 // 权限点未找到
+	CodeDirectoryConfigNotFound BusinessCode = 404005 // 目录配置不存在
+	CodeResourceConflict        BusinessCode = 409001 // 唯一约束冲突
+	CodeDepartmentHasChildren   BusinessCode = 409002 // 部门下仍有子部门
+	CodeDepartmentHasMembers    BusinessCode = 409003 // 部门下仍有成员
+	CodeDepartmentInvalidParent BusinessCode = 409004 // 部门上级非法（成环/层级超限/已停用）
+	CodeSyncInProgress          BusinessCode = 409005 // 目录同步正在进行
+	CodePermissionHasChildren   BusinessCode = 409006 // 权限点下仍有子节点
+	CodeExternalAccountManaged  BusinessCode = 409007 // 域账号由目录服务管理
+	CodeRateLimited             BusinessCode = 429001 // 请求过于频繁
+	CodeDatabaseError           BusinessCode = 500001 // 数据库异常
+	CodeInternalError           BusinessCode = 500002 // 系统未知故障
+	CodeDirectoryUnavailable    BusinessCode = 502001 // 目录服务不可用
 )
 
 // Envelope 统一泛型响应外壳 (Go 1.27+)

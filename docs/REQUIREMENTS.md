@@ -27,7 +27,8 @@
 | **配置中心** | `github.com/spf13/viper` | 支持 yaml/env 配置读取，连接池精细化管理 |
 | **结构化日志** | `log/slog` | 结合 Fiber RequestID 中间件实现 Trace 关联日志 |
 | **缓存/存储** | `github.com/redis/go-redis/v9` + Fiber Storage | 统一缓存与 Session/限流/持久化接口 |
-| **权限中枢** | `github.com/gofiber/contrib/casbin` + GORM Adapter | RBAC 策略动态计算与鉴权中间件 |
+| **权限中枢** | `github.com/casbin/casbin/v3` + `casbin/gorm-adapter/v3` | RBAC 策略动态计算；鉴权中间件为 contrib 同形自研实现（`gofiber/contrib/casbin` 依赖 casbin/v2） |
+| **目录集成** | `github.com/go-ldap/ldap/v3` | AD / LDAP 连接测试、域账号认证与组织架构同步 |
 | **身份认证体系** | **双通道认证 (Dual-Channel Auth)** | **前端优先 HttpOnly Session Cookie**；**第三方与 CLI 优先 JWT Bearer Token** |
 | **输入校验** | GoFiber Validation (`go-playground/validator/v10`) | DTO 请求体验证、自定义错误语义翻译 |
 
@@ -77,6 +78,14 @@ storage:
     region: "us-east-1"
     access_key: ""
     secret_key: ""
+
+security:
+  encryption_key: "change-me" # AES-GCM 加密目录绑定密码；production 拒绝空值与默认开发密钥
+
+ldap:
+  scheduler:
+    enabled: true
+    tick_seconds: 60 # 检查到期同步任务的间隔
 ```
 
 ### 2.3 统一响应模型与业务状态码挂钩规范 (Business-Linked Response Envelope)
@@ -98,17 +107,31 @@ storage:
 | :--- | :--- | :--- | :--- |
 | `200 OK` | `200000` | `CodeSuccess` | 操作成功，正常渲染数据 |
 | `400 Bad Request` | `400001` | `CodeParamInvalid` | 请求参数格式错误，data 附带字段校验列表 |
+| `400 Bad Request` | `400002` | `CodePasswordTooWeak` | 密码强度不足（≥8 位且含大写/小写/数字/符号中任意 3 类） |
+| `400 Bad Request` | `400003` | `CodeDomainNotFound` | 认证域不存在或未启用 |
 | `401 Unauthorized` | `401001` | `CodeTokenExpired` | 凭证无效或已过期，Web 清理内存身份状态 |
-| `401 Unauthorized` | `401002` | `CodeInvalidCredentials` | 账号或密码不匹配 |
+| `401 Unauthorized` | `401002` | `CodeInvalidCredentials` | 账号或密码不匹配；域账号失败统一提示「域认证账号或密码错误」 |
 | `401 Unauthorized` | `401003` | `CodeSessionRevoked` | 会话已撤销 |
 | `403 Forbidden` | `403001` | `CodePermissionDenied` | Casbin 拦截，当前角色无操作权限 |
 | `403 Forbidden` | `403002` | `CodeAccountDisabled` | 账号已被停用，禁止操作 |
+| `403 Forbidden` | `403003` | `CodeBuiltinProtected` | 内置管理员 / 内置角色 / 内置权限点受保护 |
+| `403 Forbidden` | `403004` | `CodeSelfOperationDenied` | 不能对当前登录账号执行停用、删除等操作 |
 | `404 Not Found` | `404001` | `CodeUserNotFound` | 目标用户不存在 |
 | `404 Not Found` | `404002` | `CodeRoleNotFound` | 目标角色不存在 |
+| `404 Not Found` | `404003` | `CodeDepartmentNotFound` | 目标部门不存在 |
+| `404 Not Found` | `404004` | `CodePermissionNotFound` | 目标权限点不存在 |
+| `404 Not Found` | `404005` | `CodeDirectoryConfigNotFound` | 目录配置不存在 |
 | `409 Conflict` | `409001` | `CodeResourceConflict` | 唯一约束冲突（如用户名或邮箱已存在） |
+| `409 Conflict` | `409002` | `CodeDepartmentHasChildren` | 部门下仍有子部门，禁止删除 |
+| `409 Conflict` | `409003` | `CodeDepartmentHasMembers` | 部门下仍有成员，禁止删除 |
+| `409 Conflict` | `409004` | `CodeDepartmentInvalidParent` | 上级部门非法（成环、超过 15 级或已停用） |
+| `409 Conflict` | `409005` | `CodeSyncInProgress` | 该目录配置正在同步 |
+| `409 Conflict` | `409006` | `CodePermissionHasChildren` | 权限点下仍有子节点 |
+| `409 Conflict` | `409007` | `CodeExternalAccountManaged` | 域账号由目录服务管理（如不可重置本地密码） |
 | `429 Too Many Requests` | `429001` | `CodeRateLimited` | 登录或 Token 获取过于频繁 |
 | `500 Server Error` | `500001` | `CodeDatabaseError` | 数据库执行异常，内部记录详细 SQL 日志 |
 | `500 Server Error` | `500002` | `CodeInternalError` | 系统未捕获未知故障 |
+| `502 Bad Gateway` | `502001` | `CodeDirectoryUnavailable` | AD / LDAP 目录服务不可达或返回异常 |
 
 ### 2.4 GORM 多驱动与 JSONB 强类型支持 (`gorm.io/datatypes`)
 结合 `gorm.io/datatypes`，在 PostgreSQL 下映射为高性能原生的 `JSONB` 索引字段，在 SQLite 下映射为 JSON 兼容文本字段。利用 **Go 1.27+ 泛型** 使用 `datatypes.JSONType[T]` 实现编译期强类型绑定与自动序列化：
@@ -183,7 +206,7 @@ GoFiber v3 按照以下顺序装配全局中间件：
 6. **ErrorHandler 统合** (`app.Config.ErrorHandler`): 拦截 Fiber/业务异常，自动包装为统一 JSON 错误结构。
 7. **业务专属中间件**:
    - `DualAuth`: 校验 JWT 用途、issuer、有效期与令牌族，或校验 Session；每次读取当前用户状态和角色。
-   - `casbin.New(...)`: 基于请求上下文验证 `(sub=User/Role, obj=API Path, act=Method)`。
+   - `middleware.NewCasbin(...).RoutePermission()`: 以用户角色编码为 subject 校验 `(role, 路由模板, Method)`，`admin` 超级角色直通。
    - `sse.New(...)`: 专用于长链接事件推送（如实时系统通知、任务队列进度推送）。
 
 ### 2.5 核心模块业务需求
@@ -193,7 +216,8 @@ GoFiber v3 按照以下顺序装配全局中间件：
    - 用户登出：撤销当前 Session 或 JWT 令牌族。
    - Token 刷新接口 (`POST /api/v1/auth/refresh`)：原子轮换有效 RefreshToken，返回新 TokenPair；重放旧令牌拒绝。
 2. **用户管理模块 (Users)**:
-   - 用户分页查询、按用户名/邮箱/状态/角色 Faceted 筛选。
+   - 用户分页查询、按用户名/邮箱/状态/角色/来源/部门（可含下级）筛选。
+   - 重置密码（强度校验，撤销该用户全部会话与令牌）；`POST /api/v1/users/batch-move-department` 事务化批量调岗。
    - 创建/更新/删除（软删除 `gorm.DeletedAt`）用户。
    - 用户分配单角色或多角色。
    - 用户状态启停（禁用后下一次认证立即拒绝）。
@@ -205,6 +229,12 @@ GoFiber v3 按照以下顺序装配全局中间件：
    - 权限树状结构维护：目录、菜单、按钮/操作。
    - API 资源绑定（路径、HTTP Method）。
    - 前端权限指令与动态路由注册元数据输出。
+   - `POST /api/v1/permissions/sync` 扫描已注册受控路由，补登记接口权限点并重建全部角色策略。
+5. **部门管理模块 (Departments)**:
+   - 部门树（`TreePath` 物化路径，最多 15 级）CRUD、移动与同级排序；存在子部门或成员时禁止删除。
+6. **目录集成与多源认证模块 (AD / LDAP)**:
+   - 目录配置（绑定密码加密存储）、连接测试、同步预览，手动全量/增量同步与按间隔定时全量同步，OU 或属性映射部门，同步报告与日志。
+   - 登录携带 `domain` 时走目录认证：服务账号检索用户 DN 后以用户凭据绑定；首次登录按默认角色自动建档（JIT），与本地账号共用 Session/JWT 体系。
 
 ---
 
@@ -230,7 +260,7 @@ GoFiber v3 按照以下顺序装配全局中间件：
    - 工作台卡片与图表容器统一采用 `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6` 或 12 列网格 `grid grid-cols-12 gap-4` 进行划分。
    - 严禁固定像素宽度（如 `w-[800px]`），必须使用响应式列宽（如 `col-span-12 lg:col-span-8`，`col-span-12 lg:col-span-4`）。
 3. **全宽度流式画布 (Full-width Fluid Canvas)**:
-   - 管理后台主内容区域采用 `w-full min-h-[calc(100vh-4rem)] flex-1 overflow-x-hidden`。
+   - 外壳固定视口：`SidebarProvider` / `SidebarInset` 为 `h-svh overflow-hidden`，Header `h-14 shrink-0`，仅主内容 `<main>` 以 `overflow-y-auto` 滚动。
    - 严禁添加限制页面上限宽度的类名（如 `container` 或 `max-w-7xl mx-auto`），确保在 2K / 4K / 34寸带鱼屏等超宽设备下，数据表格各列能够横向充分自适应展示。
 4. **移动端自适应与抽屉导航 (Responsive Drawer)**:
    - **桌面端 (≥1024px)**: 侧边栏常驻，可一键切换完整展开与 Mini 图标模式。

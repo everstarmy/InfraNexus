@@ -8,7 +8,6 @@ import (
 	"infranexus/internal/config"
 	coreerrors "infranexus/internal/core/errors"
 	"infranexus/internal/core/response"
-	"infranexus/internal/core/validator"
 	"infranexus/internal/domain"
 	"infranexus/internal/middleware"
 )
@@ -23,37 +22,41 @@ func NewAuthHandler(cfg *config.Config, authSvc domain.AuthService) *AuthHandler
 }
 
 type LoginRequest struct {
-	Username string `json:"username" validate:"required,min=3,max=64"`
-	Password string `json:"password" validate:"required,min=6,max=64"`
+	Username string `json:"username" validate:"required,max=256"`
+	Password string `json:"password" validate:"required,max=256"`
+	Domain   string `json:"domain" validate:"max=128"`
 }
+
+func (r LoginRequest) input() domain.LoginInput {
+	return domain.LoginInput{Username: strings.TrimSpace(r.Username), Password: r.Password, Domain: r.Domain}
+}
+
 type LoginResponse struct {
-	User *domain.User `json:"user"`
+	User *domain.CurrentUser `json:"user"`
 }
 
 func (h *AuthHandler) Login(c fiber.Ctx) error {
 	var req LoginRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return response.Error(c, 400, response.CodeParamInvalid, "请求数据格式错误")
-	}
-	if err := validator.ValidateRequest(c, req); err != nil {
+	if err := bindBody(c, &req); err != nil {
 		return err
 	}
-	user, sess, err := h.authSvc.Login(c.Context(), req.Username, req.Password, c.Cookies(h.cfg.Session.CookieName))
+	user, sess, err := h.authSvc.Login(c.Context(), req.input(), c.Cookies(h.cfg.Session.CookieName))
 	if err != nil {
 		return err
 	}
 	middleware.SetSessionCookie(c, h.cfg, sess.ID, sess.ExpiresAt)
-	return response.Success(c, LoginResponse{User: user})
+	profile, err := h.authSvc.Profile(c.Context(), user.ID)
+	if err != nil {
+		return err
+	}
+	return response.Success(c, LoginResponse{User: profile})
 }
 func (h *AuthHandler) Token(c fiber.Ctx) error {
 	var req LoginRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return response.Error(c, 400, response.CodeParamInvalid, "请求数据格式错误")
-	}
-	if err := validator.ValidateRequest(c, req); err != nil {
+	if err := bindBody(c, &req); err != nil {
 		return err
 	}
-	tokens, err := h.authSvc.IssueTokens(c.Context(), req.Username, req.Password)
+	tokens, err := h.authSvc.IssueTokens(c.Context(), req.input())
 	if err != nil {
 		return err
 	}
@@ -96,9 +99,17 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 	if !ok {
 		return coreerrors.ErrUnauthorized
 	}
-	user, err := h.authSvc.CurrentUser(c.Context(), p.UserID)
+	profile, err := h.authSvc.Profile(c.Context(), p.UserID)
 	if err != nil {
 		return err
 	}
-	return response.Success(c, user)
+	return response.Success(c, profile)
+}
+
+func (h *AuthHandler) Domains(c fiber.Ctx) error {
+	domains, err := h.authSvc.Domains(c.Context())
+	if err != nil {
+		return err
+	}
+	return response.Success(c, domains)
 }

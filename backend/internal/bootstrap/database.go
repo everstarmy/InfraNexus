@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"fmt"
+	stdlog "log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -25,7 +26,13 @@ func InitDatabase(cfg *config.Config, log *slog.Logger) (*gorm.DB, error) {
 	}
 
 	gormConfig := &gorm.Config{
-		Logger: gormlogger.Default.LogMode(logMode),
+		Logger: gormlogger.New(stdlog.New(os.Stdout, "\r\n", stdlog.LstdFlags), gormlogger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logMode,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  cfg.App.Debug,
+		}),
+		TranslateError: true,
 	}
 
 	switch cfg.Database.Driver {

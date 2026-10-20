@@ -10,6 +10,7 @@ import (
 type Session struct {
 	ID                string    `json:"id"`
 	UserID            uuid.UUID `json:"user_id"`
+	CreatedAt         time.Time `json:"created_at"`
 	ExpiresAt         time.Time `json:"expires_at"`
 	AbsoluteExpiresAt time.Time `json:"absolute_expires_at"`
 }
@@ -28,14 +29,28 @@ type Principal struct {
 	FamilyID  string
 }
 
+type CurrentUser struct {
+	*User
+	Permissions []string `json:"permissions"`
+	IsAdmin     bool     `json:"is_admin"`
+}
+
+type LoginInput struct {
+	Username string
+	Password string
+	Domain   string
+}
+
 type AuthService interface {
-	Login(ctx context.Context, username, password, oldSessionID string) (*User, *Session, error)
-	IssueTokens(ctx context.Context, username, password string) (*TokenPair, error)
+	Login(ctx context.Context, in LoginInput, oldSessionID string) (*User, *Session, error)
+	IssueTokens(ctx context.Context, in LoginInput) (*TokenPair, error)
+	Domains(ctx context.Context) ([]AuthDomain, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error)
 	AuthenticateSession(ctx context.Context, sessionID string) (*Principal, time.Time, error)
 	AuthenticateBearer(ctx context.Context, token string) (*Principal, error)
 	Logout(ctx context.Context, principal *Principal) error
 	CurrentUser(ctx context.Context, id uuid.UUID) (*User, error)
+	Profile(ctx context.Context, id uuid.UUID) (*CurrentUser, error)
 }
 
 type AuthRepository interface {

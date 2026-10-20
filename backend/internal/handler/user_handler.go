@@ -1,52 +1,43 @@
 package handler
 
 import (
-	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"infranexus/internal/core/errors"
 	"infranexus/internal/core/response"
-	"infranexus/internal/core/validator"
 	"infranexus/internal/domain"
 	"infranexus/internal/middleware"
 )
 
 type UserHandler struct {
-	userSvc  domain.UserService
-	userRepo domain.UserRepository
+	userSvc domain.UserService
 }
 
-func NewUserHandler(userSvc domain.UserService, userRepo domain.UserRepository) *UserHandler {
-	return &UserHandler{
-		userSvc:  userSvc,
-		userRepo: userRepo,
-	}
+func NewUserHandler(userSvc domain.UserService) *UserHandler {
+	return &UserHandler{userSvc: userSvc}
 }
 
 func (h *UserHandler) List(c fiber.Ctx) error {
-	page, _ := strconv.Atoi(c.Query("page", "1"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size", "10"))
-	keyword := c.Query("keyword", "")
-
-	filters := map[string]any{
-		"keyword": keyword,
+	page, pageSize := pageParams(c, 10)
+	filter := domain.UserFilter{
+		Page:            page,
+		PageSize:        pageSize,
+		Keyword:         strings.TrimSpace(c.Query("keyword")),
+		Statuses:        queryInts(c, "status"),
+		AuthTypes:       queryStrings(c, "auth_type"),
+		RoleIDs:         queryUUIDs(c, "role_id"),
+		IncludeChildren: c.Query("include_children") == "true",
+		NoDepartment:    c.Query("department_id") == "none",
+		Sort:            c.Query("sort"),
+	}
+	if deptID, err := uuid.Parse(c.Query("department_id")); err == nil {
+		filter.DepartmentID = &deptID
 	}
 
-	if statusStr := c.Query("status", ""); statusStr != "" {
-		if st, err := strconv.Atoi(statusStr); err == nil {
-			filters["status"] = st
-		}
-	}
-
-	if roleIDStr := c.Query("role_id", ""); roleIDStr != "" {
-		if rID, err := uuid.Parse(roleIDStr); err == nil {
-			filters["role_id"] = rID
-		}
-	}
-
-	users, total, err := h.userRepo.List(c.Context(), page, pageSize, filters)
+	users, total, err := h.userSvc.ListUsers(c.Context(), filter)
 	if err != nil {
 		return err
 	}
@@ -54,16 +45,77 @@ func (h *UserHandler) List(c fiber.Ctx) error {
 	return response.Page(c, users, total, page, pageSize)
 }
 
-func (h *UserHandler) GetByID(c fiber.Ctx) error {
-	idStr := c.Params("id")
-	id, err := uuid.Parse(idStr)
+func (h *UserHandler) Stats(c fiber.Ctx) error {
+	stats, err := h.userSvc.Stats(c.Context())
 	if err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "非法的 UUID 格式")
+		return err
+	}
+	return response.Success(c, stats)
+}
+
+func (h *UserHandler) ResetPassword(c fiber.Ctx) error {
+	id, err := parseIDParam(c)
+	if err != nil {
+		return err
+	}
+	actor, err := currentPrincipal(c)
+	if err != nil {
+		return err
+	}
+	var req domain.ResetPasswordRequest
+	if err := bindBody(c, &req); err != nil {
+		return err
+	}
+	if err := h.userSvc.ResetPassword(c.Context(), actor.UserID, id, req.Password); err != nil {
+		return err
+	}
+	return response.Success(c, fiber.Map{"reset": true, "sessions_revoked": true})
+}
+
+func (h *UserHandler) AssignRoles(c fiber.Ctx) error {
+	id, err := parseIDParam(c)
+	if err != nil {
+		return err
+	}
+	actor, err := currentPrincipal(c)
+	if err != nil {
+		return err
+	}
+	var req domain.AssignRolesRequest
+	if err := bindBody(c, &req); err != nil {
+		return err
+	}
+	if req.RoleIDs == nil {
+		req.RoleIDs = []uuid.UUID{}
+	}
+	user, err := h.userSvc.AssignRoles(c.Context(), actor.UserID, id, req.RoleIDs)
+	if err != nil {
+		return err
+	}
+	return response.Success(c, user)
+}
+
+func (h *UserHandler) BatchMoveDepartment(c fiber.Ctx) error {
+	var req domain.BatchMoveDepartmentRequest
+	if err := bindBody(c, &req); err != nil {
+		return err
+	}
+	moved, err := h.userSvc.BatchMoveDepartment(c.Context(), req.UserIDs, req.TargetDeptID)
+	if err != nil {
+		return err
+	}
+	return response.Success(c, fiber.Map{"moved": moved})
+}
+
+func (h *UserHandler) GetByID(c fiber.Ctx) error {
+	id, err := parseIDParam(c)
+	if err != nil {
+		return err
 	}
 
-	user, err := h.userRepo.GetByID(c.Context(), id)
+	user, err := h.userSvc.GetUser(c.Context(), id)
 	if err != nil {
-		return errors.ErrUserNotFound
+		return err
 	}
 
 	return response.Success(c, user)
@@ -71,11 +123,7 @@ func (h *UserHandler) GetByID(c fiber.Ctx) error {
 
 func (h *UserHandler) Create(c fiber.Ctx) error {
 	var req domain.CreateUserRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "请求体格式错误")
-	}
-
-	if err := validator.ValidateRequest(c, req); err != nil {
+	if err := bindBody(c, &req); err != nil {
 		return err
 	}
 
@@ -88,18 +136,21 @@ func (h *UserHandler) Create(c fiber.Ctx) error {
 }
 
 func (h *UserHandler) Update(c fiber.Ctx) error {
-	idStr := c.Params("id")
-	id, err := uuid.Parse(idStr)
+	id, err := parseIDParam(c)
 	if err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "非法的 UUID 格式")
+		return err
+	}
+	actor, err := currentPrincipal(c)
+	if err != nil {
+		return err
 	}
 
 	var req domain.UpdateUserRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "请求体格式错误")
+	if err := bindBody(c, &req); err != nil {
+		return err
 	}
 
-	user, err := h.userSvc.UpdateUser(c.Context(), id, req)
+	user, err := h.userSvc.UpdateUser(c.Context(), actor.UserID, id, req)
 	if err != nil {
 		return err
 	}
@@ -108,13 +159,16 @@ func (h *UserHandler) Update(c fiber.Ctx) error {
 }
 
 func (h *UserHandler) Delete(c fiber.Ctx) error {
-	idStr := c.Params("id")
-	id, err := uuid.Parse(idStr)
+	id, err := parseIDParam(c)
 	if err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "非法的 UUID 格式")
+		return err
+	}
+	actor, err := currentPrincipal(c)
+	if err != nil {
+		return err
 	}
 
-	if err := h.userSvc.DeleteUser(c.Context(), id); err != nil {
+	if err := h.userSvc.DeleteUser(c.Context(), actor.UserID, id); err != nil {
 		return err
 	}
 
@@ -126,18 +180,21 @@ type ToggleStatusRequest struct {
 }
 
 func (h *UserHandler) ToggleStatus(c fiber.Ctx) error {
-	idStr := c.Params("id")
-	id, err := uuid.Parse(idStr)
+	id, err := parseIDParam(c)
 	if err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "非法的 UUID 格式")
+		return err
+	}
+	actor, err := currentPrincipal(c)
+	if err != nil {
+		return err
 	}
 
 	var req ToggleStatusRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "请求体格式错误")
+	if err := bindBody(c, &req); err != nil {
+		return err
 	}
 
-	if err := h.userSvc.ToggleStatus(c.Context(), id, req.Status); err != nil {
+	if err := h.userSvc.ToggleStatus(c.Context(), actor.UserID, id, req.Status); err != nil {
 		return err
 	}
 
@@ -152,7 +209,7 @@ func (h *UserHandler) UpdateMyPreferences(c fiber.Ctx) error {
 
 	var pref domain.UserPreferences
 	if err := c.Bind().Body(&pref); err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "偏好设置格式错误")
+		return errors.ErrParamInvalid.WithMessage("偏好设置格式错误")
 	}
 
 	if err := h.userSvc.UpdatePreferences(c.Context(), userCtx.UserID, pref); err != nil {

@@ -1,30 +1,25 @@
-import { api } from "./api";
+import { api } from "./api"
+import type { CurrentUser, Envelope } from "./types"
+
+export type { CurrentUser, Envelope, UserDTO } from "./types"
+
 export interface LoginParams {
-  username: string;
-  password: string;
+  username: string
+  password: string
+  domain?: string
 }
-export interface UserDTO {
-  id: string;
-  username: string;
-  email: string;
-  nickname: string;
-  avatar?: string;
-  status: number;
-  roles?: Array<{ id: string; code: string; name: string }>;
-  preferences?: { theme?: string; locale?: string; pinned_routes?: string[] };
-  created_at?: string;
-  updated_at?: string;
+
+export interface AuthDomain {
+  domain: string
+  name: string
+  type: "ad" | "ldap"
 }
-export interface Envelope<T> {
-  code: number;
-  message: string;
-  data: T;
-  request_id: string;
-}
+
 export const authService = {
   login: (params: LoginParams) =>
-    api.post("/auth/login", params) as Promise<Envelope<{ user: UserDTO }>>,
+    api.post("/auth/login", params) as Promise<Envelope<{ user: CurrentUser }>>,
   logout: () =>
     api.post("/auth/logout") as Promise<Envelope<{ logged_out: boolean }>>,
-  getProfile: () => api.get("/auth/me") as Promise<Envelope<UserDTO>>,
-};
+  getProfile: () => api.get("/auth/me") as Promise<Envelope<CurrentUser>>,
+  domains: () => api.get("/auth/domains") as Promise<Envelope<AuthDomain[]>>,
+}

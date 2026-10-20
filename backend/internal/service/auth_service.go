@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -24,14 +25,46 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 type authService struct {
-	cfg   *config.Config
-	users domain.UserRepository
-	store domain.AuthRepository
-	now   func() time.Time
+	cfg       *config.Config
+	users     domain.UserRepository
+	store     domain.AuthRepository
+	authz     domain.AuthorizationService
+	directory domain.DirectoryAuthenticator
+	now       func() time.Time
 }
 
-func NewAuthService(cfg *config.Config, users domain.UserRepository, store domain.AuthRepository) domain.AuthService {
-	return &authService{cfg: cfg, users: users, store: store, now: time.Now}
+func NewAuthService(cfg *config.Config, users domain.UserRepository, store domain.AuthRepository, authz domain.AuthorizationService, directory domain.DirectoryAuthenticator) domain.AuthService {
+	return &authService{cfg: cfg, users: users, store: store, authz: authz, directory: directory, now: time.Now}
+}
+
+func (s *authService) Domains(ctx context.Context) ([]domain.AuthDomain, error) {
+	if s.directory == nil {
+		return []domain.AuthDomain{}, nil
+	}
+	return s.directory.ListLoginDomains(ctx)
+}
+
+func (s *authService) authenticate(ctx context.Context, in domain.LoginInput) (*domain.User, error) {
+	authDomain := strings.ToLower(strings.TrimSpace(in.Domain))
+	if authDomain == "" || authDomain == "local" {
+		return s.credentials(ctx, in.Username, in.Password)
+	}
+	if s.directory == nil {
+		return nil, coreerrors.ErrDomainNotFound
+	}
+	return s.directory.AuthenticateDomain(ctx, authDomain, in.Username, in.Password)
+}
+
+func (s *authService) Profile(ctx context.Context, id uuid.UUID) (*domain.CurrentUser, error) {
+	user, err := s.CurrentUser(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	codes, isAdmin, err := s.authz.EffectivePermissions(ctx, principal(user, "", "").Roles)
+	if err != nil {
+		return nil, err
+	}
+	return &domain.CurrentUser{User: user, Permissions: codes, IsAdmin: isAdmin}, nil
 }
 func authStoreError(err error) error {
 	return coreerrors.NewDomainError(500, 500002, "认证存储不可用", err)
@@ -50,14 +83,14 @@ func (s *authService) CurrentUser(ctx context.Context, id uuid.UUID) (*domain.Us
 	return user, nil
 }
 func (s *authService) credentials(ctx context.Context, username, password string) (*domain.User, error) {
-	user, err := s.users.GetByUsername(ctx, username)
+	user, err := s.users.GetByUsername(ctx, "", username)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, coreerrors.ErrInvalidCredentials
 		}
 		return nil, authStoreError(err)
 	}
-	if user == nil {
+	if user == nil || user.AuthType != domain.AuthTypeLocal {
 		return nil, coreerrors.ErrInvalidCredentials
 	}
 	if user.Status != 1 {
@@ -68,8 +101,8 @@ func (s *authService) credentials(ctx context.Context, username, password string
 	}
 	return user, nil
 }
-func (s *authService) Login(ctx context.Context, username, password, oldID string) (*domain.User, *domain.Session, error) {
-	user, err := s.credentials(ctx, username, password)
+func (s *authService) Login(ctx context.Context, in domain.LoginInput, oldID string) (*domain.User, *domain.Session, error) {
+	user, err := s.authenticate(ctx, in)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -83,13 +116,14 @@ func (s *authService) Login(ctx context.Context, username, password, oldID strin
 	if err != nil {
 		return nil, nil, err
 	}
-	session := domain.Session{ID: id, UserID: user.ID, ExpiresAt: now.Add(idle), AbsoluteExpiresAt: now.Add(absolute)}
+	session := domain.Session{ID: id, UserID: user.ID, CreatedAt: now, ExpiresAt: now.Add(idle), AbsoluteExpiresAt: now.Add(absolute)}
 	if session.ExpiresAt.After(session.AbsoluteExpiresAt) {
 		session.ExpiresAt = session.AbsoluteExpiresAt
 	}
 	if err = s.store.SaveSession(ctx, session, oldID); err != nil {
 		return nil, nil, authStoreError(err)
 	}
+	s.recordLogin(ctx, user)
 	return user, &session, nil
 }
 func (s *authService) AuthenticateSession(ctx context.Context, id string) (*domain.Principal, time.Time, error) {
@@ -107,7 +141,19 @@ func (s *authService) AuthenticateSession(ctx context.Context, id string) (*doma
 	if err != nil {
 		return nil, time.Time{}, err
 	}
+	if revokedBefore(user, sess.CreatedAt, time.Millisecond) {
+		_ = s.store.DeleteSession(ctx, id)
+		return nil, time.Time{}, coreerrors.ErrSessionRevoked
+	}
 	return principal(user, id, ""), sess.ExpiresAt, nil
+}
+
+func revokedBefore(user *domain.User, issuedAt time.Time, precision time.Duration) bool {
+	return user.SessionsRevokedAt != nil && issuedAt.Before(user.SessionsRevokedAt.Truncate(precision))
+}
+
+func (s *authService) recordLogin(ctx context.Context, user *domain.User) {
+	_ = s.users.UpdateColumns(ctx, user.ID, map[string]any{"last_login_at": s.now()})
 }
 func principal(user *domain.User, sessionID, familyID string) *domain.Principal {
 	p := &domain.Principal{UserID: user.ID, Username: user.Username, SessionID: sessionID, FamilyID: familyID}
@@ -118,8 +164,8 @@ func principal(user *domain.User, sessionID, familyID string) *domain.Principal 
 	}
 	return p
 }
-func (s *authService) IssueTokens(ctx context.Context, username, password string) (*domain.TokenPair, error) {
-	user, err := s.credentials(ctx, username, password)
+func (s *authService) IssueTokens(ctx context.Context, in domain.LoginInput) (*domain.TokenPair, error) {
+	user, err := s.authenticate(ctx, in)
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +180,7 @@ func (s *authService) IssueTokens(ctx context.Context, username, password string
 	if err = s.store.CreateFamily(ctx, family, refreshID, expiry); err != nil {
 		return nil, authStoreError(err)
 	}
+	s.recordLogin(ctx, user)
 	return pair, nil
 }
 func (s *authService) parse(tokenStr, purpose string) (*JWTClaims, error) {
@@ -142,7 +189,7 @@ func (s *authService) parse(tokenStr, purpose string) (*JWTClaims, error) {
 	}
 	claims := new(JWTClaims)
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) { return []byte(s.cfg.JWT.Secret), nil }, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithIssuer(s.cfg.JWT.Issuer), jwt.WithExpirationRequired())
-	if err != nil || !token.Valid || claims.Purpose != purpose || claims.ID == "" || claims.FamilyID == "" || claims.Subject == "" {
+	if err != nil || !token.Valid || claims.Purpose != purpose || claims.ID == "" || claims.FamilyID == "" || claims.Subject == "" || claims.IssuedAt == nil {
 		return nil, coreerrors.ErrUnauthorized
 	}
 	if _, err = uuid.Parse(claims.Subject); err != nil {
@@ -167,6 +214,9 @@ func (s *authService) AuthenticateBearer(ctx context.Context, token string) (*do
 	if err != nil {
 		return nil, err
 	}
+	if revokedBefore(user, claims.IssuedAt.Time, time.Second) {
+		return nil, coreerrors.ErrSessionRevoked
+	}
 	return principal(user, "", claims.FamilyID), nil
 }
 func (s *authService) RefreshToken(ctx context.Context, token string) (*domain.TokenPair, error) {
@@ -178,6 +228,9 @@ func (s *authService) RefreshToken(ctx context.Context, token string) (*domain.T
 	user, err := s.CurrentUser(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if revokedBefore(user, claims.IssuedAt.Time, time.Second) {
+		return nil, coreerrors.ErrSessionRevoked
 	}
 	pair, nextID, _, err := s.makePair(user.ID, claims.FamilyID, claims.ExpiresAt.Time)
 	if err != nil {

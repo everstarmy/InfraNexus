@@ -22,7 +22,7 @@ graph TD
         MW_CORS["cors.New()"]
         MW_Logger["logger.New() + slog 桥接"]
         MW_JWT["jwt.New() Token 鉴权"]
-        MW_Casbin["casbin.New() RBAC 鉴权"]
+        MW_Casbin["NewCasbin().RoutePermission() RBAC 鉴权 (casbin/v3)"]
         MW_SSE["sse.New() 实时推送"]
     end
 
@@ -451,44 +451,19 @@ src/
 ```
 
 ### 3.2 SaaS 全宽流式布局组件 (`layouts/admin-layout.tsx`)
-主工作区采用 **全宽度响应式设计**，在 1920px、2K、4K 超宽屏幕下不缩水受限：
+外壳固定视口，侧栏与 Header 不随内容滚动，只有 `<main>` 滚动；内容区全宽铺满，在 1920px、2K、4K 超宽屏幕下不缩水受限：
 ```tsx
-import React, { useState } from "react";
-import { Outlet } from "react-router-dom";
-import { Sidebar } from "./sidebar";
-import { Header } from "./header";
-
-export const AdminLayout: React.FC = () => {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-
-  return (
-    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
-      {/* 桌面端侧边栏 */}
-      <Sidebar 
-        isOpen={sidebarOpen} 
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
-        isMobileDrawerOpen={mobileDrawerOpen}
-        onMobileClose={() => setMobileDrawerOpen(false)}
-      />
-
-      {/* 主工作区外容器 */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* 顶部功能区 */}
-        <Header 
-          onOpenMobileSidebar={() => setMobileDrawerOpen(true)}
-          sidebarCollapsed={!sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-        />
-
-        {/* 主内容区域：全宽度流式铺满，不随大屏幕收窄，支持纵向自适应滚动 */}
-        <main className="flex-1 w-full overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8">
-          <Outlet />
-        </main>
+<SidebarProvider className="h-svh w-full overflow-hidden">
+  <AppSidebar />
+  <SidebarInset className="flex h-svh w-full flex-col overflow-hidden">
+    <Header onLogout={handleLogout} /> {/* h-14 shrink-0 */}
+    <main className="w-full flex-1 overflow-x-hidden overflow-y-auto">
+      <div className="w-full space-y-5 p-4 md:p-6 2xl:px-8">
+        <Outlet />
       </div>
-    </div>
-  );
-};
+    </main>
+  </SidebarInset>
+</SidebarProvider>
 ```
 
 ### 3.3 Web Axios Cookie 客户端 (`services/api.ts`)
@@ -499,21 +474,40 @@ export const AdminLayout: React.FC = () => {
 ## 4. API 路由与 Casbin 权限矩阵规划
 
 ### 4.1 核心 RESTful 端点
-| 模块 | 方法 | 路径 | 权限标识 / Casbin 规则 | 描述 |
+RBAC 表示经 Casbin 校验 `(role, 路由模板, Method)`，对应权限编码为 `api:<METHOD>:<路由模板>`；`admin` 超级角色直通。
+
+| 模块 | 方法 | 路径 | 鉴权 | 描述 |
 | :--- | :--- | :--- | :--- | :--- |
-| **Auth** | POST | `/api/v1/auth/login` | 公开 | Web 登录：设置 Session Cookie，仅返回用户 |
+| **Auth** | POST | `/api/v1/auth/login` | 公开 | Web 登录（可带 `domain` 走域认证）：设置 Session Cookie，仅返回用户 |
 | **Auth** | POST | `/api/v1/auth/token` | 公开 | 外部客户端换取 JWT TokenPair |
-| **Auth** | GET | `/api/v1/auth/me` | Session/JWT | 获取当前用户 |
 | **Auth** | POST | `/api/v1/auth/refresh` | 公开 (需有效 RefreshToken) | 原子轮换 Refresh Token |
+| **Auth** | GET | `/api/v1/auth/domains` | 公开 | 登录页可选的启用认证域 |
+| **Auth** | GET | `/api/v1/auth/me` | Session/JWT | 当前用户、有效权限编码与是否超级管理员 |
 | **Auth** | POST | `/api/v1/auth/logout` | Session/JWT | 撤销当前会话或令牌族 |
-| **User** | GET | `/api/v1/users` | `(role, /api/v1/users, GET)` | 分页查询用户列表 |
-| **User** | POST | `/api/v1/users` | `(role, /api/v1/users, POST)` | 新建用户 |
-| **User** | PUT | `/api/v1/users/:id` | `(role, /api/v1/users/:id, PUT)` | 更新用户基本信息与角色 |
-| **User** | PATCH | `/api/v1/users/:id/status` | `(role, /api/v1/users/:id/status, PATCH)` | 启用/禁用用户 |
-| **User** | DELETE | `/api/v1/users/:id` | `(role, /api/v1/users/:id, DELETE)` | 软删除用户 |
-| **Role** | GET | `/api/v1/roles` | `(role, /api/v1/roles, GET)` | 获取所有角色列表 |
-| **Role** | POST | `/api/v1/roles` | `(role, /api/v1/roles, POST)` | 新增角色与关联权限 |
-| **Role** | PUT | `/api/v1/roles/:id` | `(role, /api/v1/roles/:id, PUT)` | 修改角色及其权限 |
-| **Role** | DELETE | `/api/v1/roles/:id` | `(role, /api/v1/roles/:id, DELETE)` | 删除角色 |
-| **Perm** | GET | `/api/v1/permissions` | `(role, /api/v1/permissions, GET)` | 获取所有菜单与操作权限树 |
-| **SSE**  | GET | `/api/v1/sse/notifications` | JWT 校验 | 实时系统通知长链接通道 |
+| **Option** | GET | `/api/v1/options/roles` · `/options/departments` | Session/JWT | 表单下拉所需的角色、部门参考数据 |
+| **Dashboard** | GET | `/api/v1/dashboard/overview` | RBAC | 概览指标 |
+| **User** | GET | `/api/v1/users` · `/users/stats` · `/users/:id` | RBAC | 分页筛选（部门/含下级/角色/来源/状态）、统计、详情 |
+| **User** | POST | `/api/v1/users` | RBAC | 新建本地用户 |
+| **User** | PUT | `/api/v1/users/:id` | RBAC | 更新资料、部门与角色 |
+| **User** | PATCH | `/api/v1/users/:id/status` | RBAC | 启用/停用 |
+| **User** | POST | `/api/v1/users/:id/reset-password` | RBAC | 重置密码并撤销会话 |
+| **User** | PUT | `/api/v1/users/:id/roles` | RBAC | 分配多角色 |
+| **User** | POST | `/api/v1/users/batch-move-department` | RBAC | 事务化批量调岗 `{user_ids, target_dept_id}` |
+| **User** | DELETE | `/api/v1/users/:id` | RBAC | 软删除用户 |
+| **Dept** | GET | `/api/v1/departments/tree` · `/departments/:id` | RBAC | 部门树（含直属/含下级成员数）、详情 |
+| **Dept** | POST · PUT · DELETE | `/api/v1/departments` · `/departments/:id` | RBAC | 新建、编辑、删除（子部门/成员保护） |
+| **Dept** | POST · PUT | `/api/v1/departments/:id/move` · `/departments/reorder` | RBAC | 移动上级、同级排序 |
+| **Role** | GET | `/api/v1/roles` · `/roles/:id` | RBAC | 角色列表（含成员数）、详情 |
+| **Role** | POST · PUT · DELETE | `/api/v1/roles` · `/roles/:id` | RBAC | 新建、编辑、删除（内置保护） |
+| **Role** | GET | `/api/v1/roles/permission-tree` | RBAC | 授权面板使用的权限树 |
+| **Role** | POST | `/api/v1/roles/:id/permissions` | RBAC | 分配权限并差量同步 Casbin 策略 |
+| **Perm** | GET | `/api/v1/permissions` | RBAC | 菜单 → 按钮 → API 权限树 |
+| **Perm** | POST · PUT · DELETE | `/api/v1/permissions` · `/permissions/:id` | RBAC | 权限点维护（内置保护） |
+| **Perm** | POST | `/api/v1/permissions/sync` | RBAC | 扫描受控路由补登记接口权限点并重建策略 |
+| **LDAP** | GET · POST | `/api/v1/ldap/configs` | RBAC | 目录配置列表、新建 |
+| **LDAP** | GET · PUT · DELETE | `/api/v1/ldap/configs/:id` | RBAC | 目录配置详情、编辑、删除 |
+| **LDAP** | POST | `/api/v1/ldap/test` | RBAC | 连接测试（connect → bind → search 分阶段结果） |
+| **LDAP** | POST | `/api/v1/ldap/preview` | RBAC | 同步预览（只读演算） |
+| **LDAP** | POST | `/api/v1/ldap/sync` | RBAC | 异步执行全量/增量同步，SSE 推送开始与完成 |
+| **LDAP** | GET | `/api/v1/ldap/sync-logs` | RBAC | 同步日志与报告 |
+| **SSE** | GET | `/api/v1/sse/notifications` | Session/JWT | 实时系统通知长链接通道 |
