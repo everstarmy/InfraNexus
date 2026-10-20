@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 
-	"github.com/casbin/casbin/v3"
 	"github.com/google/uuid"
 
 	coreerrors "infranexus/internal/core/errors"
@@ -12,20 +11,18 @@ import (
 
 type roleService struct {
 	roleRepo domain.RoleRepository
-	permRepo domain.PermissionRepository
-	enforcer *casbin.Enforcer
+	authz    domain.AuthorizationService
 }
 
-func NewRoleService(roleRepo domain.RoleRepository, permRepo domain.PermissionRepository, enforcer *casbin.Enforcer) domain.RoleService {
+func NewRoleService(roleRepo domain.RoleRepository, authz domain.AuthorizationService) domain.RoleService {
 	return &roleService{
 		roleRepo: roleRepo,
-		permRepo: permRepo,
-		enforcer: enforcer,
+		authz:    authz,
 	}
 }
 
-func (s *roleService) ListRoles(ctx context.Context, page, pageSize int) ([]domain.Role, int64, error) {
-	return s.roleRepo.List(ctx, page, pageSize, nil)
+func (s *roleService) ListRoles(ctx context.Context, keyword string, page, pageSize int) ([]domain.Role, int64, error) {
+	return s.roleRepo.Search(ctx, keyword, page, pageSize)
 }
 
 func (s *roleService) Options(ctx context.Context) ([]domain.Role, error) {
@@ -61,22 +58,25 @@ func (s *roleService) UpdateRole(ctx context.Context, id uuid.UUID, req domain.U
 	if err != nil {
 		return nil, err
 	}
+	values := map[string]any{}
 	if req.Status != nil {
 		if role.BuiltIn && *req.Status != domain.StatusEnabled {
 			return nil, coreerrors.ErrBuiltinProtected.WithMessage("内置角色不可停用")
 		}
-		role.Status = *req.Status
+		values["status"] = *req.Status
 	}
 	if req.Name != nil {
-		role.Name = *req.Name
+		values["name"] = *req.Name
 	}
 	if req.Description != nil {
-		role.Description = *req.Description
+		values["description"] = *req.Description
 	}
-	if err := s.roleRepo.Update(ctx, role); err != nil {
-		return nil, err
+	if len(values) > 0 {
+		if err := s.roleRepo.UpdateColumns(ctx, id, values); err != nil {
+			return nil, err
+		}
 	}
-	return role, nil
+	return s.GetRole(ctx, id)
 }
 
 func (s *roleService) DeleteRole(ctx context.Context, id uuid.UUID) error {
@@ -87,41 +87,18 @@ func (s *roleService) DeleteRole(ctx context.Context, id uuid.UUID) error {
 	if role.BuiltIn {
 		return coreerrors.ErrBuiltinProtected.WithMessage("内置角色不可删除")
 	}
-
-	// 从 Casbin 移除策略
-	if s.enforcer != nil {
-		_, _ = s.enforcer.RemoveFilteredPolicy(0, role.Code)
-		_ = s.enforcer.SavePolicy()
+	if err := s.roleRepo.Delete(ctx, id); err != nil {
+		return err
 	}
-
-	return s.roleRepo.Delete(ctx, id)
+	return s.authz.RemoveRolePolicies(role.Code)
 }
 
 func (s *roleService) AssignPermissions(ctx context.Context, roleID uuid.UUID, permissionIDs []uuid.UUID) error {
-	role, err := s.GetRole(ctx, roleID)
-	if err != nil {
+	if _, err := s.GetRole(ctx, roleID); err != nil {
 		return err
 	}
-
 	if err := s.roleRepo.AssignPermissions(ctx, roleID, permissionIDs); err != nil {
 		return err
 	}
-
-	// 重新加载并同步 Casbin 策略
-	if s.enforcer != nil {
-		// 清理旧规则
-		_, _ = s.enforcer.RemoveFilteredPolicy(0, role.Code)
-
-		perms, err := s.permRepo.GetByRoleID(ctx, roleID)
-		if err == nil {
-			for _, p := range perms {
-				if p.Type == domain.PermTypeAPI && p.Path != "" && p.Method != "" {
-					_, _ = s.enforcer.AddPolicy(role.Code, p.Path, p.Method)
-				}
-			}
-		}
-		_ = s.enforcer.SavePolicy()
-	}
-
-	return nil
+	return s.authz.SyncRolePolicies(ctx, roleID)
 }

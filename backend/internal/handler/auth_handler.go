@@ -26,7 +26,7 @@ type LoginRequest struct {
 	Password string `json:"password" validate:"required,min=6,max=64"`
 }
 type LoginResponse struct {
-	User *domain.User `json:"user"`
+	User *domain.CurrentUser `json:"user"`
 }
 
 func (h *AuthHandler) Login(c fiber.Ctx) error {
@@ -39,7 +39,11 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		return err
 	}
 	middleware.SetSessionCookie(c, h.cfg, sess.ID, sess.ExpiresAt)
-	return response.Success(c, LoginResponse{User: user})
+	profile, err := h.authSvc.Profile(c.Context(), user.ID)
+	if err != nil {
+		return err
+	}
+	return response.Success(c, LoginResponse{User: profile})
 }
 func (h *AuthHandler) Token(c fiber.Ctx) error {
 	var req LoginRequest
@@ -89,9 +93,9 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 	if !ok {
 		return coreerrors.ErrUnauthorized
 	}
-	user, err := h.authSvc.CurrentUser(c.Context(), p.UserID)
+	profile, err := h.authSvc.Profile(c.Context(), p.UserID)
 	if err != nil {
 		return err
 	}
-	return response.Success(c, user)
+	return response.Success(c, profile)
 }

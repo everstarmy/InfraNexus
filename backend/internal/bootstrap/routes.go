@@ -1,7 +1,10 @@
 package bootstrap
 
 import (
-	"github.com/casbin/casbin/v3"
+	"slices"
+	"sort"
+	"strings"
+
 	"github.com/gofiber/fiber/v3"
 
 	"infranexus/internal/config"
@@ -14,12 +17,51 @@ import (
 type routeDeps struct {
 	cfg         *config.Config
 	authSvc     domain.AuthService
-	enforcer    *casbin.Enforcer
+	casbin      *middleware.Casbin
 	auth        *handler.AuthHandler
 	users       *handler.UserHandler
 	roles       *handler.RoleHandler
+	permissions *handler.PermissionHandler
 	departments *handler.DepartmentHandler
 	options     *handler.OptionsHandler
+}
+
+var authOnlyPrefixes = []string{
+	"/api/v1/health",
+	"/api/v1/auth/",
+	"/api/v1/options/",
+	"/api/v1/sse/",
+	"/api/v1/users/me/",
+}
+
+func discoverAPIRoutes(app *fiber.App) []domain.RouteInfo {
+	seen := make(map[string]bool)
+	routes := make([]domain.RouteInfo, 0)
+	for _, r := range app.GetRoutes(true) {
+		switch r.Method {
+		case fiber.MethodGet, fiber.MethodPost, fiber.MethodPut, fiber.MethodPatch, fiber.MethodDelete:
+		default:
+			continue
+		}
+		if !strings.HasPrefix(r.Path, "/api/v1/") || slices.ContainsFunc(authOnlyPrefixes, func(prefix string) bool {
+			return strings.HasPrefix(r.Path, prefix)
+		}) {
+			continue
+		}
+		key := r.Method + " " + r.Path
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		routes = append(routes, domain.RouteInfo{Method: r.Method, Path: r.Path})
+	}
+	sort.Slice(routes, func(i, j int) bool {
+		if routes[i].Path == routes[j].Path {
+			return routes[i].Method < routes[j].Method
+		}
+		return routes[i].Path < routes[j].Path
+	})
+	return routes
 }
 
 func registerRoutes(app *fiber.App, d routeDeps) {
@@ -48,7 +90,7 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	authRequired.Get("/options/departments", d.options.Departments)
 	authRequired.Get("/sse/notifications", handler.StreamNotifications)
 
-	rbac := authRequired.Group("", middleware.CasbinRBAC(d.enforcer))
+	rbac := authRequired.Group("", d.casbin.RoutePermission())
 
 	users := rbac.Group("/users")
 	users.Get("", d.users.List)
@@ -79,5 +121,10 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	roles.Delete("/:id", d.roles.Delete)
 	roles.Post("/:id/permissions", d.roles.AssignPermissions)
 
-	rbac.Get("/permissions", d.roles.GetPermissionTree)
+	permissions := rbac.Group("/permissions")
+	permissions.Get("", d.permissions.Tree)
+	permissions.Post("", d.permissions.Create)
+	permissions.Post("/sync", d.permissions.Sync)
+	permissions.Put("/:id", d.permissions.Update)
+	permissions.Delete("/:id", d.permissions.Delete)
 }

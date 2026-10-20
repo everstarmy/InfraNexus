@@ -73,6 +73,8 @@ var (
 	ErrDepartmentHasMembers    = NewDomainError(fiber.StatusConflict, response.CodeDepartmentHasMembers, "该部门下仍有成员，请先将人员调岗")
 	ErrDepartmentInvalidParent = NewDomainError(fiber.StatusConflict, response.CodeDepartmentInvalidParent, "部门上级设置非法")
 	ErrExternalAccountManaged  = NewDomainError(fiber.StatusConflict, response.CodeExternalAccountManaged, "域账号由目录服务管理，不支持该操作")
+	ErrPermissionNotFound      = NewDomainError(fiber.StatusNotFound, response.CodePermissionNotFound, "目标权限点不存在")
+	ErrPermissionHasChildren   = NewDomainError(fiber.StatusConflict, response.CodePermissionHasChildren, "该权限点下仍有子节点，请先删除子节点")
 )
 
 // GlobalErrorHandler Fiber 全局错误拦截器

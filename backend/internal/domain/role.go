@@ -37,11 +37,14 @@ type RoleRepository interface {
 	Repository[Role, uuid.UUID]
 	GetByCode(ctx context.Context, code string) (*Role, error)
 	ListAll(ctx context.Context) ([]Role, error)
+	Search(ctx context.Context, keyword string, page, pageSize int) ([]Role, int64, error)
+	ListWithPermissions(ctx context.Context, codes []string) ([]Role, error)
+	UpdateColumns(ctx context.Context, id uuid.UUID, values map[string]any) error
 	AssignPermissions(ctx context.Context, roleID uuid.UUID, permissionIDs []uuid.UUID) error
 }
 
 type RoleService interface {
-	ListRoles(ctx context.Context, page, pageSize int) ([]Role, int64, error)
+	ListRoles(ctx context.Context, keyword string, page, pageSize int) ([]Role, int64, error)
 	Options(ctx context.Context) ([]Role, error)
 	GetRole(ctx context.Context, id uuid.UUID) (*Role, error)
 	CreateRole(ctx context.Context, req CreateRoleRequest) (*Role, error)

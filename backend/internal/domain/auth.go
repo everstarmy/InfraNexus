@@ -29,6 +29,12 @@ type Principal struct {
 	FamilyID  string
 }
 
+type CurrentUser struct {
+	*User
+	Permissions []string `json:"permissions"`
+	IsAdmin     bool     `json:"is_admin"`
+}
+
 type AuthService interface {
 	Login(ctx context.Context, username, password, oldSessionID string) (*User, *Session, error)
 	IssueTokens(ctx context.Context, username, password string) (*TokenPair, error)
@@ -37,6 +43,7 @@ type AuthService interface {
 	AuthenticateBearer(ctx context.Context, token string) (*Principal, error)
 	Logout(ctx context.Context, principal *Principal) error
 	CurrentUser(ctx context.Context, id uuid.UUID) (*User, error)
+	Profile(ctx context.Context, id uuid.UUID) (*CurrentUser, error)
 }
 
 type AuthRepository interface {

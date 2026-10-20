@@ -39,7 +39,11 @@ func main() {
 	}
 
 	// 5. 装配 GoFiber v3 引擎 (全局中间件 + 路由)
-	fiberApp := bootstrap.NewFiberApp(container)
+	fiberApp, err := bootstrap.NewFiberApp(container)
+	if err != nil {
+		log.Error("Failed to assemble HTTP application", "error", err)
+		os.Exit(1)
+	}
 
 	// 6. 优雅启动与平滑退出 (Graceful Shutdown)
 	go func() {

@@ -24,10 +24,12 @@ const (
 	CodeUserNotFound            BusinessCode = 404001 // 用户未找到
 	CodeRoleNotFound            BusinessCode = 404002 // 角色未找到
 	CodeDepartmentNotFound      BusinessCode = 404003 // 部门未找到
+	CodePermissionNotFound      BusinessCode = 404004 // 权限点未找到
 	CodeResourceConflict        BusinessCode = 409001 // 唯一约束冲突
 	CodeDepartmentHasChildren   BusinessCode = 409002 // 部门下仍有子部门
 	CodeDepartmentHasMembers    BusinessCode = 409003 // 部门下仍有成员
 	CodeDepartmentInvalidParent BusinessCode = 409004 // 部门上级非法（成环/层级超限/已停用）
+	CodePermissionHasChildren   BusinessCode = 409006 // 权限点下仍有子节点
 	CodeExternalAccountManaged  BusinessCode = 409007 // 域账号由目录服务管理
 	CodeRateLimited             BusinessCode = 429001 // 请求过于频繁
 	CodeDatabaseError           BusinessCode = 500001 // 数据库异常

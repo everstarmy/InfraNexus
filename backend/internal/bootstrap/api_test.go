@@ -74,7 +74,10 @@ func setupTestApp(t *testing.T) (*AppContainer, *fiber.App, func()) {
 		t.Fatalf("Seed failed: %v", err)
 	}
 
-	fiberApp := NewFiberApp(container)
+	fiberApp, err := NewFiberApp(container)
+	if err != nil {
+		t.Fatalf("NewFiberApp failed: %v", err)
+	}
 
 	cleanup := func() {
 		container.Close()

@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
@@ -10,20 +12,16 @@ import (
 
 type RoleHandler struct {
 	roleSvc domain.RoleService
-	permSvc domain.PermissionService
 }
 
-func NewRoleHandler(roleSvc domain.RoleService, permSvc domain.PermissionService) *RoleHandler {
-	return &RoleHandler{
-		roleSvc: roleSvc,
-		permSvc: permSvc,
-	}
+func NewRoleHandler(roleSvc domain.RoleService) *RoleHandler {
+	return &RoleHandler{roleSvc: roleSvc}
 }
 
 func (h *RoleHandler) List(c fiber.Ctx) error {
 	page, pageSize := pageParams(c, 50)
 
-	roles, total, err := h.roleSvc.ListRoles(c.Context(), page, pageSize)
+	roles, total, err := h.roleSvc.ListRoles(c.Context(), strings.TrimSpace(c.Query("keyword")), page, pageSize)
 	if err != nil {
 		return err
 	}
@@ -111,12 +109,4 @@ func (h *RoleHandler) AssignPermissions(c fiber.Ctx) error {
 	}
 
 	return response.Success(c, fiber.Map{"assigned": true})
-}
-
-func (h *RoleHandler) GetPermissionTree(c fiber.Ctx) error {
-	tree, err := h.permSvc.Tree(c.Context())
-	if err != nil {
-		return err
-	}
-	return response.Success(c, tree)
 }

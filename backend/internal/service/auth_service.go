@@ -27,11 +27,24 @@ type authService struct {
 	cfg   *config.Config
 	users domain.UserRepository
 	store domain.AuthRepository
+	authz domain.AuthorizationService
 	now   func() time.Time
 }
 
-func NewAuthService(cfg *config.Config, users domain.UserRepository, store domain.AuthRepository) domain.AuthService {
-	return &authService{cfg: cfg, users: users, store: store, now: time.Now}
+func NewAuthService(cfg *config.Config, users domain.UserRepository, store domain.AuthRepository, authz domain.AuthorizationService) domain.AuthService {
+	return &authService{cfg: cfg, users: users, store: store, authz: authz, now: time.Now}
+}
+
+func (s *authService) Profile(ctx context.Context, id uuid.UUID) (*domain.CurrentUser, error) {
+	user, err := s.CurrentUser(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	codes, isAdmin, err := s.authz.EffectivePermissions(ctx, principal(user, "", "").Roles)
+	if err != nil {
+		return nil, err
+	}
+	return &domain.CurrentUser{User: user, Permissions: codes, IsAdmin: isAdmin}, nil
 }
 func authStoreError(err error) error {
 	return coreerrors.NewDomainError(500, 500002, "认证存储不可用", err)
