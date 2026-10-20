@@ -90,6 +90,7 @@ func (s *authService) Login(ctx context.Context, username, password, oldID strin
 	if err = s.store.SaveSession(ctx, session, oldID); err != nil {
 		return nil, nil, authStoreError(err)
 	}
+	s.recordLogin(ctx, user)
 	return user, &session, nil
 }
 func (s *authService) AuthenticateSession(ctx context.Context, id string) (*domain.Principal, time.Time, error) {
@@ -107,7 +108,19 @@ func (s *authService) AuthenticateSession(ctx context.Context, id string) (*doma
 	if err != nil {
 		return nil, time.Time{}, err
 	}
+	if revokedBefore(user, sess.CreatedAt, time.Millisecond) {
+		_ = s.store.DeleteSession(ctx, id)
+		return nil, time.Time{}, coreerrors.ErrSessionRevoked
+	}
 	return principal(user, id, ""), sess.ExpiresAt, nil
+}
+
+func revokedBefore(user *domain.User, issuedAt time.Time, precision time.Duration) bool {
+	return user.SessionsRevokedAt != nil && issuedAt.Before(user.SessionsRevokedAt.Truncate(precision))
+}
+
+func (s *authService) recordLogin(ctx context.Context, user *domain.User) {
+	_ = s.users.UpdateColumns(ctx, user.ID, map[string]any{"last_login_at": s.now()})
 }
 func principal(user *domain.User, sessionID, familyID string) *domain.Principal {
 	p := &domain.Principal{UserID: user.ID, Username: user.Username, SessionID: sessionID, FamilyID: familyID}
@@ -134,6 +147,7 @@ func (s *authService) IssueTokens(ctx context.Context, username, password string
 	if err = s.store.CreateFamily(ctx, family, refreshID, expiry); err != nil {
 		return nil, authStoreError(err)
 	}
+	s.recordLogin(ctx, user)
 	return pair, nil
 }
 func (s *authService) parse(tokenStr, purpose string) (*JWTClaims, error) {
@@ -142,7 +156,7 @@ func (s *authService) parse(tokenStr, purpose string) (*JWTClaims, error) {
 	}
 	claims := new(JWTClaims)
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) { return []byte(s.cfg.JWT.Secret), nil }, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithIssuer(s.cfg.JWT.Issuer), jwt.WithExpirationRequired())
-	if err != nil || !token.Valid || claims.Purpose != purpose || claims.ID == "" || claims.FamilyID == "" || claims.Subject == "" {
+	if err != nil || !token.Valid || claims.Purpose != purpose || claims.ID == "" || claims.FamilyID == "" || claims.Subject == "" || claims.IssuedAt == nil {
 		return nil, coreerrors.ErrUnauthorized
 	}
 	if _, err = uuid.Parse(claims.Subject); err != nil {
@@ -167,6 +181,9 @@ func (s *authService) AuthenticateBearer(ctx context.Context, token string) (*do
 	if err != nil {
 		return nil, err
 	}
+	if revokedBefore(user, claims.IssuedAt.Time, time.Second) {
+		return nil, coreerrors.ErrSessionRevoked
+	}
 	return principal(user, "", claims.FamilyID), nil
 }
 func (s *authService) RefreshToken(ctx context.Context, token string) (*domain.TokenPair, error) {
@@ -178,6 +195,9 @@ func (s *authService) RefreshToken(ctx context.Context, token string) (*domain.T
 	user, err := s.CurrentUser(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if revokedBefore(user, claims.IssuedAt.Time, time.Second) {
+		return nil, coreerrors.ErrSessionRevoked
 	}
 	pair, nextID, _, err := s.makePair(user.ID, claims.FamilyID, claims.ExpiresAt.Time)
 	if err != nil {

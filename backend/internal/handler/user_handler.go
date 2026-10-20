@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -24,15 +23,18 @@ func NewUserHandler(userSvc domain.UserService) *UserHandler {
 func (h *UserHandler) List(c fiber.Ctx) error {
 	page, pageSize := pageParams(c, 10)
 	filter := domain.UserFilter{
-		Page:     page,
-		PageSize: pageSize,
-		Keyword:  strings.TrimSpace(c.Query("keyword")),
+		Page:            page,
+		PageSize:        pageSize,
+		Keyword:         strings.TrimSpace(c.Query("keyword")),
+		Statuses:        queryInts(c, "status"),
+		AuthTypes:       queryStrings(c, "auth_type"),
+		RoleIDs:         queryUUIDs(c, "role_id"),
+		IncludeChildren: c.Query("include_children") == "true",
+		NoDepartment:    c.Query("department_id") == "none",
+		Sort:            c.Query("sort"),
 	}
-	if st, err := strconv.Atoi(c.Query("status")); err == nil {
-		filter.Status = &st
-	}
-	if roleID, err := uuid.Parse(c.Query("role_id")); err == nil {
-		filter.RoleID = &roleID
+	if deptID, err := uuid.Parse(c.Query("department_id")); err == nil {
+		filter.DepartmentID = &deptID
 	}
 
 	users, total, err := h.userSvc.ListUsers(c.Context(), filter)
@@ -41,6 +43,68 @@ func (h *UserHandler) List(c fiber.Ctx) error {
 	}
 
 	return response.Page(c, users, total, page, pageSize)
+}
+
+func (h *UserHandler) Stats(c fiber.Ctx) error {
+	stats, err := h.userSvc.Stats(c.Context())
+	if err != nil {
+		return err
+	}
+	return response.Success(c, stats)
+}
+
+func (h *UserHandler) ResetPassword(c fiber.Ctx) error {
+	id, err := parseIDParam(c)
+	if err != nil {
+		return err
+	}
+	actor, err := currentPrincipal(c)
+	if err != nil {
+		return err
+	}
+	var req domain.ResetPasswordRequest
+	if err := bindBody(c, &req); err != nil {
+		return err
+	}
+	if err := h.userSvc.ResetPassword(c.Context(), actor.UserID, id, req.Password); err != nil {
+		return err
+	}
+	return response.Success(c, fiber.Map{"reset": true, "sessions_revoked": true})
+}
+
+func (h *UserHandler) AssignRoles(c fiber.Ctx) error {
+	id, err := parseIDParam(c)
+	if err != nil {
+		return err
+	}
+	actor, err := currentPrincipal(c)
+	if err != nil {
+		return err
+	}
+	var req domain.AssignRolesRequest
+	if err := bindBody(c, &req); err != nil {
+		return err
+	}
+	if req.RoleIDs == nil {
+		req.RoleIDs = []uuid.UUID{}
+	}
+	user, err := h.userSvc.AssignRoles(c.Context(), actor.UserID, id, req.RoleIDs)
+	if err != nil {
+		return err
+	}
+	return response.Success(c, user)
+}
+
+func (h *UserHandler) BatchMoveDepartment(c fiber.Ctx) error {
+	var req domain.BatchMoveDepartmentRequest
+	if err := bindBody(c, &req); err != nil {
+		return err
+	}
+	moved, err := h.userSvc.BatchMoveDepartment(c.Context(), req.UserIDs, req.TargetDeptID)
+	if err != nil {
+		return err
+	}
+	return response.Success(c, fiber.Map{"moved": moved})
 }
 
 func (h *UserHandler) GetByID(c fiber.Ctx) error {
@@ -145,7 +209,7 @@ func (h *UserHandler) UpdateMyPreferences(c fiber.Ctx) error {
 
 	var pref domain.UserPreferences
 	if err := c.Bind().Body(&pref); err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "偏好设置格式错误")
+		return errors.ErrParamInvalid.WithMessage("偏好设置格式错误")
 	}
 
 	if err := h.userSvc.UpdatePreferences(c.Context(), userCtx.UserID, pref); err != nil {

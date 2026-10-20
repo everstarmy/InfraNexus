@@ -36,11 +36,13 @@ type UpdateRoleRequest struct {
 type RoleRepository interface {
 	Repository[Role, uuid.UUID]
 	GetByCode(ctx context.Context, code string) (*Role, error)
+	ListAll(ctx context.Context) ([]Role, error)
 	AssignPermissions(ctx context.Context, roleID uuid.UUID, permissionIDs []uuid.UUID) error
 }
 
 type RoleService interface {
 	ListRoles(ctx context.Context, page, pageSize int) ([]Role, int64, error)
+	Options(ctx context.Context) ([]Role, error)
 	GetRole(ctx context.Context, id uuid.UUID) (*Role, error)
 	CreateRole(ctx context.Context, req CreateRoleRequest) (*Role, error)
 	UpdateRole(ctx context.Context, id uuid.UUID, req UpdateRoleRequest) (*Role, error)

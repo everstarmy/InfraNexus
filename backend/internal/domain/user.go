@@ -42,26 +42,64 @@ type User struct {
 }
 
 type UserFilter struct {
-	Page     int
-	PageSize int
-	Keyword  string
-	Status   *int
-	RoleID   *uuid.UUID
+	Page            int
+	PageSize        int
+	Keyword         string
+	Statuses        []int
+	AuthTypes       []string
+	RoleIDs         []uuid.UUID
+	DepartmentID    *uuid.UUID
+	IncludeChildren bool
+	NoDepartment    bool
+	DepartmentIDs   []uuid.UUID
+	Sort            string
 }
 
 type CreateUserRequest struct {
-	Username string      `json:"username" validate:"required,min=3,max=32"`
-	Email    string      `json:"email" validate:"required,email"`
-	Password string      `json:"password" validate:"required,min=6,max=64"`
-	Nickname string      `json:"nickname" validate:"max=64"`
-	RoleIDs  []uuid.UUID `json:"role_ids"`
+	Username     string      `json:"username" validate:"required,min=3,max=32"`
+	Email        string      `json:"email" validate:"required,email,max=128"`
+	Password     string      `json:"password" validate:"required,max=128"`
+	Nickname     string      `json:"nickname" validate:"max=64"`
+	DepartmentID *uuid.UUID  `json:"department_id"`
+	RoleIDs      []uuid.UUID `json:"role_ids" validate:"max=50"`
 }
 
 type UpdateUserRequest struct {
-	Nickname string      `json:"nickname" validate:"max=64"`
-	Avatar   string      `json:"avatar"`
-	Status   *int        `json:"status" validate:"omitempty,oneof=1 2"`
-	RoleIDs  []uuid.UUID `json:"role_ids"`
+	Nickname     string      `json:"nickname" validate:"max=64"`
+	Avatar       string      `json:"avatar" validate:"max=255"`
+	Email        *string     `json:"email" validate:"omitempty,email,max=128"`
+	Status       *int        `json:"status" validate:"omitempty,oneof=1 2"`
+	DepartmentID *uuid.UUID  `json:"department_id"`
+	RoleIDs      []uuid.UUID `json:"role_ids" validate:"max=50"`
+}
+
+type ResetPasswordRequest struct {
+	Password string `json:"password" validate:"required,max=128"`
+}
+
+type AssignRolesRequest struct {
+	RoleIDs []uuid.UUID `json:"role_ids" validate:"max=50"`
+}
+
+type BatchMoveDepartmentRequest struct {
+	UserIDs      []uuid.UUID `json:"user_ids" validate:"required,min=1,max=500"`
+	TargetDeptID uuid.UUID   `json:"target_dept_id" validate:"required"`
+}
+
+type DomainCount struct {
+	Domain   string `json:"domain"`
+	AuthType string `json:"auth_type"`
+	Count    int64  `json:"count"`
+}
+
+type UserStats struct {
+	Total      int64         `json:"total"`
+	Active     int64         `json:"active"`
+	Disabled   int64         `json:"disabled"`
+	Local      int64         `json:"local"`
+	Directory  int64         `json:"directory"`
+	Unassigned int64         `json:"unassigned"`
+	ByDomain   []DomainCount `json:"by_domain"`
 }
 
 type UserRepository interface {
@@ -69,15 +107,27 @@ type UserRepository interface {
 	Search(ctx context.Context, f UserFilter) ([]User, int64, error)
 	GetByUsername(ctx context.Context, authDomain, username string) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
+	GetByExternalID(ctx context.Context, authDomain, externalID string) (*User, error)
+	ListByDomain(ctx context.Context, authDomain string) ([]User, error)
+	FindByIDs(ctx context.Context, ids []uuid.UUID) ([]User, error)
 	AssignRoles(ctx context.Context, userID uuid.UUID, roleIDs []uuid.UUID) error
+	UpdateColumns(ctx context.Context, id uuid.UUID, values map[string]any) error
+	MoveToDepartment(ctx context.Context, userIDs []uuid.UUID, deptID uuid.UUID) (int64, error)
+	CountByDepartmentIDs(ctx context.Context, deptIDs []uuid.UUID) (int64, error)
+	MemberCounts(ctx context.Context) (map[uuid.UUID]int64, error)
+	Stats(ctx context.Context) (*UserStats, error)
 }
 
 type UserService interface {
 	ListUsers(ctx context.Context, f UserFilter) ([]User, int64, error)
 	GetUser(ctx context.Context, id uuid.UUID) (*User, error)
+	Stats(ctx context.Context) (*UserStats, error)
 	CreateUser(ctx context.Context, req CreateUserRequest) (*User, error)
 	UpdateUser(ctx context.Context, actorID, id uuid.UUID, req UpdateUserRequest) (*User, error)
 	DeleteUser(ctx context.Context, actorID, id uuid.UUID) error
 	ToggleStatus(ctx context.Context, actorID, id uuid.UUID, status int) error
+	ResetPassword(ctx context.Context, actorID, id uuid.UUID, password string) error
+	AssignRoles(ctx context.Context, actorID, id uuid.UUID, roleIDs []uuid.UUID) (*User, error)
+	BatchMoveDepartment(ctx context.Context, userIDs []uuid.UUID, deptID uuid.UUID) (int64, error)
 	UpdatePreferences(ctx context.Context, id uuid.UUID, pref UserPreferences) error
 }

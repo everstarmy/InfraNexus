@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -47,4 +48,44 @@ func pageParams(c fiber.Ctx, defaultSize int) (int, int) {
 		size = 100
 	}
 	return page, size
+}
+
+func queryStrings(c fiber.Ctx, key string) []string {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return nil
+	}
+	out := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func queryInts(c fiber.Ctx, key string) []int {
+	out := make([]int, 0)
+	for _, part := range queryStrings(c, key) {
+		if n, err := strconv.Atoi(part); err == nil {
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func queryUUIDs(c fiber.Ctx, key string) []uuid.UUID {
+	out := make([]uuid.UUID, 0)
+	for _, part := range queryStrings(c, key) {
+		if id, err := uuid.Parse(part); err == nil {
+			out = append(out, id)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

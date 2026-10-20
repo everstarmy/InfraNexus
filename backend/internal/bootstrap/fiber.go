@@ -8,7 +8,6 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/responsetime"
 
 	"infranexus/internal/core/errors"
-	"infranexus/internal/core/response"
 	"infranexus/internal/handler"
 	"infranexus/internal/middleware"
 	"infranexus/internal/repository"
@@ -44,70 +43,25 @@ func NewFiberApp(app *AppContainer) *fiber.App {
 	roleRepo := repository.NewRoleRepository(app.DB)
 	permRepo := repository.NewPermissionRepository(app.DB)
 
+	deptRepo := repository.NewDepartmentRepository(app.DB)
+
 	authRepo := repository.NewAuthRepository(app.Redis)
 	authSvc := service.NewAuthService(app.Config, userRepo, authRepo)
-	userSvc := service.NewUserService(userRepo, roleRepo)
+	userSvc := service.NewUserService(userRepo, roleRepo, deptRepo)
 	roleSvc := service.NewRoleService(roleRepo, permRepo, enforcer)
 	permSvc := service.NewPermissionService(permRepo)
+	deptSvc := service.NewDepartmentService(deptRepo, userRepo)
 
-	authHandler := handler.NewAuthHandler(app.Config, authSvc)
-	userHandler := handler.NewUserHandler(userSvc)
-	roleHandler := handler.NewRoleHandler(roleSvc, permSvc)
-
-	// 4. 路由注册
-	api := fiberApp.Group("/api/v1")
-
-	// 健康检查
-	api.Get("/health", func(c fiber.Ctx) error {
-		return response.Success(c, fiber.Map{
-			"status":  "ok",
-			"app":     app.Config.App.Name,
-			"env":     app.Config.App.Env,
-			"storage": app.Config.Storage.Driver,
-		})
+	registerRoutes(fiberApp, routeDeps{
+		cfg:         app.Config,
+		authSvc:     authSvc,
+		enforcer:    enforcer,
+		auth:        handler.NewAuthHandler(app.Config, authSvc),
+		users:       handler.NewUserHandler(userSvc),
+		roles:       handler.NewRoleHandler(roleSvc, permSvc),
+		departments: handler.NewDepartmentHandler(deptSvc),
+		options:     handler.NewOptionsHandler(roleSvc, deptSvc),
 	})
-
-	// 公开路由 (无需认证)
-	authPublic := api.Group("/auth")
-	authPublic.Post("/login", middleware.TrustedOrigin(app.Config.Security.TrustedOrigins), middleware.LoginRateLimit(app.Config.Security.LoginRateLimit), authHandler.Login)
-	authPublic.Post("/token", middleware.LoginRateLimit(app.Config.Security.LoginRateLimit), authHandler.Token)
-	authPublic.Post("/refresh", authHandler.Refresh)
-
-	// 保护路由组 (挂载双通道认证与 Casbin 权限中间件)
-	authRequired := api.Group("", middleware.DualAuth(authSvc, app.Config))
-
-	// 个人信息与会话注销
-	authRequired.Use(middleware.TrustedOrigin(app.Config.Security.TrustedOrigins))
-	authRequired.Post("/auth/logout", authHandler.Logout)
-	authRequired.Get("/auth/me", authHandler.Me)
-
-	// 实时推送通知
-	authRequired.Get("/sse/notifications", handler.StreamNotifications)
-
-	// 业务管理路由组 (受 Casbin RBAC 管控)
-	rbacGroup := authRequired.Group("", middleware.CasbinRBAC(enforcer))
-
-	// 用户管理
-	users := rbacGroup.Group("/users")
-	users.Get("", userHandler.List)
-	users.Post("", userHandler.Create)
-	users.Get("/:id", userHandler.GetByID)
-	users.Put("/:id", userHandler.Update)
-	users.Patch("/:id/status", userHandler.ToggleStatus)
-	users.Delete("/:id", userHandler.Delete)
-	users.Put("/me/preferences", userHandler.UpdateMyPreferences)
-
-	// 角色与权限管理
-	roles := rbacGroup.Group("/roles")
-	roles.Get("", roleHandler.List)
-	roles.Post("", roleHandler.Create)
-	roles.Get("/:id", roleHandler.GetByID)
-	roles.Put("/:id", roleHandler.Update)
-	roles.Delete("/:id", roleHandler.Delete)
-	roles.Post("/:id/permissions", roleHandler.AssignPermissions)
-
-	// 权限菜单树
-	rbacGroup.Get("/permissions", roleHandler.GetPermissionTree)
 
 	return fiberApp
 }

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"strings"
 
 	"github.com/google/uuid"
@@ -57,4 +58,60 @@ type DepartmentTreeDTO struct {
 	MemberCount      int64                `json:"member_count"`
 	TotalMemberCount int64                `json:"total_member_count"`
 	Children         []*DepartmentTreeDTO `json:"children"`
+}
+
+type CreateDepartmentRequest struct {
+	ParentID  *uuid.UUID `json:"parent_id"`
+	Name      string     `json:"name" validate:"required,min=1,max=64"`
+	Code      string     `json:"code" validate:"required,min=2,max=64,slug"`
+	SortOrder int        `json:"sort_order" validate:"min=0,max=100000"`
+	LeaderID  *uuid.UUID `json:"leader_id"`
+	Phone     string     `json:"phone" validate:"max=32"`
+	Email     string     `json:"email" validate:"omitempty,email,max=128"`
+	Status    int        `json:"status" validate:"omitempty,oneof=1 2"`
+}
+
+type UpdateDepartmentRequest struct {
+	Name      string     `json:"name" validate:"required,min=1,max=64"`
+	Code      string     `json:"code" validate:"required,min=2,max=64,slug"`
+	SortOrder int        `json:"sort_order" validate:"min=0,max=100000"`
+	LeaderID  *uuid.UUID `json:"leader_id"`
+	Phone     string     `json:"phone" validate:"max=32"`
+	Email     string     `json:"email" validate:"omitempty,email,max=128"`
+	Status    int        `json:"status" validate:"required,oneof=1 2"`
+}
+
+type MoveDepartmentRequest struct {
+	ParentID *uuid.UUID `json:"parent_id"`
+}
+
+type DepartmentOrder struct {
+	ID        uuid.UUID `json:"id" validate:"required"`
+	SortOrder int       `json:"sort_order" validate:"min=0,max=100000"`
+}
+
+type ReorderDepartmentsRequest struct {
+	Items []DepartmentOrder `json:"items" validate:"required,min=1,max=500,dive"`
+}
+
+type DepartmentRepository interface {
+	Repository[Department, uuid.UUID]
+	ListAll(ctx context.Context) ([]Department, error)
+	GetByCode(ctx context.Context, code string) (*Department, error)
+	GetByExternalID(ctx context.Context, source, externalID string) (*Department, error)
+	FindChildByName(ctx context.Context, parentID *uuid.UUID, name string) (*Department, error)
+	CountChildren(ctx context.Context, id uuid.UUID) (int64, error)
+	ListSubtree(ctx context.Context, treePath string) ([]Department, error)
+	Move(ctx context.Context, id uuid.UUID, parentID *uuid.UUID, oldPath, newPath string) error
+	Reorder(ctx context.Context, items []DepartmentOrder) error
+}
+
+type DepartmentService interface {
+	Tree(ctx context.Context) ([]*DepartmentTreeDTO, error)
+	Get(ctx context.Context, id uuid.UUID) (*Department, error)
+	Create(ctx context.Context, req CreateDepartmentRequest) (*Department, error)
+	Update(ctx context.Context, id uuid.UUID, req UpdateDepartmentRequest) (*Department, error)
+	Move(ctx context.Context, id uuid.UUID, parentID *uuid.UUID) (*Department, error)
+	Reorder(ctx context.Context, items []DepartmentOrder) error
+	Delete(ctx context.Context, id uuid.UUID) error
 }

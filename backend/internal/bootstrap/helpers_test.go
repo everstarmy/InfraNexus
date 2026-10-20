@@ -2,11 +2,15 @@ package bootstrap
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/golang-jwt/jwt/v5"
 
 	"infranexus/internal/core/response"
+	"infranexus/internal/service"
 )
 
 type apiResult struct {
@@ -63,4 +67,19 @@ func expectCode(t *testing.T, r apiResult, status int, code response.BusinessCod
 	if r.Status != status || r.Code != code {
 		t.Fatalf("want %d/%d, got %d/%d: %s", status, code, r.Status, r.Code, r.Message)
 	}
+}
+
+func forgeIssuedAt(t *testing.T, container *AppContainer, bearer string, issuedAt time.Time) string {
+	t.Helper()
+	var claims service.JWTClaims
+	raw := strings.TrimPrefix(bearer, "Bearer ")
+	if _, err := jwt.ParseWithClaims(raw, &claims, func(*jwt.Token) (any, error) { return []byte(container.Config.JWT.Secret), nil }); err != nil {
+		t.Fatal(err)
+	}
+	claims.IssuedAt = jwt.NewNumericDate(issuedAt)
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(container.Config.JWT.Secret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "Bearer " + signed
 }

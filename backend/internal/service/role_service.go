@@ -28,6 +28,10 @@ func (s *roleService) ListRoles(ctx context.Context, page, pageSize int) ([]doma
 	return s.roleRepo.List(ctx, page, pageSize, nil)
 }
 
+func (s *roleService) Options(ctx context.Context) ([]domain.Role, error) {
+	return s.roleRepo.ListAll(ctx)
+}
+
 func (s *roleService) GetRole(ctx context.Context, id uuid.UUID) (*domain.Role, error) {
 	role, err := s.roleRepo.GetByID(ctx, id)
 	if err != nil {

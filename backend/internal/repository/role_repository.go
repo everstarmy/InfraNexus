@@ -66,6 +66,12 @@ func (r *roleRepository) List(ctx context.Context, page, pageSize int, filters m
 	return roles, total, nil
 }
 
+func (r *roleRepository) ListAll(ctx context.Context) ([]domain.Role, error) {
+	var roles []domain.Role
+	err := r.DB(ctx).Order("built_in DESC, created_at ASC").Find(&roles).Error
+	return roles, err
+}
+
 func (r *roleRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("DELETE FROM sys_user_roles WHERE role_id = ?", id).Error; err != nil {

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -19,9 +20,13 @@ func NewUserRepository(db *gorm.DB) domain.UserRepository {
 	}
 }
 
+func (r *userRepository) withRelations(ctx context.Context) *gorm.DB {
+	return r.DB(ctx).Preload("Roles").Preload("Department")
+}
+
 func (r *userRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	var user domain.User
-	if err := r.DB(ctx).Preload("Roles").First(&user, "id = ?", id).Error; err != nil {
+	if err := r.withRelations(ctx).First(&user, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
 	return &user, nil
@@ -29,7 +34,7 @@ func (r *userRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 
 func (r *userRepository) GetByUsername(ctx context.Context, authDomain, username string) (*domain.User, error) {
 	var user domain.User
-	if err := r.DB(ctx).Preload("Roles").First(&user, "domain = ? AND username = ?", authDomain, username).Error; err != nil {
+	if err := r.withRelations(ctx).First(&user, "domain = ? AND username = ?", authDomain, username).Error; err != nil {
 		return nil, err
 	}
 	return &user, nil
@@ -37,10 +42,54 @@ func (r *userRepository) GetByUsername(ctx context.Context, authDomain, username
 
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
 	var user domain.User
-	if err := r.DB(ctx).Preload("Roles").First(&user, "email = ?", email).Error; err != nil {
+	if err := r.withRelations(ctx).First(&user, "email = ?", email).Error; err != nil {
 		return nil, err
 	}
 	return &user, nil
+}
+
+func (r *userRepository) GetByExternalID(ctx context.Context, authDomain, externalID string) (*domain.User, error) {
+	var user domain.User
+	if err := r.withRelations(ctx).First(&user, "domain = ? AND external_id = ?", authDomain, externalID).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *userRepository) ListByDomain(ctx context.Context, authDomain string) ([]domain.User, error) {
+	var users []domain.User
+	err := r.DB(ctx).Where("domain = ?", authDomain).Find(&users).Error
+	return users, err
+}
+
+func (r *userRepository) FindByIDs(ctx context.Context, ids []uuid.UUID) ([]domain.User, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var users []domain.User
+	err := r.DB(ctx).Where("id IN ?", ids).Find(&users).Error
+	return users, err
+}
+
+var userSortColumns = map[string]string{
+	"username":      "users.username",
+	"nickname":      "users.nickname",
+	"email":         "users.email",
+	"status":        "users.status",
+	"created_at":    "users.created_at",
+	"last_login_at": "users.last_login_at",
+}
+
+func userOrder(sort string) string {
+	key, dir, _ := strings.Cut(sort, ":")
+	column, ok := userSortColumns[key]
+	if !ok {
+		return "users.created_at DESC, users.id ASC"
+	}
+	if strings.EqualFold(dir, "asc") {
+		return column + " ASC, users.id ASC"
+	}
+	return column + " DESC, users.id ASC"
 }
 
 func (r *userRepository) Search(ctx context.Context, f domain.UserFilter) ([]domain.User, int64, error) {
@@ -53,13 +102,22 @@ func (r *userRepository) Search(ctx context.Context, f domain.UserFilter) ([]dom
 		likePattern := "%" + f.Keyword + "%"
 		query = query.Where("users.username LIKE ? OR users.email LIKE ? OR users.nickname LIKE ?", likePattern, likePattern, likePattern)
 	}
-
-	if f.Status != nil && *f.Status != 0 {
-		query = query.Where("users.status = ?", *f.Status)
+	if len(f.Statuses) > 0 {
+		query = query.Where("users.status IN ?", f.Statuses)
 	}
-
-	if f.RoleID != nil && *f.RoleID != uuid.Nil {
-		query = query.Where("EXISTS (SELECT 1 FROM sys_user_roles ur WHERE ur.user_id = users.id AND ur.role_id = ?)", *f.RoleID)
+	if len(f.AuthTypes) > 0 {
+		query = query.Where("users.auth_type IN ?", f.AuthTypes)
+	}
+	if len(f.RoleIDs) > 0 {
+		query = query.Where("EXISTS (SELECT 1 FROM sys_user_roles ur WHERE ur.user_id = users.id AND ur.role_id IN ?)", f.RoleIDs)
+	}
+	switch {
+	case f.NoDepartment:
+		query = query.Where("users.department_id IS NULL")
+	case f.DepartmentIDs != nil && len(f.DepartmentIDs) == 0:
+		query = query.Where("1 = 0")
+	case f.DepartmentIDs != nil:
+		query = query.Where("users.department_id IN ?", f.DepartmentIDs)
 	}
 
 	if err := query.Count(&total).Error; err != nil {
@@ -70,7 +128,7 @@ func (r *userRepository) Search(ctx context.Context, f domain.UserFilter) ([]dom
 		query = query.Offset((f.Page - 1) * f.PageSize).Limit(f.PageSize)
 	}
 
-	if err := query.Preload("Roles").Order("users.created_at DESC").Find(&users).Error; err != nil {
+	if err := query.Preload("Roles").Preload("Department").Order(userOrder(f.Sort)).Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -93,4 +151,87 @@ func (r *userRepository) AssignRoles(ctx context.Context, userID uuid.UUID, role
 
 		return tx.Model(&user).Association("Roles").Replace(roles)
 	})
+}
+
+func (r *userRepository) UpdateColumns(ctx context.Context, id uuid.UUID, values map[string]any) error {
+	return r.DB(ctx).Model(&domain.User{}).Where("id = ?", id).Updates(values).Error
+}
+
+func (r *userRepository) MoveToDepartment(ctx context.Context, userIDs []uuid.UUID, deptID uuid.UUID) (int64, error) {
+	var moved int64
+	err := r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&domain.User{}).Where("id IN ?", userIDs).Update("department_id", deptID)
+		moved = result.RowsAffected
+		return result.Error
+	})
+	return moved, err
+}
+
+func (r *userRepository) CountByDepartmentIDs(ctx context.Context, deptIDs []uuid.UUID) (int64, error) {
+	if len(deptIDs) == 0 {
+		return 0, nil
+	}
+	var count int64
+	err := r.DB(ctx).Model(&domain.User{}).Where("department_id IN ?", deptIDs).Count(&count).Error
+	return count, err
+}
+
+func (r *userRepository) MemberCounts(ctx context.Context) (map[uuid.UUID]int64, error) {
+	var rows []struct {
+		DepartmentID uuid.UUID
+		Count        int64
+	}
+	err := r.DB(ctx).Model(&domain.User{}).
+		Select("department_id, COUNT(*) AS count").
+		Where("department_id IS NOT NULL").
+		Group("department_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[uuid.UUID]int64, len(rows))
+	for _, row := range rows {
+		counts[row.DepartmentID] = row.Count
+	}
+	return counts, nil
+}
+
+func (r *userRepository) Stats(ctx context.Context) (*domain.UserStats, error) {
+	var totals struct {
+		Total      int64
+		Active     int64
+		Disabled   int64
+		Local      int64
+		Directory  int64
+		Unassigned int64
+	}
+	err := r.DB(ctx).Model(&domain.User{}).Select(`COUNT(*) AS total,
+		COALESCE(SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END), 0) AS active,
+		COALESCE(SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END), 0) AS disabled,
+		COALESCE(SUM(CASE WHEN auth_type = 'local' THEN 1 ELSE 0 END), 0) AS local,
+		COALESCE(SUM(CASE WHEN auth_type <> 'local' THEN 1 ELSE 0 END), 0) AS directory,
+		COALESCE(SUM(CASE WHEN department_id IS NULL THEN 1 ELSE 0 END), 0) AS unassigned`).
+		Scan(&totals).Error
+	if err != nil {
+		return nil, err
+	}
+	stats := domain.UserStats{
+		Total:      totals.Total,
+		Active:     totals.Active,
+		Disabled:   totals.Disabled,
+		Local:      totals.Local,
+		Directory:  totals.Directory,
+		Unassigned: totals.Unassigned,
+		ByDomain:   []domain.DomainCount{},
+	}
+	err = r.DB(ctx).Model(&domain.User{}).
+		Select("domain, auth_type, COUNT(*) AS count").
+		Where("auth_type <> ?", domain.AuthTypeLocal).
+		Group("domain, auth_type").
+		Order("count DESC").
+		Scan(&stats.ByDomain).Error
+	if err != nil {
+		return nil, err
+	}
+	return &stats, nil
 }
