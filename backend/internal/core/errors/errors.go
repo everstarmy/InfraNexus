@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/gofiber/fiber/v3"
+	"gorm.io/gorm"
 
 	"infranexus/internal/core/response"
 )
@@ -12,6 +13,7 @@ type DomainError struct {
 	HTTPStatus int
 	BizCode    response.BusinessCode
 	Message    string
+	Data       any
 	Err        error
 }
 
@@ -24,6 +26,18 @@ func (e *DomainError) Error() string {
 
 func (e *DomainError) Unwrap() error {
 	return e.Err
+}
+
+func (e *DomainError) WithData(data any) *DomainError {
+	clone := *e
+	clone.Data = data
+	return &clone
+}
+
+func (e *DomainError) WithMessage(message string) *DomainError {
+	clone := *e
+	clone.Message = message
+	return &clone
 }
 
 func NewDomainError(httpStatus int, bizCode response.BusinessCode, message string, err ...error) *DomainError {
@@ -43,8 +57,11 @@ func NewDomainError(httpStatus int, bizCode response.BusinessCode, message strin
 var (
 	ErrUnauthorized        = NewDomainError(fiber.StatusUnauthorized, response.CodeTokenExpired, "认证凭据无效或已过期")
 	ErrInvalidCredentials  = NewDomainError(fiber.StatusUnauthorized, response.CodeInvalidCredentials, "用户名或密码错误")
+	ErrParamInvalid        = NewDomainError(fiber.StatusBadRequest, response.CodeParamInvalid, "请求参数校验失败")
 	ErrPermissionDenied    = NewDomainError(fiber.StatusForbidden, response.CodePermissionDenied, "没有权限执行该操作")
 	ErrAccountDisabled     = NewDomainError(fiber.StatusForbidden, response.CodeAccountDisabled, "账号已被停用，请联系管理员")
+	ErrBuiltinProtected    = NewDomainError(fiber.StatusForbidden, response.CodeBuiltinProtected, "内置资源受保护，不允许该操作")
+	ErrSelfOperationDenied = NewDomainError(fiber.StatusForbidden, response.CodeSelfOperationDenied, "不能对当前登录账号执行该操作")
 	ErrUserNotFound        = NewDomainError(fiber.StatusNotFound, response.CodeUserNotFound, "目标用户不存在")
 	ErrRoleNotFound        = NewDomainError(fiber.StatusNotFound, response.CodeRoleNotFound, "目标角色不存在")
 	ErrResourceConflict    = NewDomainError(fiber.StatusConflict, response.CodeResourceConflict, "资源已存在或唯一性冲突")
@@ -55,12 +72,16 @@ var (
 func GlobalErrorHandler(c fiber.Ctx, err error) error {
 	var domainErr *DomainError
 	if errors.As(err, &domainErr) {
-		return response.Error(c, domainErr.HTTPStatus, domainErr.BizCode, domainErr.Message)
+		return response.Error(c, domainErr.HTTPStatus, domainErr.BizCode, domainErr.Message, domainErr.Data)
+	}
+
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return response.Error(c, ErrResourceConflict.HTTPStatus, ErrResourceConflict.BizCode, ErrResourceConflict.Message)
 	}
 
 	var fiberErr *fiber.Error
 	if errors.As(err, &fiberErr) {
-		return response.Error(c, fiberErr.Code, response.CodeInternalError, fiberErr.Message)
+		return response.Error(c, fiberErr.Code, response.BusinessCode(fiberErr.Code*1000), fiberErr.Message)
 	}
 
 	// 未知错误

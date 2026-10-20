@@ -24,30 +24,33 @@ func (r *permissionRepository) GetTree(ctx context.Context) ([]domain.Permission
 	if err := r.DB(ctx).Order("sort_order ASC, created_at ASC").Find(&allPerms).Error; err != nil {
 		return nil, err
 	}
+	return BuildPermissionTree(allPerms), nil
+}
 
-	// 内存中构建树形结构
-	permMap := make(map[uuid.UUID]*domain.Permission)
-	var rootPerms []domain.Permission
-
-	for i := range allPerms {
-		p := allPerms[i]
-		p.Children = make([]domain.Permission, 0)
-		permMap[p.ID] = &p
+func BuildPermissionTree(ordered []domain.Permission) []domain.Permission {
+	known := make(map[uuid.UUID]bool, len(ordered))
+	for _, p := range ordered {
+		known[p.ID] = true
 	}
-
-	for _, p := range permMap {
-		if p.ParentID == nil || *p.ParentID == uuid.Nil {
-			rootPerms = append(rootPerms, *p)
-		} else {
-			if parent, exists := permMap[*p.ParentID]; exists {
-				parent.Children = append(parent.Children, *p)
-			} else {
-				rootPerms = append(rootPerms, *p)
-			}
+	children := make(map[uuid.UUID][]domain.Permission)
+	roots := make([]domain.Permission, 0)
+	for _, p := range ordered {
+		if p.ParentID == nil || *p.ParentID == uuid.Nil || !known[*p.ParentID] {
+			roots = append(roots, p)
+			continue
 		}
+		children[*p.ParentID] = append(children[*p.ParentID], p)
 	}
-
-	return rootPerms, nil
+	var attach func(nodes []domain.Permission) []domain.Permission
+	attach = func(nodes []domain.Permission) []domain.Permission {
+		out := make([]domain.Permission, len(nodes))
+		for i, node := range nodes {
+			node.Children = attach(children[node.ID])
+			out[i] = node
+		}
+		return out
+	}
+	return attach(roots)
 }
 
 func (r *permissionRepository) GetByRoleID(ctx context.Context, roleID uuid.UUID) ([]domain.Permission, error) {

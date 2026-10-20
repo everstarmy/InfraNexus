@@ -66,6 +66,18 @@ func (r *roleRepository) List(ctx context.Context, page, pageSize int, filters m
 	return roles, total, nil
 }
 
+func (r *roleRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DELETE FROM sys_user_roles WHERE role_id = ?", id).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DELETE FROM sys_role_permissions WHERE role_id = ?", id).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&domain.Role{}, "id = ?", id).Error
+	})
+}
+
 func (r *roleRepository) AssignPermissions(ctx context.Context, roleID uuid.UUID, permissionIDs []uuid.UUID) error {
 	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
 		var role domain.Role

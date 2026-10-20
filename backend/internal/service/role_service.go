@@ -6,7 +6,7 @@ import (
 	"github.com/casbin/casbin/v3"
 	"github.com/google/uuid"
 
-	"infranexus/internal/core/errors"
+	coreerrors "infranexus/internal/core/errors"
 	"infranexus/internal/domain"
 )
 
@@ -28,21 +28,60 @@ func (s *roleService) ListRoles(ctx context.Context, page, pageSize int) ([]doma
 	return s.roleRepo.List(ctx, page, pageSize, nil)
 }
 
-func (s *roleService) CreateRole(ctx context.Context, role *domain.Role) error {
-	if existing, _ := s.roleRepo.GetByCode(ctx, role.Code); existing != nil {
-		return errors.NewDomainError(409, 409001, "角色代码已存在")
+func (s *roleService) GetRole(ctx context.Context, id uuid.UUID) (*domain.Role, error) {
+	role, err := s.roleRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, notFoundAs(err, coreerrors.ErrRoleNotFound)
 	}
-	return s.roleRepo.Create(ctx, role)
+	return role, nil
 }
 
-func (s *roleService) UpdateRole(ctx context.Context, role *domain.Role) error {
-	return s.roleRepo.Update(ctx, role)
+func (s *roleService) CreateRole(ctx context.Context, req domain.CreateRoleRequest) (*domain.Role, error) {
+	if existing, _ := s.roleRepo.GetByCode(ctx, req.Code); existing != nil {
+		return nil, coreerrors.ErrResourceConflict.WithMessage("角色代码已存在")
+	}
+	role := domain.Role{
+		Code:        req.Code,
+		Name:        req.Name,
+		Description: req.Description,
+		Status:      domain.StatusEnabled,
+	}
+	if err := s.roleRepo.Create(ctx, &role); err != nil {
+		return nil, err
+	}
+	return &role, nil
+}
+
+func (s *roleService) UpdateRole(ctx context.Context, id uuid.UUID, req domain.UpdateRoleRequest) (*domain.Role, error) {
+	role, err := s.GetRole(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if req.Status != nil {
+		if role.BuiltIn && *req.Status != domain.StatusEnabled {
+			return nil, coreerrors.ErrBuiltinProtected.WithMessage("内置角色不可停用")
+		}
+		role.Status = *req.Status
+	}
+	if req.Name != nil {
+		role.Name = *req.Name
+	}
+	if req.Description != nil {
+		role.Description = *req.Description
+	}
+	if err := s.roleRepo.Update(ctx, role); err != nil {
+		return nil, err
+	}
+	return role, nil
 }
 
 func (s *roleService) DeleteRole(ctx context.Context, id uuid.UUID) error {
-	role, err := s.roleRepo.GetByID(ctx, id)
+	role, err := s.GetRole(ctx, id)
 	if err != nil {
-		return errors.ErrRoleNotFound
+		return err
+	}
+	if role.BuiltIn {
+		return coreerrors.ErrBuiltinProtected.WithMessage("内置角色不可删除")
 	}
 
 	// 从 Casbin 移除策略
@@ -55,9 +94,9 @@ func (s *roleService) DeleteRole(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *roleService) AssignPermissions(ctx context.Context, roleID uuid.UUID, permissionIDs []uuid.UUID) error {
-	role, err := s.roleRepo.GetByID(ctx, roleID)
+	role, err := s.GetRole(ctx, roleID)
 	if err != nil {
-		return errors.ErrRoleNotFound
+		return err
 	}
 
 	if err := s.roleRepo.AssignPermissions(ctx, roleID, permissionIDs); err != nil {

@@ -8,7 +8,6 @@ import (
 	"infranexus/internal/config"
 	coreerrors "infranexus/internal/core/errors"
 	"infranexus/internal/core/response"
-	"infranexus/internal/core/validator"
 	"infranexus/internal/domain"
 	"infranexus/internal/middleware"
 )
@@ -32,10 +31,7 @@ type LoginResponse struct {
 
 func (h *AuthHandler) Login(c fiber.Ctx) error {
 	var req LoginRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return response.Error(c, 400, response.CodeParamInvalid, "请求数据格式错误")
-	}
-	if err := validator.ValidateRequest(c, req); err != nil {
+	if err := bindBody(c, &req); err != nil {
 		return err
 	}
 	user, sess, err := h.authSvc.Login(c.Context(), req.Username, req.Password, c.Cookies(h.cfg.Session.CookieName))
@@ -47,10 +43,7 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 }
 func (h *AuthHandler) Token(c fiber.Ctx) error {
 	var req LoginRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return response.Error(c, 400, response.CodeParamInvalid, "请求数据格式错误")
-	}
-	if err := validator.ValidateRequest(c, req); err != nil {
+	if err := bindBody(c, &req); err != nil {
 		return err
 	}
 	tokens, err := h.authSvc.IssueTokens(c.Context(), req.Username, req.Password)

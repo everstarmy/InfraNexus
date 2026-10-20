@@ -25,7 +25,8 @@ func InitDatabase(cfg *config.Config, log *slog.Logger) (*gorm.DB, error) {
 	}
 
 	gormConfig := &gorm.Config{
-		Logger: gormlogger.Default.LogMode(logMode),
+		Logger:         gormlogger.Default.LogMode(logMode),
+		TranslateError: true,
 	}
 
 	switch cfg.Database.Driver {

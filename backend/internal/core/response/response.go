@@ -11,19 +11,21 @@ import (
 type BusinessCode int
 
 const (
-	CodeSuccess            BusinessCode = 200000 // 成功
-	CodeParamInvalid       BusinessCode = 400001 // 请求参数错误
-	CodeTokenExpired       BusinessCode = 401001 // 会话或Token过期
-	CodeInvalidCredentials BusinessCode = 401002 // 账号或密码错误
-	CodeSessionRevoked     BusinessCode = 401003 // 会话已被注销
-	CodePermissionDenied   BusinessCode = 403001 // 权限不足 (Casbin拦截)
-	CodeAccountDisabled    BusinessCode = 403002 // 账号已被禁用
-	CodeUserNotFound       BusinessCode = 404001 // 用户未找到
-	CodeRoleNotFound       BusinessCode = 404002 // 角色未找到
-	CodeResourceConflict   BusinessCode = 409001
-	CodeRateLimited        BusinessCode = 429001 // 唯一约束冲突
-	CodeDatabaseError      BusinessCode = 500001 // 数据库异常
-	CodeInternalError      BusinessCode = 500002 // 系统未知故障
+	CodeSuccess             BusinessCode = 200000 // 成功
+	CodeParamInvalid        BusinessCode = 400001 // 请求参数错误
+	CodeTokenExpired        BusinessCode = 401001 // 会话或Token过期
+	CodeInvalidCredentials  BusinessCode = 401002 // 账号或密码错误
+	CodeSessionRevoked      BusinessCode = 401003 // 会话已被注销
+	CodePermissionDenied    BusinessCode = 403001 // 权限不足 (Casbin拦截)
+	CodeAccountDisabled     BusinessCode = 403002 // 账号已被禁用
+	CodeBuiltinProtected    BusinessCode = 403003 // 内置资源受保护
+	CodeSelfOperationDenied BusinessCode = 403004 // 不能对当前登录账号执行该操作
+	CodeUserNotFound        BusinessCode = 404001 // 用户未找到
+	CodeRoleNotFound        BusinessCode = 404002 // 角色未找到
+	CodeResourceConflict    BusinessCode = 409001 // 唯一约束冲突
+	CodeRateLimited         BusinessCode = 429001 // 请求过于频繁
+	CodeDatabaseError       BusinessCode = 500001 // 数据库异常
+	CodeInternalError       BusinessCode = 500002 // 系统未知故障
 )
 
 // Envelope 统一泛型响应外壳 (Go 1.27+)

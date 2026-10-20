@@ -1,33 +1,27 @@
 package handler
 
 import (
-	"strconv"
-
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
-	"infranexus/internal/core/errors"
 	"infranexus/internal/core/response"
 	"infranexus/internal/domain"
 )
 
 type RoleHandler struct {
-	roleSvc  domain.RoleService
-	roleRepo domain.RoleRepository
-	permRepo domain.PermissionRepository
+	roleSvc domain.RoleService
+	permSvc domain.PermissionService
 }
 
-func NewRoleHandler(roleSvc domain.RoleService, roleRepo domain.RoleRepository, permRepo domain.PermissionRepository) *RoleHandler {
+func NewRoleHandler(roleSvc domain.RoleService, permSvc domain.PermissionService) *RoleHandler {
 	return &RoleHandler{
-		roleSvc:  roleSvc,
-		roleRepo: roleRepo,
-		permRepo: permRepo,
+		roleSvc: roleSvc,
+		permSvc: permSvc,
 	}
 }
 
 func (h *RoleHandler) List(c fiber.Ctx) error {
-	page, _ := strconv.Atoi(c.Query("page", "1"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size", "50"))
+	page, pageSize := pageParams(c, 50)
 
 	roles, total, err := h.roleSvc.ListRoles(c.Context(), page, pageSize)
 	if err != nil {
@@ -38,80 +32,46 @@ func (h *RoleHandler) List(c fiber.Ctx) error {
 }
 
 func (h *RoleHandler) GetByID(c fiber.Ctx) error {
-	idStr := c.Params("id")
-	id, err := uuid.Parse(idStr)
+	id, err := parseIDParam(c)
 	if err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "非法的 UUID 格式")
+		return err
 	}
 
-	role, err := h.roleRepo.GetByID(c.Context(), id)
+	role, err := h.roleSvc.GetRole(c.Context(), id)
 	if err != nil {
-		return errors.ErrRoleNotFound
-	}
-
-	return response.Success(c, role)
-}
-
-type CreateRoleRequest struct {
-	Code        string `json:"code" validate:"required,min=2,max=32"`
-	Name        string `json:"name" validate:"required,min=2,max=64"`
-	Description string `json:"description"`
-}
-
-func (h *RoleHandler) Create(c fiber.Ctx) error {
-	var req CreateRoleRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "请求体格式错误")
-	}
-
-	role := domain.Role{
-		Code:        req.Code,
-		Name:        req.Name,
-		Description: req.Description,
-		Status:      1,
-	}
-
-	if err := h.roleSvc.CreateRole(c.Context(), &role); err != nil {
 		return err
 	}
 
 	return response.Success(c, role)
 }
 
-type UpdateRoleRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Status      *int   `json:"status"`
+func (h *RoleHandler) Create(c fiber.Ctx) error {
+	var req domain.CreateRoleRequest
+	if err := bindBody(c, &req); err != nil {
+		return err
+	}
+
+	role, err := h.roleSvc.CreateRole(c.Context(), req)
+	if err != nil {
+		return err
+	}
+
+	return response.Success(c, role)
 }
 
 func (h *RoleHandler) Update(c fiber.Ctx) error {
-	idStr := c.Params("id")
-	id, err := uuid.Parse(idStr)
+	id, err := parseIDParam(c)
 	if err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "非法的 UUID 格式")
+		return err
 	}
 
-	role, err := h.roleRepo.GetByID(c.Context(), id)
+	var req domain.UpdateRoleRequest
+	if err := bindBody(c, &req); err != nil {
+		return err
+	}
+
+	role, err := h.roleSvc.UpdateRole(c.Context(), id, req)
 	if err != nil {
-		return errors.ErrRoleNotFound
-	}
-
-	var req UpdateRoleRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "请求体格式错误")
-	}
-
-	if req.Name != "" {
-		role.Name = req.Name
-	}
-	if req.Description != "" {
-		role.Description = req.Description
-	}
-	if req.Status != nil {
-		role.Status = *req.Status
-	}
-
-	if err := h.roleSvc.UpdateRole(c.Context(), role); err != nil {
 		return err
 	}
 
@@ -119,10 +79,9 @@ func (h *RoleHandler) Update(c fiber.Ctx) error {
 }
 
 func (h *RoleHandler) Delete(c fiber.Ctx) error {
-	idStr := c.Params("id")
-	id, err := uuid.Parse(idStr)
+	id, err := parseIDParam(c)
 	if err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "非法的 UUID 格式")
+		return err
 	}
 
 	if err := h.roleSvc.DeleteRole(c.Context(), id); err != nil {
@@ -137,15 +96,14 @@ type AssignPermissionsRequest struct {
 }
 
 func (h *RoleHandler) AssignPermissions(c fiber.Ctx) error {
-	idStr := c.Params("id")
-	id, err := uuid.Parse(idStr)
+	id, err := parseIDParam(c)
 	if err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "非法的 UUID 格式")
+		return err
 	}
 
 	var req AssignPermissionsRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return response.Error(c, fiber.StatusBadRequest, response.CodeParamInvalid, "请求体格式错误")
+	if err := bindBody(c, &req); err != nil {
+		return err
 	}
 
 	if err := h.roleSvc.AssignPermissions(c.Context(), id, req.PermissionIDs); err != nil {
@@ -156,7 +114,7 @@ func (h *RoleHandler) AssignPermissions(c fiber.Ctx) error {
 }
 
 func (h *RoleHandler) GetPermissionTree(c fiber.Ctx) error {
-	tree, err := h.permRepo.GetTree(c.Context())
+	tree, err := h.permSvc.Tree(c.Context())
 	if err != nil {
 		return err
 	}

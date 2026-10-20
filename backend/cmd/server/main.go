@@ -10,7 +10,6 @@ import (
 	"infranexus/internal/bootstrap"
 	"infranexus/internal/config"
 	"infranexus/internal/core/logger"
-	"infranexus/internal/domain"
 )
 
 func main() {
@@ -30,12 +29,12 @@ func main() {
 	defer container.Close()
 
 	// 4. 自动数据库表结构迁移 (兼容 SQLite 与 PostgreSQL)
-	if err := container.DB.AutoMigrate(
-		&domain.User{},
-		&domain.Role{},
-		&domain.Permission{},
-	); err != nil {
+	if err := bootstrap.Migrate(container.DB); err != nil {
 		log.Error("Database automigration failed", "error", err)
+		os.Exit(1)
+	}
+	if err := bootstrap.Seed(container.DB, log); err != nil {
+		log.Error("Database seeding failed", "error", err)
 		os.Exit(1)
 	}
 

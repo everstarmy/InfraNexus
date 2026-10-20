@@ -16,7 +16,6 @@ import (
 
 	"infranexus/internal/config"
 	"infranexus/internal/core/response"
-	"infranexus/internal/domain"
 )
 
 func setupTestApp(t *testing.T) (*AppContainer, *fiber.App, func()) {
@@ -68,12 +67,11 @@ func setupTestApp(t *testing.T) (*AppContainer, *fiber.App, func()) {
 	}
 
 	// 迁移数据库
-	if err := container.DB.AutoMigrate(
-		&domain.User{},
-		&domain.Role{},
-		&domain.Permission{},
-	); err != nil {
-		t.Fatalf("AutoMigrate failed: %v", err)
+	if err := Migrate(container.DB); err != nil {
+		t.Fatalf("Migrate failed: %v", err)
+	}
+	if err := Seed(container.DB, logger); err != nil {
+		t.Fatalf("Seed failed: %v", err)
 	}
 
 	fiberApp := NewFiberApp(container)

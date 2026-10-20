@@ -1,20 +1,14 @@
 package bootstrap
 
 import (
-	"context"
-
-	"github.com/casbin/casbin/v3"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 	"github.com/gofiber/fiber/v3/middleware/responsetime"
-	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 
 	"infranexus/internal/core/errors"
 	"infranexus/internal/core/response"
-	"infranexus/internal/domain"
 	"infranexus/internal/handler"
 	"infranexus/internal/middleware"
 	"infranexus/internal/repository"
@@ -52,17 +46,15 @@ func NewFiberApp(app *AppContainer) *fiber.App {
 
 	authRepo := repository.NewAuthRepository(app.Redis)
 	authSvc := service.NewAuthService(app.Config, userRepo, authRepo)
-	userSvc := service.NewUserService(userRepo)
+	userSvc := service.NewUserService(userRepo, roleRepo)
 	roleSvc := service.NewRoleService(roleRepo, permRepo, enforcer)
+	permSvc := service.NewPermissionService(permRepo)
 
 	authHandler := handler.NewAuthHandler(app.Config, authSvc)
-	userHandler := handler.NewUserHandler(userSvc, userRepo)
-	roleHandler := handler.NewRoleHandler(roleSvc, roleRepo, permRepo)
+	userHandler := handler.NewUserHandler(userSvc)
+	roleHandler := handler.NewRoleHandler(roleSvc, permSvc)
 
-	// 4. 自动种子数据预热
-	seedInitialData(app, userRepo, roleRepo, permRepo, enforcer)
-
-	// 5. 路由注册
+	// 4. 路由注册
 	api := fiberApp.Group("/api/v1")
 
 	// 健康检查
@@ -118,39 +110,4 @@ func NewFiberApp(app *AppContainer) *fiber.App {
 	rbacGroup.Get("/permissions", roleHandler.GetPermissionTree)
 
 	return fiberApp
-}
-
-func seedInitialData(app *AppContainer, userRepo domain.UserRepository, roleRepo domain.RoleRepository, permRepo domain.PermissionRepository, enforcer *casbin.Enforcer) {
-	ctx := context.Background()
-
-	// 1. 确保初始化管理员角色
-	adminRole, err := roleRepo.GetByCode(ctx, "admin")
-	if err != nil || adminRole == nil {
-		role := domain.Role{
-			Code:        "admin",
-			Name:        "超级管理员",
-			Description: "拥有平台所有最高管理权限",
-			Status:      1,
-		}
-		_ = roleRepo.Create(ctx, &role)
-		adminRole = &role
-		app.Logger.Info("Seeded default admin role")
-	}
-
-	// 2. 确保初始化管理员账号
-	adminUser, err := userRepo.GetByUsername(ctx, "admin")
-	if err != nil || adminUser == nil {
-		hashPassword, _ := bcrypt.GenerateFromPassword([]byte("admin123456"), bcrypt.DefaultCost)
-		user := domain.User{
-			Username: "admin",
-			Email:    "admin@infranexus.com",
-			Password: string(hashPassword),
-			Nickname: "系统管理员",
-			Status:   1,
-		}
-		if err := userRepo.Create(ctx, &user); err == nil {
-			_ = userRepo.AssignRoles(ctx, user.ID, []uuid.UUID{adminRole.ID})
-			app.Logger.Info("Seeded default admin user (admin / admin123456)")
-		}
-	}
 }

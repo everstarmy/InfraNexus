@@ -50,6 +50,7 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { Kbd } from "@/components/ui/kbd";
+import { setTheme } from "@/lib/theme";
 
 interface HeaderProps {
   currentUser?: {
@@ -87,13 +88,7 @@ export const Header: React.FC<HeaderProps> = ({
   const toggleTheme = () => {
     const nextDark = !isDark;
     setIsDark(nextDark);
-    if (nextDark) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
+    setTheme(nextDark ? "dark" : "light");
   };
 
   // 根据当前路由生成面包屑名称

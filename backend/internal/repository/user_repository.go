@@ -43,35 +43,34 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*domain.
 	return &user, nil
 }
 
-func (r *userRepository) List(ctx context.Context, page, pageSize int, filters map[string]any) ([]domain.User, int64, error) {
+func (r *userRepository) Search(ctx context.Context, f domain.UserFilter) ([]domain.User, int64, error) {
 	var users []domain.User
 	var total int64
 
-	query := r.DB(ctx).Model(&domain.User{}).Preload("Roles")
+	query := r.DB(ctx).Model(&domain.User{})
 
-	if kw, ok := filters["keyword"].(string); ok && kw != "" {
-		likePattern := "%" + kw + "%"
-		query = query.Where("username LIKE ? OR email LIKE ? OR nickname LIKE ?", likePattern, likePattern, likePattern)
+	if f.Keyword != "" {
+		likePattern := "%" + f.Keyword + "%"
+		query = query.Where("users.username LIKE ? OR users.email LIKE ? OR users.nickname LIKE ?", likePattern, likePattern, likePattern)
 	}
 
-	if st, ok := filters["status"].(int); ok && st != 0 {
-		query = query.Where("status = ?", st)
+	if f.Status != nil && *f.Status != 0 {
+		query = query.Where("users.status = ?", *f.Status)
 	}
 
-	if roleID, ok := filters["role_id"].(uuid.UUID); ok && roleID != uuid.Nil {
-		query = query.Joins("JOIN sys_user_roles ON sys_user_roles.user_id = sys_users.id AND sys_user_roles.role_id = ?", roleID)
+	if f.RoleID != nil && *f.RoleID != uuid.Nil {
+		query = query.Where("EXISTS (SELECT 1 FROM sys_user_roles ur WHERE ur.user_id = users.id AND ur.role_id = ?)", *f.RoleID)
 	}
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if page > 0 && pageSize > 0 {
-		offset := (page - 1) * pageSize
-		query = query.Offset(offset).Limit(pageSize)
+	if f.Page > 0 && f.PageSize > 0 {
+		query = query.Offset((f.Page - 1) * f.PageSize).Limit(f.PageSize)
 	}
 
-	if err := query.Order("created_at DESC").Find(&users).Error; err != nil {
+	if err := query.Preload("Roles").Order("users.created_at DESC").Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
 
