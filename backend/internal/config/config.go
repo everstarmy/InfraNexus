@@ -8,13 +8,14 @@ import (
 )
 
 type Config struct {
-	App      AppConfig      `mapstructure:"app"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Redis    RedisConfig    `mapstructure:"redis"`
-	Session  SessionConfig  `mapstructure:"session"`
-	Security SecurityConfig `mapstructure:"security"`
-	JWT      JWTConfig      `mapstructure:"jwt"`
-	Storage  StorageConfig  `mapstructure:"storage"`
+	App       AppConfig       `mapstructure:"app"`
+	Database  DatabaseConfig  `mapstructure:"database"`
+	Redis     RedisConfig     `mapstructure:"redis"`
+	Session   SessionConfig   `mapstructure:"session"`
+	Security  SecurityConfig  `mapstructure:"security"`
+	JWT       JWTConfig       `mapstructure:"jwt"`
+	Storage   StorageConfig   `mapstructure:"storage"`
+	Directory DirectoryConfig `mapstructure:"ldap"`
 }
 
 type AppConfig struct {
@@ -70,6 +71,16 @@ type SessionConfig struct {
 type SecurityConfig struct {
 	TrustedOrigins []string `mapstructure:"trusted_origins"`
 	LoginRateLimit int      `mapstructure:"login_rate_limit"`
+	EncryptionKey  string   `mapstructure:"encryption_key"`
+}
+
+type DirectoryConfig struct {
+	Scheduler DirectorySchedulerConfig `mapstructure:"scheduler"`
+}
+
+type DirectorySchedulerConfig struct {
+	Enabled     bool `mapstructure:"enabled"`
+	TickSeconds int  `mapstructure:"tick_seconds"`
 }
 
 type JWTConfig struct {

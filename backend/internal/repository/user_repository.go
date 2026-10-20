@@ -27,9 +27,9 @@ func (r *userRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 	return &user, nil
 }
 
-func (r *userRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
+func (r *userRepository) GetByUsername(ctx context.Context, authDomain, username string) (*domain.User, error) {
 	var user domain.User
-	if err := r.DB(ctx).Preload("Roles").First(&user, "username = ?", username).Error; err != nil {
+	if err := r.DB(ctx).Preload("Roles").First(&user, "domain = ? AND username = ?", authDomain, username).Error; err != nil {
 		return nil, err
 	}
 	return &user, nil

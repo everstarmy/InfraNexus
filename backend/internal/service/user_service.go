@@ -46,7 +46,7 @@ func (s *userService) GetUser(ctx context.Context, id uuid.UUID) (*domain.User, 
 }
 
 func (s *userService) CreateUser(ctx context.Context, req domain.CreateUserRequest) (*domain.User, error) {
-	if existing, _ := s.userRepo.GetByUsername(ctx, req.Username); existing != nil {
+	if existing, _ := s.userRepo.GetByUsername(ctx, "", req.Username); existing != nil {
 		return nil, coreerrors.ErrResourceConflict.WithMessage("用户名已存在")
 	}
 	if existing, _ := s.userRepo.GetByEmail(ctx, req.Email); existing != nil {
@@ -64,6 +64,7 @@ func (s *userService) CreateUser(ctx context.Context, req domain.CreateUserReque
 		Password: string(hashedPassword),
 		Nickname: req.Nickname,
 		Status:   domain.StatusEnabled,
+		AuthType: domain.AuthTypeLocal,
 	}
 
 	if err := s.userRepo.Create(ctx, &user); err != nil {

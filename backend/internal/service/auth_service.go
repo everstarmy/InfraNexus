@@ -50,14 +50,14 @@ func (s *authService) CurrentUser(ctx context.Context, id uuid.UUID) (*domain.Us
 	return user, nil
 }
 func (s *authService) credentials(ctx context.Context, username, password string) (*domain.User, error) {
-	user, err := s.users.GetByUsername(ctx, username)
+	user, err := s.users.GetByUsername(ctx, "", username)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, coreerrors.ErrInvalidCredentials
 		}
 		return nil, authStoreError(err)
 	}
-	if user == nil {
+	if user == nil || user.AuthType != domain.AuthTypeLocal {
 		return nil, coreerrors.ErrInvalidCredentials
 	}
 	if user.Status != 1 {
@@ -83,7 +83,7 @@ func (s *authService) Login(ctx context.Context, username, password, oldID strin
 	if err != nil {
 		return nil, nil, err
 	}
-	session := domain.Session{ID: id, UserID: user.ID, ExpiresAt: now.Add(idle), AbsoluteExpiresAt: now.Add(absolute)}
+	session := domain.Session{ID: id, UserID: user.ID, CreatedAt: now, ExpiresAt: now.Add(idle), AbsoluteExpiresAt: now.Add(absolute)}
 	if session.ExpiresAt.After(session.AbsoluteExpiresAt) {
 		session.ExpiresAt = session.AbsoluteExpiresAt
 	}

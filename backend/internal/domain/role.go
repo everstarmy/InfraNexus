@@ -16,6 +16,7 @@ type Role struct {
 	Description string         `gorm:"size:255" json:"description"`
 	Status      int            `gorm:"default:1" json:"status"` // 1: 启用, 2: 禁用
 	BuiltIn     bool           `gorm:"not null;default:false" json:"built_in"`
+	UserCount   int64          `gorm:"->;-:migration" json:"user_count"`
 	ExtraMeta   datatypes.JSON `gorm:"type:jsonb" json:"extra_meta"`
 	Permissions []Permission   `gorm:"many2many:sys_role_permissions;foreignKey:ID;joinForeignKey:RoleID;References:ID;joinReferences:PermissionID" json:"permissions"`
 }

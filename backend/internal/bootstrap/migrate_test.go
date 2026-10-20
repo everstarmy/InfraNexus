@@ -63,3 +63,35 @@ func TestMigrateUpgradesLegacyUniqueIndexesSoDeletedNamesCanBeReused(t *testing.
 		t.Fatal("active duplicate username accepted after migrate")
 	}
 }
+
+func TestIdentityIsScopedByDomainAndEmptyEmailsCoexist(t *testing.T) {
+	container, _, cleanup := setupTestApp(t)
+	defer cleanup()
+	db := container.DB
+	for _, table := range []any{&domain.Department{}, &domain.LDAPConfig{}, &domain.LDAPSyncLog{}} {
+		if !db.Migrator().HasTable(table) {
+			t.Fatalf("missing table for %T", table)
+		}
+	}
+	local := domain.User{Username: "zhangsan", Email: "", Password: "x"}
+	corp := domain.User{Username: "zhangsan", Domain: "corp.local", AuthType: domain.AuthTypeAD, Email: ""}
+	other := domain.User{Username: "zhangsan", Domain: "branch.local", AuthType: domain.AuthTypeAD, Email: ""}
+	for _, u := range []*domain.User{&local, &corp, &other} {
+		if err := db.Create(u).Error; err != nil {
+			t.Fatalf("create %s@%s: %v", u.Username, u.Domain, err)
+		}
+	}
+	if local.AuthType != domain.AuthTypeLocal {
+		t.Fatalf("local user auth type defaulted to %q", local.AuthType)
+	}
+	dup := domain.User{Username: "zhangsan", Domain: "corp.local", AuthType: domain.AuthTypeAD}
+	if err := db.Create(&dup).Error; err == nil {
+		t.Fatal("duplicate username accepted inside one domain")
+	}
+	if err := db.Create(&domain.User{Username: "lisi", Email: "dup@x.com"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&domain.User{Username: "wangwu", Email: "dup@x.com"}).Error; err == nil {
+		t.Fatal("duplicate non-empty email accepted")
+	}
+}

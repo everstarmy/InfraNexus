@@ -17,7 +17,7 @@ const (
 type Permission struct {
 	BaseEntity
 	ParentID  *uuid.UUID     `gorm:"type:uuid;index" json:"parent_id"`
-	Code      string         `gorm:"size:64;not null;uniqueIndex:uidx_permissions_code,where:deleted_at IS NULL" json:"code"` // 如 "users:create"
+	Code      string         `gorm:"size:128;not null;uniqueIndex:uidx_permissions_code,where:deleted_at IS NULL" json:"code"` // 如 "users:create"
 	Name      string         `gorm:"size:64;not null" json:"name"`
 	Type      PermissionType `gorm:"size:16;not null" json:"type"` // menu | button | api
 	Path      string         `gorm:"size:255" json:"path"`         // 路由路径或 API Path
@@ -25,7 +25,12 @@ type Permission struct {
 	Component string         `gorm:"size:255" json:"component"`    // 前端组件标识
 	Icon      string         `gorm:"size:64" json:"icon"`
 	SortOrder int            `gorm:"default:0" json:"sort_order"`
+	BuiltIn   bool           `gorm:"not null;default:false" json:"built_in"`
 	Children  []Permission   `gorm:"-" json:"children,omitempty"`
+}
+
+func APIPermissionCode(method, path string) string {
+	return "api:" + method + ":" + path
 }
 
 type PermissionRepository interface {

@@ -53,3 +53,9 @@ storage:
 security:
   trusted_origins: ["http://localhost:5173", "http://127.0.0.1:5173"]
   login_rate_limit: 10 # 每 IP 每分钟（单进程）
+  encryption_key: "infranexus-dev-encryption-key-change-me" # 目录绑定密码 AES-GCM 加密密钥；production 必须替换（APP_SECURITY_ENCRYPTION_KEY）
+
+ldap:
+  scheduler:
+    enabled: true # 是否运行 AD/LDAP 定时同步调度器
+    tick_seconds: 60 # 调度器检查到期同步任务的间隔

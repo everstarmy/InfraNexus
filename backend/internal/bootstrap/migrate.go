@@ -18,13 +18,18 @@ var legacyIndexes = []legacyIndex{
 	{&domain.User{}, "idx_users_email"},
 	{&domain.Role{}, "idx_roles_code"},
 	{&domain.Permission{}, "idx_permissions_code"},
+	{&domain.User{}, "uidx_users_username"},
+	{&domain.User{}, "uidx_users_email"},
 }
 
 func models() []any {
 	return []any{
+		&domain.Department{},
 		&domain.User{},
 		&domain.Role{},
 		&domain.Permission{},
+		&domain.LDAPConfig{},
+		&domain.LDAPSyncLog{},
 	}
 }
 

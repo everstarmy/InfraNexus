@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"errors"
 	"log/slog"
 
 	"github.com/gofiber/fiber/v3"
@@ -8,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"infranexus/internal/config"
+	"infranexus/internal/core/secret"
 	"infranexus/internal/storage"
 )
 
@@ -17,9 +19,27 @@ type AppContainer struct {
 	DB      *gorm.DB
 	Redis   *redis.Client
 	Storage fiber.Storage
+	Cipher  *secret.Cipher
+}
+
+func NewCipher(cfg *config.Config, log *slog.Logger) (*secret.Cipher, error) {
+	key := cfg.Security.EncryptionKey
+	if key == "" || key == secret.DevKey {
+		if cfg.App.Env == "production" {
+			return nil, errors.New("security.encryption_key must be set to a non-default value in production")
+		}
+		key = secret.DevKey
+		log.Warn("Using development encryption key for directory secrets; set security.encryption_key before production")
+	}
+	return secret.New(key)
 }
 
 func NewAppContainer(cfg *config.Config, log *slog.Logger) (*AppContainer, error) {
+	cipher, err := NewCipher(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+
 	db, err := InitDatabase(cfg, log)
 	if err != nil {
 		return nil, err
@@ -41,6 +61,7 @@ func NewAppContainer(cfg *config.Config, log *slog.Logger) (*AppContainer, error
 		DB:      db,
 		Redis:   rdb,
 		Storage: store,
+		Cipher:  cipher,
 	}, nil
 }
 

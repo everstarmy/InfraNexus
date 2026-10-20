@@ -17,7 +17,10 @@ func Seed(db *gorm.DB, log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		return ensureAdminUser(tx, log, adminRole)
+		if err := ensureAdminUser(tx, log, adminRole); err != nil {
+			return err
+		}
+		return seedPermissions(tx)
 	})
 }
 
@@ -51,7 +54,7 @@ func ensureAdminRole(tx *gorm.DB, log *slog.Logger) (*domain.Role, error) {
 
 func ensureAdminUser(tx *gorm.DB, log *slog.Logger, adminRole *domain.Role) error {
 	var user domain.User
-	err := tx.First(&user, "username = ?", "admin").Error
+	err := tx.First(&user, "domain = ? AND username = ?", "", "admin").Error
 	if err == nil {
 		if user.BuiltIn {
 			return nil
@@ -71,6 +74,7 @@ func ensureAdminUser(tx *gorm.DB, log *slog.Logger, adminRole *domain.Role) erro
 		Password: string(hash),
 		Nickname: "系统管理员",
 		Status:   domain.StatusEnabled,
+		AuthType: domain.AuthTypeLocal,
 		BuiltIn:  true,
 	}
 	if err := tx.Create(&user).Error; err != nil {

@@ -2,9 +2,16 @@ package domain
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
+)
+
+const (
+	AuthTypeLocal = "local"
+	AuthTypeAD    = "ad"
+	AuthTypeLDAP  = "ldap"
 )
 
 // UserPreferences 用户界面与操作偏好 (利用 JSONType[T] 强类型序列化)
@@ -16,15 +23,22 @@ type UserPreferences struct {
 
 type User struct {
 	BaseEntity
-	Username    string                              `gorm:"size:64;not null;uniqueIndex:uidx_users_username,where:deleted_at IS NULL" json:"username"`
-	Email       string                              `gorm:"size:128;not null;uniqueIndex:uidx_users_email,where:deleted_at IS NULL" json:"email"`
-	Password    string                              `gorm:"size:255;not null" json:"-"`
-	Nickname    string                              `gorm:"size:64" json:"nickname"`
-	Avatar      string                              `gorm:"size:255" json:"avatar"`
-	Status      int                                 `gorm:"default:1" json:"status"` // 1: 启用, 2: 禁用
-	BuiltIn     bool                                `gorm:"not null;default:false" json:"built_in"`
-	Preferences datatypes.JSONType[UserPreferences] `gorm:"type:jsonb" json:"preferences"`
-	Roles       []Role                              `gorm:"many2many:sys_user_roles;foreignKey:ID;joinForeignKey:UserID;References:ID;joinReferences:RoleID" json:"roles"`
+	Username          string                              `gorm:"size:64;not null;uniqueIndex:uidx_users_domain_username,priority:2,where:deleted_at IS NULL" json:"username"`
+	Domain            string                              `gorm:"size:128;not null;default:'';uniqueIndex:uidx_users_domain_username,priority:1" json:"domain"`
+	Email             string                              `gorm:"size:128;not null;uniqueIndex:uidx_users_email_nonempty,where:deleted_at IS NULL AND email <> ''" json:"email"`
+	Password          string                              `gorm:"size:255;not null" json:"-"`
+	Nickname          string                              `gorm:"size:64" json:"nickname"`
+	Avatar            string                              `gorm:"size:255" json:"avatar"`
+	Status            int                                 `gorm:"default:1" json:"status"` // 1: 启用, 2: 禁用
+	AuthType          string                              `gorm:"size:16;not null;default:local;index" json:"auth_type"`
+	ExternalID        string                              `gorm:"size:255;index" json:"external_id"`
+	DepartmentID      *uuid.UUID                          `gorm:"type:uuid;index" json:"department_id"`
+	Department        *Department                         `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
+	BuiltIn           bool                                `gorm:"not null;default:false" json:"built_in"`
+	LastLoginAt       *time.Time                          `json:"last_login_at"`
+	SessionsRevokedAt *time.Time                          `json:"-"`
+	Preferences       datatypes.JSONType[UserPreferences] `gorm:"type:jsonb" json:"preferences"`
+	Roles             []Role                              `gorm:"many2many:sys_user_roles;foreignKey:ID;joinForeignKey:UserID;References:ID;joinReferences:RoleID" json:"roles"`
 }
 
 type UserFilter struct {
@@ -53,7 +67,7 @@ type UpdateUserRequest struct {
 type UserRepository interface {
 	Repository[User, uuid.UUID]
 	Search(ctx context.Context, f UserFilter) ([]User, int64, error)
-	GetByUsername(ctx context.Context, username string) (*User, error)
+	GetByUsername(ctx context.Context, authDomain, username string) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	AssignRoles(ctx context.Context, userID uuid.UUID, roleIDs []uuid.UUID) error
 }
