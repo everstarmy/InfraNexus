@@ -121,6 +121,7 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	roles := rbac.Group("/roles")
 	roles.Get("", d.roles.List)
 	roles.Post("", d.roles.Create)
+	roles.Get("/permission-tree", d.permissions.Tree)
 	roles.Get("/:id", d.roles.GetByID)
 	roles.Put("/:id", d.roles.Update)
 	roles.Delete("/:id", d.roles.Delete)

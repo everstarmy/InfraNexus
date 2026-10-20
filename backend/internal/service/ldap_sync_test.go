@@ -96,13 +96,13 @@ func TestBuildSyncPlanClassifiesEveryDirectoryEntry(t *testing.T) {
 		actions[p.item.Username+"|"+p.item.DN] = p.item.Action
 	}
 	expect := map[string]string{
-		"zhangsan|CN=ZS,OU=Platform,OU=RD,DC=corp,DC=local":  domain.SyncActionUnchanged,
-		"newbie|CN=New,OU=Sales,DC=corp,DC=local":            domain.SyncActionCreate,
-		"renamed|CN=Ren,OU=Platform,OU=RD,DC=corp,DC=local":  domain.SyncActionUpdate,
-		"disabled|CN=Dis,OU=RD,DC=corp,DC=local":             domain.SyncActionSkip,
-		"newbie|CN=Dup,OU=RD,DC=corp,DC=local":               domain.SyncActionConflict,
-		"|CN=NoName,OU=RD,DC=corp,DC=local":                  domain.SyncActionSkip,
-		"gone|":                                              domain.SyncActionDisable,
+		"zhangsan|CN=ZS,OU=Platform,OU=RD,DC=corp,DC=local": domain.SyncActionUnchanged,
+		"newbie|CN=New,OU=Sales,DC=corp,DC=local":           domain.SyncActionCreate,
+		"renamed|CN=Ren,OU=Platform,OU=RD,DC=corp,DC=local": domain.SyncActionUpdate,
+		"disabled|CN=Dis,OU=RD,DC=corp,DC=local":            domain.SyncActionSkip,
+		"newbie|CN=Dup,OU=RD,DC=corp,DC=local":              domain.SyncActionConflict,
+		"|CN=NoName,OU=RD,DC=corp,DC=local":                 domain.SyncActionSkip,
+		"gone|":                                             domain.SyncActionDisable,
 	}
 	for key, want := range expect {
 		if actions[key] != want {

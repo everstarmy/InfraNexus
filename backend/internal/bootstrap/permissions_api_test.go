@@ -79,6 +79,13 @@ func TestNonAdminRoleIsLimitedToAssignedAPIsAndSeesItsCodes(t *testing.T) {
 	expectCode(t, call(t, app, "GET", "/api/v1/users", aud, nil), 200, response.CodeSuccess)
 	expectCode(t, call(t, app, "POST", "/api/v1/users", aud, map[string]any{"username": "newbie1", "email": "newbie1@x.com", "password": "Str0ng!pass"}), 403, response.CodePermissionDenied)
 	expectCode(t, call(t, app, "GET", "/api/v1/roles", aud, nil), 403, response.CodePermissionDenied)
+	expectCode(t, call(t, app, "GET", "/api/v1/roles/permission-tree", aud, nil), 403, response.CodePermissionDenied)
+	assigner := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "assigner", "name": "授权专员"}).Data)
+	expectCode(t, call(t, app, "POST", "/api/v1/roles/"+assigner.ID.String()+"/permissions", bearer, map[string]any{"permission_ids": permissionIDs(t, container, "roles:assign", domain.APIPermissionCode("GET", "/api/v1/roles/permission-tree"))}), 200, response.CodeSuccess)
+	createLocalUser(t, app, bearer, "granter", map[string]any{"role_ids": []uuid.UUID{assigner.ID}})
+	granter := tokenFor(t, app, "granter", "Str0ng!pass")
+	expectCode(t, call(t, app, "GET", "/api/v1/roles/permission-tree", granter, nil), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "GET", "/api/v1/permissions", granter, nil), 403, response.CodePermissionDenied)
 	me := decode[domain.CurrentUser](t, call(t, app, "GET", "/api/v1/auth/me", aud, nil).Data)
 	if me.IsAdmin || !slices.Contains(me.Permissions, "users") || !slices.Contains(me.Permissions, "org") || slices.Contains(me.Permissions, "users:create") {
 		t.Fatalf("effective codes must include granted nodes and their ancestors only: %v", me.Permissions)

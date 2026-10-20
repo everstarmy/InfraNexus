@@ -30,6 +30,7 @@ type LoginRequest struct {
 func (r LoginRequest) input() domain.LoginInput {
 	return domain.LoginInput{Username: strings.TrimSpace(r.Username), Password: r.Password, Domain: r.Domain}
 }
+
 type LoginResponse struct {
 	User *domain.CurrentUser `json:"user"`
 }

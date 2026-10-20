@@ -1,497 +1,609 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { UserPlus, MoreHorizontal, Edit, Trash2, Shield, RefreshCw, AlertCircle } from "lucide-react";
-import { DataTable, type ColumnDef } from "@/components/data-table";
-import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { PaginationState, SortingState } from "@tanstack/react-table"
+import {
+  ArrowRightLeft,
+  Building2,
+  CircleCheck,
+  CircleSlash,
+  Eye,
+  KeyRound,
+  MoreHorizontal,
+  Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  ShieldCheck,
+  Trash2,
+  UserCheck,
+  UserPlus,
+  UserRoundPen,
+  Users,
+  UserX,
+} from "lucide-react"
+import { DataTable, createSelectColumn, type ColumnDef, type FacetedFilterConfig } from "@/components/data-table"
+import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   DropdownMenu,
-  DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { usersService } from "@/services/users";
-import { rolesService, RoleDTO } from "@/services/roles";
-import { UserDTO } from "@/services/auth";
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { toast } from "@/components/ui/toast"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AuthSourceBadge, BuiltinBadge, StatusDot } from "@/components/common/badges"
+import { useConfirm } from "@/components/common/confirm-dialog"
+import { departmentPathLabel } from "@/components/common/department-select"
+import { ALL_KEY, DepartmentTree, UNASSIGNED_KEY } from "@/components/common/department-tree"
+import { PageHeader } from "@/components/common/page-header"
+import { StatCard, StatGrid } from "@/components/common/stat-card"
+import { UserAvatar } from "@/components/common/user-avatar"
+import { useDebouncedValue } from "@/hooks/use-debounced-value"
+import { formatCompact, formatDateTime, formatPercent, formatRelative } from "@/lib/format"
+import { notify } from "@/lib/notify"
+import { queryKeys } from "@/lib/query-keys"
+import { cn } from "@/lib/utils"
+import { optionsService } from "@/services/options"
+import type { PageData, UserDTO } from "@/services/types"
+import { usersService, type UserListParams } from "@/services/users"
+import { useAuth } from "@/stores/auth-context"
+import { AssignRolesDialog } from "./components/assign-roles-dialog"
+import { MoveDepartmentDialog } from "./components/move-department-dialog"
+import { ResetPasswordDialog } from "./components/reset-password-dialog"
+import { UserDetailSheet } from "./components/user-detail-sheet"
+import { UserFormDialog } from "./components/user-form-dialog"
+
+const columnLabels = {
+  username: "用户",
+  auth_type: "来源",
+  department: "部门",
+  roles: "角色",
+  status: "状态",
+  last_login_at: "最近登录",
+  created_at: "创建时间",
+}
 
 export default function UsersPage() {
-  const [data, setData] = useState<UserDTO[]>([]);
-  const [roles, setRoles] = useState<RoleDTO[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [keyword, setKeyword] = useState("");
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const { user: me, can, checkAuth } = useAuth()
+  const navigate = useNavigate()
+  const confirm = useConfirm()
+  const queryClient = useQueryClient()
+  const [searchParams] = useSearchParams()
 
-  // 弹窗状态
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [editUser, setEditUser] = useState<UserDTO | null>(null);
+  const [deptKey, setDeptKey] = useState<string>(ALL_KEY)
+  const [includeChildren, setIncludeChildren] = useState(true)
+  const [treeOpen, setTreeOpen] = useState(true)
+  const [keyword, setKeyword] = useState("")
+  const debouncedKeyword = useDebouncedValue(keyword.trim(), 300)
+  const [statuses, setStatuses] = useState<string[]>([])
+  const [authTypes, setAuthTypes] = useState<string[]>([])
+  const [roleIds, setRoleIds] = useState<string[]>(() => {
+    const fromUrl = searchParams.get("role_id")
+    return fromUrl ? [fromUrl] : []
+  })
+  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 10 })
+  const [sorting, setSorting] = useState<SortingState>([])
 
-  // 表单状态
-  const [formUsername, setFormUsername] = useState("");
-  const [formEmail, setFormEmail] = useState("");
-  const [formPassword, setFormPassword] = useState("");
-  const [formNickname, setFormNickname] = useState("");
-  const [formRoleIDs, setFormRoleIDs] = useState<string[]>([]);
-  const [formError, setFormError] = useState("");
-  const [formSubmitting, setFormSubmitting] = useState(false);
-
-  const loadUsers = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await usersService.getUsers({
-        page,
-        page_size: pageSize,
-        keyword: keyword.trim() || undefined,
-      });
-      setData(res.data.items || []);
-      setTotal(res.data.total || 0);
-    } catch (err) {
-      console.error("加载用户列表失败", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, pageSize, keyword]);
-
-  const loadRoles = async () => {
-    try {
-      const res = await rolesService.getRoles();
-      setRoles(res.data.items || []);
-    } catch (err) {
-      console.error("加载角色列表失败", err);
-    }
-  };
+  const [formUser, setFormUser] = useState<UserDTO | "new" | null>(null)
+  const [resetUser, setResetUser] = useState<UserDTO | null>(null)
+  const [rolesUser, setRolesUser] = useState<UserDTO | null>(null)
+  const [moveUsers, setMoveUsers] = useState<UserDTO[]>([])
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const clearSelection = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    loadUsers();
-    loadRoles();
-  }, [loadUsers]);
+    setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }))
+  }, [debouncedKeyword, statuses, authTypes, roleIds, deptKey, includeChildren, sorting])
 
-  const handleToggleStatus = async (user: UserDTO) => {
-    const nextStatus = user.status === 1 ? 2 : 1;
-    try {
-      await usersService.toggleStatus(user.id, nextStatus);
-      loadUsers();
-    } catch (err) {
-      console.error("切换用户状态失败", err);
-    }
-  };
+  const params = useMemo<UserListParams>(
+    () => ({
+      page: pagination.pageIndex + 1,
+      page_size: pagination.pageSize,
+      keyword: debouncedKeyword || undefined,
+      status: statuses.join(",") || undefined,
+      auth_type: authTypes.join(",") || undefined,
+      role_id: roleIds.join(",") || undefined,
+      department_id: deptKey === ALL_KEY ? undefined : deptKey,
+      include_children: deptKey !== ALL_KEY && deptKey !== UNASSIGNED_KEY ? includeChildren : undefined,
+      sort: sorting[0] ? `${sorting[0].id}:${sorting[0].desc ? "desc" : "asc"}` : undefined,
+    }),
+    [pagination, debouncedKeyword, statuses, authTypes, roleIds, deptKey, includeChildren, sorting],
+  )
+  const paramsRef = useRef(params)
+  paramsRef.current = params
 
-  const handleDeleteUser = async (id: string) => {
-    if (!confirm("确定要删除该用户吗？此操作不可逆。")) return;
-    try {
-      await usersService.deleteUser(id);
-      loadUsers();
-    } catch (err) {
-      console.error("删除用户失败", err);
-    }
-  };
+  const usersQuery = useQuery({
+    queryKey: queryKeys.users(params),
+    queryFn: async () => (await usersService.list(params)).data,
+    placeholderData: keepPreviousData,
+  })
+  const statsQuery = useQuery({ queryKey: queryKeys.userStats, queryFn: async () => (await usersService.stats()).data })
+  const deptQuery = useQuery({ queryKey: queryKeys.departmentOptions, queryFn: async () => (await optionsService.departments()).data })
+  const rolesQuery = useQuery({ queryKey: queryKeys.roleOptions, queryFn: async () => (await optionsService.roles()).data })
 
-  const openCreateDialog = () => {
-    setFormUsername("");
-    setFormEmail("");
-    setFormPassword("");
-    setFormNickname("");
-    setFormRoleIDs([]);
-    setFormError("");
-    setCreateDialogOpen(true);
-  };
+  const departments = useMemo(() => deptQuery.data ?? [], [deptQuery.data])
+  const roles = useMemo(() => rolesQuery.data ?? [], [rolesQuery.data])
+  const stats = statsQuery.data
+  const page = usersQuery.data
 
-  const openEditDialog = (user: UserDTO) => {
-    setEditUser(user);
-    setFormNickname(user.nickname || "");
-    const initialRoleIDs = (user.roles || [])
-      .map((r) => r.id)
-      .filter(Boolean);
-    setFormRoleIDs(initialRoleIDs);
-    setFormError("");
-  };
+  const refreshAll = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["users"] })
+    void queryClient.invalidateQueries({ queryKey: ["options"] })
+    void queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+  }, [queryClient])
 
-  const handleCreateSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormSubmitting(true);
-    setFormError("");
-    try {
-      await usersService.createUser({
-        username: formUsername.trim(),
-        email: formEmail.trim(),
-        password: formPassword,
-        nickname: formNickname.trim() || undefined,
-        role_ids: formRoleIDs,
-      });
-      setCreateDialogOpen(false);
-      loadUsers();
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { message?: string } } };
-      setFormError(axiosErr.response?.data?.message || "创建用户失败，请检查参数");
-    } finally {
-      setFormSubmitting(false);
-    }
-  };
+  const setStatus = useCallback(
+    async (user: UserDTO, enabled: boolean, silent = false) => {
+      const key = queryKeys.users(paramsRef.current)
+      const previous = queryClient.getQueryData<PageData<UserDTO>>(key)
+      queryClient.setQueryData<PageData<UserDTO>>(key, (old) =>
+        old ? { ...old, items: old.items.map((i) => (i.id === user.id ? { ...i, status: enabled ? 1 : 2 } : i)) } : old,
+      )
+      try {
+        await usersService.setStatus(user.id, enabled ? 1 : 2)
+        if (!silent) {
+          toast.add({
+            title: enabled ? "账号已启用" : "账号已停用",
+            description: enabled ? `${user.nickname || user.username} 可以重新登录` : `${user.nickname || user.username} 的会话已立即失效`,
+            type: "success",
+            actionProps: { children: "撤销", onClick: () => void setStatus(user, !enabled, true) },
+          })
+        }
+      } catch (error) {
+        queryClient.setQueryData(key, previous)
+        notify.apiError(error, "状态更新失败")
+      } finally {
+        void queryClient.invalidateQueries({ queryKey: ["users"] })
+        void queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      }
+    },
+    [queryClient],
+  )
 
-  const handleEditSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editUser) return;
-    setFormSubmitting(true);
-    setFormError("");
-    try {
-      await usersService.updateUser(editUser.id, {
-        nickname: formNickname.trim() || undefined,
-        role_ids: formRoleIDs,
-      });
-      setEditUser(null);
-      loadUsers();
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { message?: string } } };
-      setFormError(axiosErr.response?.data?.message || "更新用户失败");
-    } finally {
-      setFormSubmitting(false);
-    }
-  };
+  const handleDelete = useCallback(
+    (user: UserDTO) =>
+      void confirm({
+        title: `删除用户「${user.nickname || user.username}」？`,
+        description: "删除后该账号将无法登录，已登录的会话会立即失效，此操作不可撤销。",
+        confirmText: "确认删除",
+        onConfirm: async () => {
+          try {
+            await usersService.remove(user.id)
+            notify.success("用户已删除", user.nickname || user.username)
+            setDetailId(null)
+            refreshAll()
+          } catch (error) {
+            notify.apiError(error, "删除失败")
+            throw error
+          }
+        },
+      }),
+    [confirm, refreshAll],
+  )
+
+  const resetFilters = () => {
+    setKeyword("")
+    setStatuses([])
+    setAuthTypes([])
+    setRoleIds([])
+    setDeptKey(ALL_KEY)
+  }
 
   const columns = useMemo<ColumnDef<UserDTO>[]>(
     () => [
+      createSelectColumn<UserDTO>(),
       {
+        id: "username",
         accessorKey: "username",
         header: ({ column }) => <DataTableColumnHeader column={column} title="用户" />,
         cell: ({ row }) => {
-          const user = row.original;
+          const u = row.original
           return (
-            <div className="flex items-center gap-3">
-              <Avatar className="h-8 w-8 border border-border">
-                <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
-                  {user.nickname?.[0] || user.username[0]?.toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex flex-col">
-                <span className="font-medium text-foreground text-sm leading-tight">{user.username}</span>
-                <span className="text-xs text-muted-foreground">{user.nickname || "-"}</span>
+            <div className="flex min-w-48 items-center gap-3">
+              <UserAvatar name={u.nickname || u.username} seed={u.username} />
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-sm font-medium text-foreground">{u.nickname || u.username}</span>
+                  {u.id === me?.id && <Badge variant="secondary" className="h-4.5 px-1.5 text-[10px]">我</Badge>}
+                  {u.built_in && <BuiltinBadge />}
+                </div>
+                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                  {u.username}
+                  {u.email ? ` · ${u.email}` : ""}
+                </p>
               </div>
             </div>
-          );
+          )
         },
       },
       {
-        accessorKey: "email",
-        header: ({ column }) => <DataTableColumnHeader column={column} title="电子邮箱" />,
-        cell: ({ row }) => <span className="text-xs text-muted-foreground font-mono">{row.original.email}</span>,
+        id: "auth_type",
+        accessorKey: "auth_type",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="来源" />,
+        enableSorting: false,
+        cell: ({ row }) => <AuthSourceBadge authType={row.original.auth_type} domain={row.original.domain} />,
       },
       {
-        accessorKey: "status",
-        header: ({ column }) => <DataTableColumnHeader column={column} title="状态开关" />,
+        id: "department",
+        accessorFn: (u) => u.department?.name ?? "",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="部门" />,
+        enableSorting: false,
         cell: ({ row }) => {
-          const isActive = row.original.status === 1;
+          const u = row.original
+          if (!u.department_id) return <span className="text-xs text-muted-foreground">未分配</span>
+          const path = departmentPathLabel(departments, u.department_id)
           return (
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={isActive}
-                onCheckedChange={() => handleToggleStatus(row.original)}
-                aria-label="快速启停用户状态"
-              />
-              <span className={`text-xs ${isActive ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-                {isActive ? "启用" : "停用"}
-              </span>
-            </div>
-          );
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex max-w-40 items-center gap-1.5 truncate text-sm" />}>
+                <Network className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{u.department?.name}</span>
+              </TooltipTrigger>
+              <TooltipContent>{path || u.department?.name}</TooltipContent>
+            </Tooltip>
+          )
         },
       },
       {
-        accessorKey: "roles",
-        header: ({ column }) => <DataTableColumnHeader column={column} title="分派角色" />,
+        id: "roles",
+        accessorFn: (u) => u.roles?.map((r) => r.name).join(","),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="角色" />,
+        enableSorting: false,
         cell: ({ row }) => {
-          const userRoles = row.original.roles || [];
+          const list = row.original.roles ?? []
+          if (list.length === 0) return <span className="text-xs text-muted-foreground">未分配</span>
           return (
-            <div className="flex flex-wrap gap-1">
-              {userRoles.length === 0 ? (
-                <span className="text-xs text-muted-foreground italic">未指定</span>
-              ) : (
-                userRoles.map((role) => (
-                  <Badge key={role.id} variant="outline" className="gap-1 text-xs">
-                    <Shield className="h-3 w-3 text-primary" />
-                    <span>{role.name || role.code}</span>
-                  </Badge>
-                ))
+            <div className="flex max-w-56 flex-wrap gap-1">
+              {list.slice(0, 2).map((r) => (
+                <Badge key={r.id} variant="outline" className="gap-1 font-normal">
+                  <ShieldCheck className="text-primary" />
+                  {r.name}
+                </Badge>
+              ))}
+              {list.length > 2 && (
+                <Tooltip>
+                  <TooltipTrigger render={<span />}>
+                    <Badge variant="secondary">+{list.length - 2}</Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>{list.slice(2).map((r) => r.name).join("、")}</TooltipContent>
+                </Tooltip>
               )}
             </div>
-          );
+          )
         },
       },
       {
-        accessorKey: "created_at",
-        header: ({ column }) => <DataTableColumnHeader column={column} title="创建时间" />,
+        id: "status",
+        accessorKey: "status",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="状态" />,
+        cell: ({ row }) => <StatusCell user={row.original} meId={me?.id} canToggle={can("users:status")} onToggle={setStatus} />,
+      },
+      {
+        id: "last_login_at",
+        accessorKey: "last_login_at",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="最近登录" />,
         cell: ({ row }) => (
-          <span className="text-xs text-muted-foreground">
-            {row.original.created_at
-              ? new Date(row.original.created_at).toLocaleString("zh-CN", {
-                  year: "numeric",
-                  month: "2-digit",
-                  day: "2-digit",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : "-"}
+          <span className="text-xs whitespace-nowrap text-muted-foreground" title={formatDateTime(row.original.last_login_at)}>
+            {formatRelative(row.original.last_login_at)}
           </span>
         ),
       },
       {
+        id: "created_at",
+        accessorKey: "created_at",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="创建时间" />,
+        cell: ({ row }) => <span className="text-xs whitespace-nowrap text-muted-foreground">{formatDateTime(row.original.created_at)}</span>,
+      },
+      {
         id: "actions",
-        header: "操作",
+        header: () => <span className="sr-only">操作</span>,
+        enableSorting: false,
+        enableHiding: false,
         cell: ({ row }) => {
-          const user = row.original;
+          const u = row.original
+          const isSelf = u.id === me?.id
           return (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="icon" className="h-8 w-8 p-0" />
-                }
-              >
-                <MoreHorizontal className="h-4 w-4" />
-                <span className="sr-only">打开菜单</span>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => openEditDialog(user)}>
-                  <Edit className="mr-2 h-4 w-4" />
-                  <span>编辑信息</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => handleDeleteUser(user.id)}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  <span>删除用户</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          );
+            <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`${u.username} 的更多操作`} />}>
+                  <MoreHorizontal />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuItem onClick={() => setDetailId(u.id)}>
+                    <Eye />
+                    查看详情
+                  </DropdownMenuItem>
+                  {can("users:update") && (
+                    <DropdownMenuItem onClick={() => setFormUser(u)}>
+                      <UserRoundPen />
+                      编辑资料
+                    </DropdownMenuItem>
+                  )}
+                  {can("users:assign-roles") && (
+                    <DropdownMenuItem onClick={() => setRolesUser(u)}>
+                      <ShieldCheck />
+                      分配角色
+                    </DropdownMenuItem>
+                  )}
+                  {can("users:move") && (
+                    <DropdownMenuItem onClick={() => setMoveUsers([u])}>
+                      <ArrowRightLeft />
+                      调整部门
+                    </DropdownMenuItem>
+                  )}
+                  {can("users:reset-password") && u.auth_type === "local" && (
+                    <DropdownMenuItem onClick={() => setResetUser(u)}>
+                      <KeyRound />
+                      重置密码
+                    </DropdownMenuItem>
+                  )}
+                  {can("users:delete") && !isSelf && !u.built_in && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem variant="destructive" onClick={() => handleDelete(u)}>
+                        <Trash2 />
+                        删除用户
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )
         },
       },
     ],
-    [roles]
-  );
+    [me?.id, can, departments, setStatus, handleDelete],
+  )
+
+  const facetedFilters: FacetedFilterConfig[] = [
+    {
+      columnId: "status",
+      title: "状态",
+      options: [
+        { label: "启用", value: "1", icon: CircleCheck },
+        { label: "停用", value: "2", icon: CircleSlash },
+      ],
+      selectedValues: statuses,
+      onSelectedChange: setStatuses,
+    },
+    {
+      columnId: "auth_type",
+      title: "来源",
+      options: [
+        { label: "本地账号", value: "local", icon: KeyRound },
+        { label: "AD 域", value: "ad", icon: Building2 },
+        { label: "LDAP", value: "ldap", icon: Network },
+      ],
+      selectedValues: authTypes,
+      onSelectedChange: setAuthTypes,
+    },
+    {
+      columnId: "roles",
+      title: "角色",
+      options: roles.map((r) => ({ label: r.name, value: r.id, icon: ShieldCheck })),
+      selectedValues: roleIds,
+      onSelectedChange: setRoleIds,
+    },
+  ]
+
+  const filtersActive = !!debouncedKeyword || statuses.length > 0 || authTypes.length > 0 || roleIds.length > 0 || deptKey !== ALL_KEY
+  const scopeLabel =
+    deptKey === ALL_KEY ? "全部人员" : deptKey === UNASSIGNED_KEY ? "未分配部门" : departmentPathLabel(departments, deptKey) || "所选部门"
+  const topDomains = stats?.by_domain.slice(0, 2).map((d) => `${d.domain} ${d.count}`).join(" · ")
+  const total = stats?.total ?? 0
 
   return (
-    <div className="w-full space-y-4">
-      {/* 顶部操作区 */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-foreground">用户账号管理</h2>
-          <p className="text-xs text-muted-foreground">
-            平台人员账号清单、状态控制与角色分派
-          </p>
-        </div>
+    <>
+      <PageHeader
+        icon={Users}
+        title="用户管理"
+        description="管理平台人员档案、所属部门、角色授权与账号状态"
+        actions={
+          can("users:create") && (
+            <Button onClick={() => setFormUser("new")}>
+              <UserPlus />
+              新建用户
+            </Button>
+          )
+        }
+      />
 
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => loadUsers()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
-            <span>刷新</span>
-          </Button>
-          <Button size="sm" onClick={openCreateDialog}>
-            <UserPlus className="h-4 w-4 mr-1.5" />
-            <span>新建用户</span>
-          </Button>
-        </div>
+      <StatGrid>
+        <StatCard label="用户总数" value={formatCompact(total)} icon={Users} tone="primary" loading={statsQuery.isLoading} hint={stats ? `本地 ${stats.local} · 目录同步 ${stats.directory} · 未分配部门 ${stats.unassigned}` : undefined} />
+        <StatCard label="启用中" value={formatCompact(stats?.active ?? 0)} icon={UserCheck} tone="success" loading={statsQuery.isLoading} ratio={total ? (stats?.active ?? 0) / total : 0} hint={`占全部账号 ${formatPercent(stats?.active ?? 0, total)}`} />
+        <StatCard label="已停用" value={formatCompact(stats?.disabled ?? 0)} icon={UserX} tone="default" loading={statsQuery.isLoading} ratio={total ? (stats?.disabled ?? 0) / total : 0} hint="停用账号无法登录，会话立即失效" />
+        <StatCard label="企业域账号" value={formatCompact(stats?.directory ?? 0)} icon={Building2} tone="info" loading={statsQuery.isLoading} hint={topDomains || "尚未接入企业目录"} />
+      </StatGrid>
+
+      <div className="grid grid-cols-12 gap-4">
+        {treeOpen && (
+          <Card className="col-span-12 h-fit gap-3 self-start lg:sticky lg:top-0 lg:col-span-4 xl:col-span-3">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
+              <CardTitle className="text-sm">组织架构</CardTitle>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="include-children" className="text-xs font-normal text-muted-foreground">
+                  含下级
+                </Label>
+                <Switch id="include-children" size="sm" checked={includeChildren} onCheckedChange={setIncludeChildren} />
+                <Button variant="ghost" size="icon-xs" onClick={() => setTreeOpen(false)} aria-label="收起组织架构">
+                  <PanelLeftClose />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="max-h-80 overflow-y-auto lg:max-h-[calc(100svh-15rem)]">
+              <DepartmentTree
+                nodes={departments}
+                selectedKey={deptKey}
+                onSelect={(key) => setDeptKey(key)}
+                allItem={{ label: "全部人员", count: stats?.total }}
+                unassignedItem={{ label: "未分配部门", count: stats?.unassigned }}
+              />
+            </CardContent>
+          </Card>
+        )}
+
+        <Card className={cn("col-span-12 min-w-0 gap-3", treeOpen && "lg:col-span-8 xl:col-span-9")}>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              {!treeOpen && (
+                <Button variant="ghost" size="icon-xs" onClick={() => setTreeOpen(true)} aria-label="展开组织架构">
+                  <PanelLeftOpen />
+                </Button>
+              )}
+              <CardTitle className="truncate text-sm">{scopeLabel}</CardTitle>
+              <Badge variant="secondary" className="font-mono">
+                {page?.total ?? 0}
+              </Badge>
+              {deptKey !== ALL_KEY && deptKey !== UNASSIGNED_KEY && (
+                <span className="hidden text-xs text-muted-foreground sm:inline">{includeChildren ? "含下级部门" : "仅直属成员"}</span>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <DataTable
+              columns={columns}
+              data={page?.items ?? []}
+              loading={usersQuery.isLoading}
+              getRowId={(u) => u.id}
+              serverFiltering
+              serverPagination={{ pageIndex: pagination.pageIndex, pageSize: pagination.pageSize, total: page?.total ?? 0, onChange: setPagination }}
+              serverSorting={{ sorting, onChange: setSorting }}
+              externalSearch={{ value: keyword, onChange: setKeyword }}
+              searchPlaceholder="搜索用户名、姓名或邮箱"
+              facetedFilters={facetedFilters}
+              columnLabels={columnLabels}
+              initialColumnVisibility={{ created_at: false }}
+              onRefresh={refreshAll}
+              isRefreshing={usersQuery.isFetching}
+              onRowClick={(u) => setDetailId(u.id)}
+              stickyActionColumn
+              batchActions={(rows, reset) =>
+                can("users:move") ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 bg-background"
+                    onClick={() => {
+                      clearSelection.current = reset
+                      setMoveUsers(rows)
+                    }}
+                  >
+                    <ArrowRightLeft />
+                    批量调岗
+                  </Button>
+                ) : null
+              }
+              emptyTitle={filtersActive ? "没有符合条件的人员" : "还没有用户"}
+              emptyDescription={filtersActive ? "调整筛选条件或切换左侧部门后再试" : "新建第一位成员，或在「目录同步」中从 AD / LDAP 自动导入"}
+              emptyAction={
+                filtersActive ? (
+                  <Button variant="outline" size="sm" onClick={resetFilters}>
+                    清除全部筛选
+                  </Button>
+                ) : can("users:create") ? (
+                  <Button size="sm" onClick={() => setFormUser("new")}>
+                    <UserPlus />
+                    新建用户
+                  </Button>
+                ) : undefined
+              }
+            />
+          </CardContent>
+        </Card>
       </div>
 
-      {/* 企业级数据表格核心容器 */}
-      <div className="w-full rounded-xl border border-border bg-card shadow-xs p-4">
-        <DataTable
-          columns={columns}
-          data={data}
-          loading={loading}
-          searchKey="username"
-          searchPlaceholder="搜索用户名..."
-        />
-      </div>
+      <UserFormDialog
+        open={formUser !== null}
+        onOpenChange={(open) => !open && setFormUser(null)}
+        user={formUser === "new" ? null : formUser}
+        departments={departments}
+        roles={roles}
+        defaultDepartmentId={deptKey !== ALL_KEY && deptKey !== UNASSIGNED_KEY ? deptKey : null}
+      />
+      <ResetPasswordDialog
+        user={resetUser}
+        isSelf={resetUser?.id === me?.id}
+        onOpenChange={(open) => !open && setResetUser(null)}
+        onSelfReset={() => {
+          queryClient.clear()
+          window.dispatchEvent(new Event("infranexus:unauthorized"))
+          navigate("/login", { replace: true })
+        }}
+      />
+      <AssignRolesDialog
+        user={rolesUser}
+        roles={roles}
+        isSelf={rolesUser?.id === me?.id}
+        onOpenChange={(open) => !open && setRolesUser(null)}
+        onSelfChanged={() => void checkAuth()}
+      />
+      <MoveDepartmentDialog
+        users={moveUsers}
+        departments={departments}
+        onOpenChange={(open) => !open && setMoveUsers([])}
+        onMoved={() => {
+          clearSelection.current?.()
+          clearSelection.current = null
+        }}
+      />
+      <UserDetailSheet
+        userId={detailId}
+        meId={me?.id}
+        departments={departments}
+        onOpenChange={(open) => !open && setDetailId(null)}
+        onEdit={(u) => setFormUser(u)}
+        onAssignRoles={(u) => setRolesUser(u)}
+        onResetPassword={(u) => setResetUser(u)}
+        onMove={(u) => setMoveUsers([u])}
+        onDelete={handleDelete}
+      />
+    </>
+  )
+}
 
-      {/* 新建用户弹窗 */}
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>新建平台用户</DialogTitle>
-            <DialogDescription>创建新的操作账号并分配初始安全角色</DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleCreateSubmit} className="space-y-4 pt-2">
-            {formError && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{formError}</AlertDescription>
-              </Alert>
-            )}
-
-            <div className="space-y-1.5">
-              <Label htmlFor="create-username">用户名 *</Label>
-              <Input
-                id="create-username"
-                placeholder="例如：developer"
-                value={formUsername}
-                onChange={(e) => setFormUsername(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="create-email">电子邮箱 *</Label>
-              <Input
-                id="create-email"
-                type="email"
-                placeholder="例如：dev@infranexus.com"
-                value={formEmail}
-                onChange={(e) => setFormEmail(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="create-password">初始密码 *</Label>
-              <Input
-                id="create-password"
-                type="password"
-                placeholder="至少 6 位密码"
-                value={formPassword}
-                onChange={(e) => setFormPassword(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="create-nickname">昵称 / 姓名</Label>
-              <Input
-                id="create-nickname"
-                placeholder="例如：张三"
-                value={formNickname}
-                onChange={(e) => setFormNickname(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>分配角色</Label>
-              <div className="grid grid-cols-2 gap-2 pt-1 max-h-40 overflow-y-auto">
-                {roles.map((r) => {
-                  const checked = formRoleIDs.includes(r.id);
-                  return (
-                    <label
-                      key={r.id}
-                      className={`flex items-center gap-2 rounded-lg border p-2.5 cursor-pointer transition-colors ${
-                        checked ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
-                      }`}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={(val) => {
-                          if (val) {
-                            setFormRoleIDs([...formRoleIDs, r.id]);
-                          } else {
-                            setFormRoleIDs(formRoleIDs.filter((id) => id !== r.id));
-                          }
-                        }}
-                      />
-                      <span className="text-xs font-medium leading-none">{r.name}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)}>
-                取消
-              </Button>
-              <Button type="submit" disabled={formSubmitting}>
-                {formSubmitting ? "正在创建..." : "确认创建"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* 编辑用户弹窗 */}
-      <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>编辑用户信息</DialogTitle>
-            <DialogDescription>修改用户昵称与角色分派</DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleEditSubmit} className="space-y-4 pt-2">
-            {formError && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{formError}</AlertDescription>
-              </Alert>
-            )}
-
-            <div className="space-y-1.5">
-              <Label className="text-muted-foreground">用户名 (不可变)</Label>
-              <Input value={editUser?.username || ""} disabled className="bg-muted" />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-nickname">昵称 / 姓名</Label>
-              <Input
-                id="edit-nickname"
-                placeholder="例如：李四"
-                value={formNickname}
-                onChange={(e) => setFormNickname(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>重新指定角色</Label>
-              <div className="grid grid-cols-2 gap-2 pt-1 max-h-40 overflow-y-auto">
-                {roles.map((r) => {
-                  const checked = formRoleIDs.includes(r.id);
-                  return (
-                    <label
-                      key={r.id}
-                      className={`flex items-center gap-2 rounded-lg border p-2.5 cursor-pointer transition-colors ${
-                        checked ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
-                      }`}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={(val) => {
-                          if (val) {
-                            setFormRoleIDs([...formRoleIDs, r.id]);
-                          } else {
-                            setFormRoleIDs(formRoleIDs.filter((id) => id !== r.id));
-                          }
-                        }}
-                      />
-                      <span className="text-xs font-medium leading-none">{r.name}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" onClick={() => setEditUser(null)}>
-                取消
-              </Button>
-              <Button type="submit" disabled={formSubmitting}>
-                {formSubmitting ? "正在保存..." : "保存修改"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+function StatusCell({
+  user,
+  meId,
+  canToggle,
+  onToggle,
+}: {
+  user: UserDTO
+  meId?: string
+  canToggle: boolean
+  onToggle: (user: UserDTO, enabled: boolean) => Promise<void>
+}) {
+  const [pending, setPending] = useState(false)
+  const reason = user.id === meId ? "不能停用当前登录账号" : user.built_in ? "内置管理员账号不可停用" : !canToggle ? "没有启停账号的权限" : ""
+  const active = user.status === 1
+  const control = (
+    <div className="flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
+      <Switch
+        checked={active}
+        disabled={pending || !!reason}
+        aria-label={active ? "停用账号" : "启用账号"}
+        onCheckedChange={async (checked) => {
+          setPending(true)
+          try {
+            await onToggle(user, checked)
+          } finally {
+            setPending(false)
+          }
+        }}
+      />
+      <StatusDot active={active} />
     </div>
-  );
+  )
+  if (!reason || user.status !== 1) return control
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<div className="inline-flex" />}>{control}</TooltipTrigger>
+      <TooltipContent>{reason}</TooltipContent>
+    </Tooltip>
+  )
 }

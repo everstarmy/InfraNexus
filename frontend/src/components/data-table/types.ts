@@ -1,6 +1,7 @@
 import {
   tableFeatures,
   stockFeatures,
+  createExpandedRowModel,
   createFilteredRowModel,
   createSortedRowModel,
   createPaginatedRowModel,
@@ -21,6 +22,7 @@ import {
  */
 export const appTableFeatures = tableFeatures({
   ...stockFeatures,
+  expandedRowModel: createExpandedRowModel(),
   filteredRowModel: createFilteredRowModel(),
   sortedRowModel: createSortedRowModel(),
   paginatedRowModel: createPaginatedRowModel(),
