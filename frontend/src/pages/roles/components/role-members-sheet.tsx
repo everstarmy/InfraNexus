@@ -38,7 +38,7 @@ export function RoleMembersSheet({ role, onOpenChange }: { role: RoleDTO | null;
           <SheetDescription>共 {role?.user_count ?? 0} 名在用成员拥有该角色</SheetDescription>
         </SheetHeader>
         <div className="border-b p-4">
-          <InputGroup className="h-8">
+          <InputGroup className="h-8 shadow-none border-input/50 bg-muted/30 focus-within:ring-0 has-[[data-slot=input-group-control]:focus-visible]:ring-0">
             <InputGroupAddon>
               <Search />
             </InputGroupAddon>

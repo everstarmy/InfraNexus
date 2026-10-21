@@ -73,7 +73,7 @@ export function AssignRolesDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <InputGroup className="h-8">
+          <InputGroup className="h-8 shadow-none border-input/50 bg-muted/30 focus-within:ring-0 has-[[data-slot=input-group-control]:focus-visible]:ring-0">
             <InputGroupAddon>
               <Search />
             </InputGroupAddon>

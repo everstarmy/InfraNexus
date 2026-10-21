@@ -96,7 +96,7 @@ func (r *authRepository) RenewSession(ctx context.Context, id string, now time.T
 		return &s, nil
 	}
 	raw, err := renewSessionScript.Run(ctx, r.redis, []string{sessionKey(id)}, now.UnixMilli(), idle.Milliseconds()).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) || (err == nil && raw == nil) {
 		return nil, nil
 	}
 	if err != nil {

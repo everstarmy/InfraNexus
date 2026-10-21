@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -32,9 +33,12 @@ func DualAuth(authSvc domain.AuthService, cfg *config.Config) fiber.Handler {
 			}
 			p, err = authSvc.AuthenticateBearer(c.Context(), parts[1])
 		} else {
-			p, expiry, err = authSvc.AuthenticateSession(c.Context(), c.Cookies(cfg.Session.CookieName))
+			cookie := c.Cookies(cfg.Session.CookieName)
+			p, expiry, err = authSvc.AuthenticateSession(c.Context(), cookie)
 			if err == nil {
 				SetSessionCookie(c, cfg, p.SessionID, expiry)
+			} else if cookie != "" && (errors.Is(err, coreerrors.ErrUnauthorized) || errors.Is(err, coreerrors.ErrSessionRevoked)) {
+				ClearSessionCookie(c, cfg)
 			}
 		}
 		if err != nil {
