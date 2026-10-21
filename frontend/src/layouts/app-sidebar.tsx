@@ -31,10 +31,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader className="border-b border-sidebar-border">
+      <SidebarHeader className="h-14 justify-center border-b border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<Link to="/" />}>
+            <SidebarMenuButton size="lg" className="h-10" render={<Link to="/" />}>
               <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-violet-500 text-primary-foreground shadow-sm ring-1 ring-primary/20">
                 <Layers className="size-4.5" />
               </div>

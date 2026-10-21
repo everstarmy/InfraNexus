@@ -84,7 +84,7 @@ export function Header({ onLogout }: { onLogout: () => void }) {
   const roleNames = user?.roles?.map((r) => r.name).join("、")
 
   return (
-    <header className="z-30 flex h-14 w-full shrink-0 items-center justify-between gap-2 border-b border-border/80 bg-background/80 px-3 backdrop-blur-md supports-backdrop-filter:bg-background/70 md:px-5">
+    <header className="z-30 flex h-14 w-full shrink-0 items-center justify-between gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-md supports-backdrop-filter:bg-background/70 md:px-5">
       <div className="flex min-w-0 items-center gap-2">
         <SidebarTrigger className="-ml-1" />
         <Separator orientation="vertical" className="mr-1 h-4" />
