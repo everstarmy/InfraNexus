@@ -9,24 +9,11 @@ import { RequirePermission } from "@/components/common/require-permission"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { routePages } from "@/routing/pages"
+import { RoutePage, RoutePageSkeleton } from "@/routing/route-page"
 import ForbiddenPage from "@/pages/errors/forbidden"
 
-const DashboardPage = lazy(() => import("@/pages/dashboard/index"))
-const UsersPage = lazy(() => import("@/pages/users/index"))
-const DepartmentsPage = lazy(() => import("@/pages/departments/index"))
-const RolesPage = lazy(() => import("@/pages/roles/index"))
-const PermissionsPage = lazy(() => import("@/pages/permissions/index"))
-const LdapPage = lazy(() => import("@/pages/ldap/index"))
 const LoginPage = lazy(() => import("@/pages/auth/login"))
-
-const pages: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
-  "/dashboard": DashboardPage,
-  "/users": UsersPage,
-  "/departments": DepartmentsPage,
-  "/roles": RolesPage,
-  "/permissions": PermissionsPage,
-  "/ldap": LdapPage,
-}
 
 function PageLoader() {
   return (
@@ -108,15 +95,15 @@ export default function App() {
               >
                 <Route path="/" element={<HomeRedirect />} />
                 {navItems.map((item) => {
-                  const Page = pages[item.url]
+                  const { Page } = routePages[item.url as keyof typeof routePages]
                   return (
                     <Route
                       key={item.url}
                       path={item.url}
                       element={
                         <RequirePermission code={item.permission}>
-                          <Suspense fallback={<PageLoader />}>
-                            <Page />
+                          <Suspense fallback={<RoutePageSkeleton />}>
+                            <RoutePage key={item.url}><Page /></RoutePage>
                           </Suspense>
                         </RequirePermission>
                       }

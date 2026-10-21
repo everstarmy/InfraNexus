@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/stores/auth-context"
 import { useNotifications } from "@/stores/notifications"
+import { preloadPage } from "@/routing/pages"
 import { navGroups } from "./nav-config"
 
 const statusText = { online: "实时通道已连接", connecting: "实时通道重连中", offline: "实时通道离线" } as const
@@ -59,7 +60,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   return (
                     <SidebarMenuItem key={item.url}>
                       <SidebarMenuButton
-                        render={<Link to={item.url} />}
+                        render={<Link to={item.url} onPointerEnter={() => preloadPage(item.url)} onFocus={() => preloadPage(item.url)} onTouchStart={() => preloadPage(item.url)} />}
                         isActive={isActive}
                         tooltip={item.title}
                         className={cn(
