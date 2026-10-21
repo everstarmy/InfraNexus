@@ -1,18 +1,7 @@
 import { useEffect, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Bell, BellOff, CheckCheck, ChevronDown, LogOut, Moon, Search, Settings, Sun } from "lucide-react"
-import { UserPreferencesDialog } from "./components/user-preferences-dialog"
+import { Bell, BellOff, CheckCheck, LogOut, Moon, Search, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -33,7 +22,6 @@ import {
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Kbd } from "@/components/ui/kbd"
-import { AuthSourceBadge } from "@/components/common/badges"
 import { setTheme } from "@/lib/theme"
 import { formatRelative } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -51,11 +39,10 @@ const toneDot: Record<NotificationTone, string> = {
 export function Header({ onLogout }: { onLogout: () => void }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, can } = useAuth()
+  const { can } = useAuth()
   const { items, unread, status, markAllRead, clear } = useNotifications()
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"))
   const [searchOpen, setSearchOpen] = useState(false)
-  const [prefOpen, setPrefOpen] = useState(false)
   const current = findNavByPath(location.pathname)
 
   useEffect(() => {
@@ -80,17 +67,20 @@ export function Header({ onLogout }: { onLogout: () => void }) {
     navigate(path)
   }
 
-  const displayName = user?.nickname || user?.username || ""
-  const roleNames = user?.roles?.map((r) => r.name).join("、")
-
   return (
-    <header className="z-30 flex h-14 w-full shrink-0 items-center justify-between gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-md supports-backdrop-filter:bg-background/70 md:px-5">
+    <header className="z-30 flex h-14 w-full shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-3 md:px-5">
       <div className="flex min-w-0 items-center gap-2">
         <SidebarTrigger className="-ml-1" />
         <Separator orientation="vertical" className="mr-1 h-4" />
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem className="hidden sm:inline-flex">{current?.group.label ?? "工作台"}</BreadcrumbItem>
+            {current?.parent && (
+              <>
+                <BreadcrumbSeparator className="hidden sm:inline-flex" />
+                <BreadcrumbItem className="hidden sm:inline-flex">{current.parent.title}</BreadcrumbItem>
+              </>
+            )}
             <BreadcrumbSeparator className="hidden sm:inline-flex" />
             <BreadcrumbItem>
               <BreadcrumbPage className="font-medium text-foreground">{current?.item.title ?? "控制台"}</BreadcrumbPage>
@@ -122,7 +112,10 @@ export function Header({ onLogout }: { onLogout: () => void }) {
             <CommandList>
               <CommandEmpty>未找到相关页面或操作</CommandEmpty>
               {navGroups.map((group) => {
-                const allowed = group.items.filter((item) => can(item.permission))
+                const flatItems = group.items.flatMap((item) =>
+                  item.children ? item.children : [item]
+                )
+                const allowed = flatItems.filter((item) => can(item.permission))
                 if (allowed.length === 0) return null
                 return (
                   <CommandGroup key={group.label} heading={group.label}>
@@ -211,47 +204,6 @@ export function Header({ onLogout }: { onLogout: () => void }) {
         <Button variant="ghost" size="icon" onClick={toggleTheme} className="text-muted-foreground hover:text-foreground" aria-label={isDark ? "切换至浅色模式" : "切换至深色模式"}>
           {isDark ? <Sun className="text-amber-400" /> : <Moon />}
         </Button>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={<Button variant="ghost" className="h-9 gap-2 rounded-full border border-transparent pr-2.5 pl-1 hover:border-border/60" />}
-          >
-            <Avatar className="size-7">
-              <AvatarFallback className="bg-primary/10 text-xs font-semibold text-primary">{displayName.slice(0, 1).toUpperCase() || "U"}</AvatarFallback>
-            </Avatar>
-            <span className="hidden max-w-28 flex-col text-left md:flex">
-              <span className="truncate text-xs leading-tight font-semibold">{displayName}</span>
-              <span className="truncate text-[10px] leading-tight text-muted-foreground">{roleNames || "未分配角色"}</span>
-            </span>
-            <ChevronDown className="hidden size-3.5 text-muted-foreground md:block" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-60">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
-                  {user && <AuthSourceBadge authType={user.auth_type} />}
-                </div>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">
-                  {user?.username}
-                  {user?.domain ? `@${user.domain}` : ""}
-                </p>
-              </DropdownMenuLabel>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setPrefOpen(true)}>
-              <Settings className="size-4" />
-              偏好与会话设置
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onClick={onLogout}>
-              <LogOut />
-              退出登录
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <UserPreferencesDialog open={prefOpen} onOpenChange={setPrefOpen} />
       </div>
     </header>
   )
