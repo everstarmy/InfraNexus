@@ -85,7 +85,35 @@ func (r *authRepository) SaveSession(ctx context.Context, s domain.Session, oldI
 	return saveSessionScript.Run(ctx, r.redis, []string{sessionKey(s.ID), sessionKey(oldID)}, oldID, data, ttl.Milliseconds()).Err()
 }
 
-var renewSessionScript = redis.NewScript(`local v=redis.call('GET',KEYS[1]); if not v then return nil end; local s=cjson.decode(v); local now=tonumber(ARGV[1]); if tonumber(s.expires_at)<=now or tonumber(s.absolute_expires_at)<=now then redis.call('DEL',KEYS[1]); return nil end; local idle=tonumber(s.idle_timeout); if not idle or idle<=0 then idle=tonumber(ARGV[2]) end; local expiry=math.min(now+idle,tonumber(s.absolute_expires_at)); s.expires_at=expiry; redis.call('SET',KEYS[1],cjson.encode(s),'PX',math.max(1,expiry-now)); return cjson.encode(s)`)
+// Session records from older versions lack millisecond expiry fields. Reject
+// those records instead of failing the script or inventing a new lifetime.
+const loadActiveSessionScript = `
+local function loadActiveSession(now)
+    local v = redis.call('GET', KEYS[1])
+    if not v then return nil end
+    local ok, s = pcall(cjson.decode, v)
+    if not ok or type(s) ~= 'table'
+        or type(s.expires_at) ~= 'number'
+        or type(s.absolute_expires_at) ~= 'number'
+        or s.expires_at <= now or s.absolute_expires_at <= now then
+        redis.call('DEL', KEYS[1])
+        return nil
+    end
+    return s
+end
+`
+
+var renewSessionScript = redis.NewScript(loadActiveSessionScript + `
+local now = tonumber(ARGV[1])
+local s = loadActiveSession(now)
+if not s then return nil end
+local idle = tonumber(s.idle_timeout)
+if not idle or idle <= 0 then idle = tonumber(ARGV[2]) end
+local expiry = math.min(now + idle, s.absolute_expires_at)
+s.expires_at = expiry
+redis.call('SET', KEYS[1], cjson.encode(s), 'PX', math.max(1, expiry - now))
+return cjson.encode(s)
+`)
 
 func (r *authRepository) RenewSession(ctx context.Context, id string, now time.Time, idle time.Duration) (*domain.Session, error) {
 	if r.redis == nil {
@@ -126,7 +154,18 @@ func (r *authRepository) RenewSession(ctx context.Context, id string, now time.T
 	return &s, err
 }
 
-var updateSessionIdleScript = redis.NewScript(`local v=redis.call('GET',KEYS[1]); if not v then return 0 end; local s=cjson.decode(v); s.idle_timeout=tonumber(ARGV[1]); local now=tonumber(ARGV[2]); local idle=tonumber(ARGV[1]); if not idle or idle<=0 then idle=tonumber(ARGV[3]) end; local expiry=math.min(now+idle,tonumber(s.absolute_expires_at)); s.expires_at=expiry; redis.call('SET',KEYS[1],cjson.encode(s),'PX',math.max(1,expiry-now)); return 1`)
+var updateSessionIdleScript = redis.NewScript(loadActiveSessionScript + `
+local now = tonumber(ARGV[2])
+local s = loadActiveSession(now)
+if not s then return 0 end
+s.idle_timeout = tonumber(ARGV[1])
+local idle = s.idle_timeout
+if not idle or idle <= 0 then idle = tonumber(ARGV[3]) end
+local expiry = math.min(now + idle, s.absolute_expires_at)
+s.expires_at = expiry
+redis.call('SET', KEYS[1], cjson.encode(s), 'PX', math.max(1, expiry - now))
+return 1
+`)
 
 func (r *authRepository) UpdateSessionIdle(ctx context.Context, id string, idleMs int64, defaultIdleMs int64) error {
 	if id == "" {
