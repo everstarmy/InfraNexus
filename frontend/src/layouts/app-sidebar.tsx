@@ -446,7 +446,9 @@ export function AppSidebar({ onLogout, ...props }: AppSidebarProps) {
       <SidebarContent>
         {groups.map((group) => (
           <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupLabel className="group-data-[collapsible=icon]:pointer-events-none">
+              {group.label}
+            </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => (
