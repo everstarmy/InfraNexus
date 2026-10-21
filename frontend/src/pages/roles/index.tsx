@@ -70,7 +70,7 @@ export default function RolesPage() {
         description:
           role.user_count > 0
             ? `该角色当前授予了 ${role.user_count} 名成员，删除后他们将立即失去该角色的全部权限。`
-            : "删除后该角色的 Casbin 策略会同步移除，此操作不可撤销。",
+            : "删除后该角色的授权策略会同步移除，此操作不可撤销。",
         confirmText: "确认删除",
         onConfirm: async () => {
           try {
@@ -247,11 +247,11 @@ export default function RolesPage() {
       <PageHeader
         icon={ShieldCheck}
         title="角色管理"
-        description="定义角色与授权范围，策略实时同步至 Casbin 鉴权引擎"
+        description="定义角色与授权范围，策略实时生效至服务端鉴权引擎"
         badge={
           <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-300">
             <span className="size-1.5 rounded-full bg-sky-500 animate-pulse" />
-            Casbin 策略同步生效中
+            访问控制策略实时生效中
           </span>
         }
         actions={

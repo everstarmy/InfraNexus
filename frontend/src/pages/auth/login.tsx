@@ -35,7 +35,7 @@ const MODE_KEY = "infranexus_login_mode"
 const features = [
   { icon: Building2, title: "企业域统一登录", text: "AD / LDAP 凭证直连校验，首次登录自动建档" },
   { icon: Network, title: "组织架构同步", text: "OU 自动映射部门树，全量与增量定时同步" },
-  { icon: ShieldCheck, title: "细粒度权限", text: "菜单、按钮、API 三级权限，Casbin 实时鉴权" },
+  { icon: ShieldCheck, title: "细粒度权限", text: "菜单、按钮、API 三级权限，服务端实时精准鉴权" },
 ]
 
 export default function LoginPage() {

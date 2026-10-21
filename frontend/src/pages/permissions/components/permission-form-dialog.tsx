@@ -99,7 +99,7 @@ export function PermissionFormDialog({ state, tree, onOpenChange }: { state: Per
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{editing ? "编辑权限点" : "新建权限点"}</DialogTitle>
-          <DialogDescription>菜单控制导航可见性，按钮控制界面操作，接口通过 Casbin 在服务端鉴权</DialogDescription>
+          <DialogDescription>菜单控制导航可见性，按钮控制界面操作，接口由服务端在每次请求时强制鉴权</DialogDescription>
         </DialogHeader>
         <form
           className="space-y-4"

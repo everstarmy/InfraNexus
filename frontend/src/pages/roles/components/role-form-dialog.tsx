@@ -55,7 +55,7 @@ export function RoleFormDialog({ open, role, onOpenChange }: { open: boolean; ro
             {editing ? <ShieldCheck className="size-4.5 text-primary" /> : <ShieldPlus className="size-4.5 text-primary" />}
             {editing ? "编辑角色" : "新建角色"}
           </DialogTitle>
-          <DialogDescription>角色编码是 Casbin 策略的主体标识，创建后不可修改</DialogDescription>
+          <DialogDescription>角色编码是系统唯一的授权主体标识，创建后不可修改</DialogDescription>
         </DialogHeader>
         <form
           className="space-y-4"

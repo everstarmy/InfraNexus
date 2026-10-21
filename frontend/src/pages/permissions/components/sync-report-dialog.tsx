@@ -22,7 +22,7 @@ export function SyncReportDialog({ report, onOpenChange }: { report: RouteSyncRe
             <RefreshCcwDot className="size-4.5 text-primary" />
             路由同步报告
           </DialogTitle>
-          <DialogDescription>已扫描服务端注册的受控路由，补齐 API 权限点，并按角色授权重建 Casbin 策略</DialogDescription>
+          <DialogDescription>已扫描服务端注册的受控路由，补齐接口权限点，并按角色授权重建底层鉴权策略</DialogDescription>
         </DialogHeader>
         <dl className="grid grid-cols-5 gap-px overflow-hidden rounded-xl border bg-border">
           {metrics.map((m) => (
@@ -47,7 +47,7 @@ export function SyncReportDialog({ report, onOpenChange }: { report: RouteSyncRe
         ) : (
           <p className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-3 text-xs text-muted-foreground">
             <CheckCircle2 className="size-4 text-emerald-500" />
-            所有受控路由均已登记，权限点与 Casbin 策略保持一致
+            所有受控路由均已登记，接口权限点与鉴权策略保持一致
           </p>
         )}
         <DialogFooter>

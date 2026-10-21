@@ -39,7 +39,7 @@ export function RolePermissionDialog({ role, onOpenChange }: { role: RoleDTO | n
   const mutation = useMutation({
     mutationFn: () => rolesService.assignPermissions(role!.id, [...selected]),
     onSuccess: () => {
-      notify.success("权限已保存", `「${role?.name}」的授权已同步至 Casbin，立即生效`)
+      notify.success("权限已保存", `「${role?.name}」的授权已更新，策略立即生效`)
       void queryClient.invalidateQueries({ queryKey: ["roles"] })
       if (user?.roles?.some((r) => r.id === role?.id)) void checkAuth()
       onOpenChange(false)
@@ -63,7 +63,7 @@ export function RolePermissionDialog({ role, onOpenChange }: { role: RoleDTO | n
           {isAdminRole ? (
             <Alert>
               <Crown />
-              <AlertDescription>超级管理员内置拥有全部权限（Casbin 超级主体旁路），无需逐项分配。</AlertDescription>
+              <AlertDescription>超级管理员内置拥有系统最高权限，无需逐项分配。</AlertDescription>
             </Alert>
           ) : loading ? (
             <div className="space-y-3">

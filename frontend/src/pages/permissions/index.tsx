@@ -67,8 +67,8 @@ export default function PermissionsPage() {
   const syncRoutes = () =>
     void confirm({
       tone: "default",
-      title: "同步路由至 Casbin？",
-      description: "将扫描服务端已注册的受控路由，为缺失的接口登记权限点，并依据角色授权重建全部 Casbin 策略，修复策略漂移。",
+      title: "同步系统接口权限？",
+      description: "将扫描服务端已注册的受控路由，为缺失的接口自动登记权限点，并依据当前角色授权重建底层鉴权策略。",
       confirmText: "开始同步",
       onConfirm: async () => {
         setSyncing(true)
@@ -89,7 +89,7 @@ export default function PermissionsPage() {
     (perm: PermissionDTO) =>
       void confirm({
         title: `删除权限点「${perm.name}」？`,
-        description: "删除后，已授予该权限点的角色将同步移除对应授权与 Casbin 策略。",
+        description: "删除后，已授予该权限点的角色将同步移除对应授权与访问策略。",
         confirmText: "确认删除",
         onConfirm: async () => {
           try {
@@ -250,7 +250,7 @@ export default function PermissionsPage() {
       <PageHeader
         icon={KeyRound}
         title="权限清单"
-        description="维护菜单、按钮与 API 三级权限点；API 权限由 Casbin 在服务端强制校验"
+        description="维护菜单、操作按钮与接口三级权限点；接口权限由服务端在每次请求时强制鉴权"
         badge={
           <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300">
             <span className="size-1.5 rounded-full bg-violet-500 animate-pulse" />
@@ -262,7 +262,7 @@ export default function PermissionsPage() {
             {can("permissions:sync") && (
               <Button variant="outline" onClick={syncRoutes} disabled={syncing}>
                 {syncing ? <Spinner /> : <RefreshCcwDot />}
-                同步路由至 Casbin
+                同步系统路由
               </Button>
             )}
             {can("permissions:create") && (
@@ -278,7 +278,7 @@ export default function PermissionsPage() {
       <StatGrid>
         <StatCard label="菜单" value={counts.menu} icon={PanelsTopLeft} tone="primary" loading={query.isLoading} hint="控制侧栏与路由可见性" />
         <StatCard label="按钮" value={counts.button} icon={MousePointerClick} tone="warning" loading={query.isLoading} hint="控制页面内操作入口" />
-        <StatCard label="接口" value={counts.api} icon={Webhook} tone="info" loading={query.isLoading} hint="映射为 Casbin (角色, 路径, 方法) 策略" />
+        <StatCard label="接口" value={counts.api} icon={Webhook} tone="info" loading={query.isLoading} hint="控制后端接口访问，按 (角色, 路径, 请求方法) 鉴权" />
         <StatCard label="内置节点" value={counts.builtIn} icon={ShieldCheck} tone="default" loading={query.isLoading} hint="随系统升级维护，不可删除" />
       </StatGrid>
 
@@ -301,7 +301,7 @@ export default function PermissionsPage() {
             isRefreshing={query.isFetching}
             stickyActionColumn
             emptyTitle="暂无权限点"
-            emptyDescription="点击「同步路由至 Casbin」自动登记服务端接口"
+            emptyDescription="点击「同步系统路由」自动登记服务端接口"
           />
         </CardContent>
       </Card>
