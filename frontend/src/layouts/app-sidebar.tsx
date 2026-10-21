@@ -62,9 +62,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         render={<Link to={item.url} />}
                         isActive={isActive}
                         tooltip={item.title}
-                        className={cn("transition-colors", isActive ? "font-medium" : "text-muted-foreground")}
+                        className={cn(
+                          "transition-all duration-150",
+                          isActive
+                            ? "font-medium text-sidebar-foreground bg-sidebar-accent shadow-2xs"
+                            : "text-muted-foreground hover:text-sidebar-foreground",
+                        )}
                       >
-                        <Icon className="size-4 shrink-0" />
+                        <Icon className={cn("size-4 shrink-0 transition-colors", isActive && "text-primary")} />
                         <span>{item.title}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>

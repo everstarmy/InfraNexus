@@ -231,6 +231,19 @@ export default function LdapPage() {
         icon={FolderSync}
         title="目录同步"
         description="对接 Windows AD / LDAP：域账号登录、组织架构映射与定时同步"
+        badge={
+          configs.length > 0 ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+              <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              已接入 {configs.length} 个目录源
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+              <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+              尚未接入
+            </span>
+          )
+        }
         actions={
           can("ldap:create") && (
             <Button onClick={() => setEditing("new")}>
@@ -261,29 +274,63 @@ export default function LdapPage() {
           <Skeleton className="col-span-12 h-44 rounded-xl xl:col-span-6" />
         </div>
       ) : configs.length === 0 ? (
-        <Empty className="border border-dashed bg-card/50 py-14">
-          <EmptyHeader>
-            <EmptyMedia>
-              <div className="flex size-14 items-center justify-center rounded-2xl border bg-gradient-to-br from-sky-500/15 to-violet-500/10 text-sky-600 shadow-sm dark:text-sky-300">
-                <Building2 className="size-7" />
+        <Card className="col-span-12 overflow-hidden border border-border/80 bg-gradient-to-b from-card via-card to-muted/20 p-8 shadow-xs sm:p-10">
+          <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
+            <div className="flex size-14 items-center justify-center rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/15 via-violet-500/10 to-primary/10 text-sky-600 shadow-sm ring-1 ring-sky-500/20 dark:text-sky-300">
+              <Building2 className="size-7" />
+            </div>
+
+            <h3 className="mt-4 text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+              连接企业身份源 (Active Directory / OpenLDAP)
+            </h3>
+            <p className="mt-2 max-w-lg text-sm text-muted-foreground leading-relaxed">
+              将现有的 Windows AD 或 LDAP 目录服务接入 InfraNexus，实现企业员工域账号免注册登录与部门组织树全自动映射。
+            </p>
+
+            <div className="my-8 grid w-full grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4 text-left">
+              <div className="rounded-xl border border-border/70 bg-muted/40 p-4 transition-colors hover:border-primary/30">
+                <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                  <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-mono">1</span>
+                  直连目录服务器
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground leading-normal">
+                  支持 LDAPS (SSL/TLS) 加密连接，自适应各类 Base DN 与过滤规则。
+                </p>
               </div>
-            </EmptyMedia>
-            <EmptyTitle>还没有接入企业目录</EmptyTitle>
-            <EmptyDescription>添加 AD / LDAP 配置后，员工可使用域账号直接登录，组织架构也能自动同步</EmptyDescription>
-          </EmptyHeader>
-          {can("ldap:create") && (
-            <EmptyContent>
-              <Button onClick={() => setEditing("new")}>
-                <Plus />
-                新建目录配置
+
+              <div className="rounded-xl border border-border/70 bg-muted/40 p-4 transition-colors hover:border-primary/30">
+                <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                  <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-mono">2</span>
+                  统一账号与组织映射
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground leading-normal">
+                  sAMAccountName、mail 等属性映射，OU 自动生成平台部门层级。
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-border/70 bg-muted/40 p-4 transition-colors hover:border-primary/30">
+                <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                  <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-mono">3</span>
+                  定时与增量同步
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground leading-normal">
+                  后台调度器按分钟级全量/增量拉取，人员调动离职权限秒级收回。
+                </p>
+              </div>
+            </div>
+
+            {can("ldap:create") && (
+              <Button size="lg" onClick={() => setEditing("new")} className="gap-2 shadow-xs">
+                <Plus className="size-4" />
+                新建第一个目录配置
               </Button>
-            </EmptyContent>
-          )}
-        </Empty>
+            )}
+          </div>
+        </Card>
       ) : (
         <div className="grid grid-cols-12 gap-4">
           {configs.map((cfg) => (
-            <Card key={cfg.id} className="col-span-12 gap-0 overflow-hidden py-0 2xl:col-span-6">
+            <Card key={cfg.id} className="col-span-12 gap-0 overflow-hidden py-0 2xl:col-span-6 border border-border/80 shadow-xs hover:border-primary/40 hover:shadow-sm transition-all">
               <div className="flex items-start justify-between gap-3 p-5">
                 <div className="flex min-w-0 items-start gap-3">
                   <div className={cn("flex size-11 shrink-0 items-center justify-center rounded-xl", cfg.type === "ad" ? "bg-sky-500/10 text-sky-600 dark:text-sky-300" : "bg-violet-500/10 text-violet-600 dark:text-violet-300")}>
