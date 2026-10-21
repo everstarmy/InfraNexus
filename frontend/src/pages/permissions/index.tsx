@@ -188,6 +188,8 @@ export default function PermissionsPage() {
         enableSorting: false,
         cell: ({ row }) => {
           const p = row.original
+          const canManage = (p.type !== "api" && can("permissions:create")) || can("permissions:update") || can("permissions:delete")
+          if (!canManage) return null
           return (
             <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
               <DropdownMenu>

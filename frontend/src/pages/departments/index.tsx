@@ -61,6 +61,7 @@ function siblingsOf(tree: DepartmentNode[], node: DepartmentNode) {
 
 export default function DepartmentsPage() {
   const { can } = useAuth()
+  const canManage = can("departments:create") || can("departments:update") || can("departments:delete")
   const confirm = useConfirm()
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -329,16 +330,20 @@ export default function DepartmentsPage() {
                 selectedKey={selectedId}
                 onSelect={(key) => setSelectedId(key)}
                 defaultExpandDepth={3}
-                renderActions={(node) => (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`${node.name} 的操作`} />}>
-                      <MoreHorizontal />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-40">
-                      {actionsFor(node)}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                renderActions={
+                  canManage
+                    ? (node) => (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`${node.name} 的操作`} />}>
+                            <MoreHorizontal />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-40">
+                            {actionsFor(node)}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )
+                    : undefined
+                }
               />
             </CardContent>
           </Card>
@@ -363,28 +368,30 @@ export default function DepartmentsPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {can("departments:create") && (
-                      <Button size="sm" variant="outline" onClick={() => setForm({ mode: "create", parentId: selected.id })}>
-                        <FolderPlus />
-                        子部门
-                      </Button>
-                    )}
-                    {can("departments:update") && (
-                      <Button size="sm" variant="outline" onClick={() => setForm({ mode: "edit", department: selected })}>
-                        <FolderPen />
-                        编辑
-                      </Button>
-                    )}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger render={<Button size="icon-sm" variant="outline" aria-label="更多操作" />}>
-                        <MoreHorizontal />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-40">
-                        {actionsFor(selected)}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                  {canManage && (
+                    <div className="flex flex-wrap gap-2">
+                      {can("departments:create") && (
+                        <Button size="sm" variant="outline" onClick={() => setForm({ mode: "create", parentId: selected.id })}>
+                          <FolderPlus />
+                          子部门
+                        </Button>
+                      )}
+                      {can("departments:update") && (
+                        <Button size="sm" variant="outline" onClick={() => setForm({ mode: "edit", department: selected })}>
+                          <FolderPen />
+                          编辑
+                        </Button>
+                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger render={<Button size="icon-sm" variant="outline" aria-label="更多操作" />}>
+                          <MoreHorizontal />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                          {actionsFor(selected)}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  )}
                 </div>
                 <dl className="grid grid-cols-2 gap-px bg-border/60 sm:grid-cols-4">
                   {[
