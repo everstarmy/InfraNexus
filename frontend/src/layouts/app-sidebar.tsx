@@ -349,8 +349,8 @@ function NavUser({ onLogout }: { onLogout?: () => void }) {
             </DropdownMenuTrigger>
             <DropdownMenuContent
               className="w-60 rounded-xl duration-200 border border-border/80 shadow-lg"
-              side={isMobile ? "bottom" : "right"}
-              align="end"
+              side={isMobile ? "bottom" : isCollapsed ? "right" : "top"}
+              align={isCollapsed ? "end" : "center"}
               sideOffset={8}
             >
               <DropdownMenuGroup>
