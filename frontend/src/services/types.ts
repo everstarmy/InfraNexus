@@ -48,9 +48,16 @@ export interface UserDTO {
   built_in: boolean
   last_login_at?: string | null
   roles?: RoleRef[]
-  preferences?: { theme?: string; locale?: string; pinned_routes?: string[] | null }
+  preferences?: UserPreferences
   created_at?: string
   updated_at?: string
+}
+
+export interface UserPreferences {
+  theme?: string
+  locale?: string
+  pinned_routes?: string[] | null
+  session_timeout?: number
 }
 
 export interface CurrentUser extends UserDTO {

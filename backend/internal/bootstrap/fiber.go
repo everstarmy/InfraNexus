@@ -85,7 +85,7 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 		authSvc:     authSvc,
 		casbin:      middleware.NewCasbin(middleware.CasbinConfig{Enforcer: enforcer, SuperRole: domain.AdminRoleCode}),
 		auth:        handler.NewAuthHandler(app.Config, authSvc),
-		users:       handler.NewUserHandler(userSvc),
+		users:       handler.NewUserHandler(userSvc, authSvc),
 		roles:       handler.NewRoleHandler(roleSvc),
 		permissions: handler.NewPermissionHandler(permSvc),
 		departments: handler.NewDepartmentHandler(deptSvc),

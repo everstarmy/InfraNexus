@@ -261,6 +261,9 @@ func (s *userService) BatchMoveDepartment(ctx context.Context, userIDs []uuid.UU
 }
 
 func (s *userService) UpdatePreferences(ctx context.Context, id uuid.UUID, pref domain.UserPreferences) error {
+	if pref.SessionTimeout < 0 || pref.SessionTimeout > 2592000 {
+		return coreerrors.ErrParamInvalid.WithMessage("会话超时时间设置非法（范围：0 ~ 2592000秒）")
+	}
 	if _, err := s.GetUser(ctx, id); err != nil {
 		return err
 	}

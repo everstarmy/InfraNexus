@@ -112,11 +112,26 @@ func (s *authService) Login(ctx context.Context, in domain.LoginInput, oldID str
 	if idle <= 0 || absolute <= 0 {
 		return nil, nil, authStoreError(fmt.Errorf("invalid session lifetime"))
 	}
+	var idleTimeoutMs int64
+	if user.Preferences.Data().SessionTimeout > 0 {
+		userTimeout := time.Duration(user.Preferences.Data().SessionTimeout) * time.Second
+		if userTimeout <= absolute {
+			idle = userTimeout
+			idleTimeoutMs = idle.Milliseconds()
+		}
+	}
 	id, err := secureToken()
 	if err != nil {
 		return nil, nil, err
 	}
-	session := domain.Session{ID: id, UserID: user.ID, CreatedAt: now, ExpiresAt: now.Add(idle), AbsoluteExpiresAt: now.Add(absolute)}
+	session := domain.Session{
+		ID:                id,
+		UserID:            user.ID,
+		CreatedAt:         now,
+		ExpiresAt:         now.Add(idle),
+		AbsoluteExpiresAt: now.Add(absolute),
+		IdleTimeout:       idleTimeoutMs,
+	}
 	if session.ExpiresAt.After(session.AbsoluteExpiresAt) {
 		session.ExpiresAt = session.AbsoluteExpiresAt
 	}
@@ -260,6 +275,17 @@ func (s *authService) Logout(ctx context.Context, p *domain.Principal) error {
 		}
 	}
 	return nil
+}
+func (s *authService) UpdateSessionIdle(ctx context.Context, sessionID string, seconds int) error {
+	if sessionID == "" {
+		return nil
+	}
+	var idleMs int64
+	if seconds > 0 {
+		idleMs = int64(seconds) * 1000
+	}
+	defaultIdleMs := int64(s.cfg.Session.MaxAge) * 1000
+	return s.store.UpdateSessionIdle(ctx, sessionID, idleMs, defaultIdleMs)
 }
 func (s *authService) makePair(id uuid.UUID, family string, familyExpiry time.Time) (*domain.TokenPair, string, time.Time, error) {
 	now := s.now()

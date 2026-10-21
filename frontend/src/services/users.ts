@@ -1,5 +1,5 @@
 import { api } from "./api"
-import type { Envelope, PageData, UserDTO } from "./types"
+import type { Envelope, PageData, UserDTO, UserPreferences } from "./types"
 
 export interface UserListParams {
   page?: number
@@ -60,4 +60,6 @@ export const usersService = {
     api.put(`/users/${id}/roles`, { role_ids: roleIds }) as Promise<Envelope<UserDTO>>,
   batchMove: (userIds: string[], targetDeptId: string) =>
     api.post("/users/batch-move-department", { user_ids: userIds, target_dept_id: targetDeptId }) as Promise<Envelope<{ moved: number }>>,
+  updateMyPreferences: (preferences: UserPreferences) =>
+    api.put("/users/me/preferences", preferences) as Promise<Envelope<UserPreferences>>,
 }

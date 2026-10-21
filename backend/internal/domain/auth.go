@@ -13,6 +13,7 @@ type Session struct {
 	CreatedAt         time.Time `json:"created_at"`
 	ExpiresAt         time.Time `json:"expires_at"`
 	AbsoluteExpiresAt time.Time `json:"absolute_expires_at"`
+	IdleTimeout       int64     `json:"idle_timeout,omitempty"` // 毫秒，0 表示跟随系统默认
 }
 
 type TokenPair struct {
@@ -51,11 +52,13 @@ type AuthService interface {
 	Logout(ctx context.Context, principal *Principal) error
 	CurrentUser(ctx context.Context, id uuid.UUID) (*User, error)
 	Profile(ctx context.Context, id uuid.UUID) (*CurrentUser, error)
+	UpdateSessionIdle(ctx context.Context, sessionID string, seconds int) error
 }
 
 type AuthRepository interface {
 	SaveSession(ctx context.Context, session Session, oldID string) error
 	RenewSession(ctx context.Context, id string, now time.Time, idle time.Duration) (*Session, error)
+	UpdateSessionIdle(ctx context.Context, id string, idleMs int64, defaultIdleMs int64) error
 	DeleteSession(ctx context.Context, id string) error
 	CreateFamily(ctx context.Context, familyID, refreshID string, expiresAt time.Time) error
 	CheckFamily(ctx context.Context, familyID string) (bool, error)

@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { authService, type CurrentUser } from "@/services/auth"
+import type { UserPreferences } from "@/services/types"
 import { getErrorStatus } from "@/lib/api-error"
 import { hasPermission } from "@/lib/permissions"
 
@@ -12,6 +13,7 @@ interface AuthContextType {
   logout: () => Promise<void>
   checkAuth: () => Promise<boolean>
   can: (code: string | readonly string[]) => boolean
+  updateUserPreferences: (pref: Partial<UserPreferences>) => void
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -69,9 +71,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [user],
   )
 
+  const updateUserPreferences = useCallback((pref: Partial<UserPreferences>) => {
+    setUser((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        preferences: {
+          ...prev.preferences,
+          ...pref,
+        },
+      }
+    })
+  }, [])
+
   const value = useMemo(
-    () => ({ user, loading, authError, isAuthenticated: !!user, login, logout, checkAuth, can }),
-    [user, loading, authError, login, logout, checkAuth, can],
+    () => ({ user, loading, authError, isAuthenticated: !!user, login, logout, checkAuth, can, updateUserPreferences }),
+    [user, loading, authError, login, logout, checkAuth, can, updateUserPreferences],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

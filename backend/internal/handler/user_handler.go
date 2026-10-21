@@ -14,10 +14,15 @@ import (
 
 type UserHandler struct {
 	userSvc domain.UserService
+	authSvc domain.AuthService
 }
 
-func NewUserHandler(userSvc domain.UserService) *UserHandler {
-	return &UserHandler{userSvc: userSvc}
+func NewUserHandler(userSvc domain.UserService, authSvc ...domain.AuthService) *UserHandler {
+	var auth domain.AuthService
+	if len(authSvc) > 0 {
+		auth = authSvc[0]
+	}
+	return &UserHandler{userSvc: userSvc, authSvc: auth}
 }
 
 func (h *UserHandler) List(c fiber.Ctx) error {
@@ -214,6 +219,12 @@ func (h *UserHandler) UpdateMyPreferences(c fiber.Ctx) error {
 
 	if err := h.userSvc.UpdatePreferences(c.Context(), userCtx.UserID, pref); err != nil {
 		return err
+	}
+
+	if h.authSvc != nil {
+		if p, ok := c.Locals("current_principal").(*domain.Principal); ok && p != nil && p.SessionID != "" {
+			_ = h.authSvc.UpdateSessionIdle(c.Context(), p.SessionID, pref.SessionTimeout)
+		}
 	}
 
 	return response.Success(c, pref)

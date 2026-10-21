@@ -228,5 +228,6 @@ func TestSelfServiceAndOptionsNeedOnlyAuthentication(t *testing.T) {
 	expectCode(t, call(t, app, "GET", "/api/v1/users", plain, nil), 403, response.CodePermissionDenied)
 	expectCode(t, call(t, app, "GET", "/api/v1/options/roles", plain, nil), 200, response.CodeSuccess)
 	expectCode(t, call(t, app, "GET", "/api/v1/options/departments", plain, nil), 200, response.CodeSuccess)
-	expectCode(t, call(t, app, "PUT", "/api/v1/users/me/preferences", plain, map[string]any{"theme": "dark"}), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "PUT", "/api/v1/users/me/preferences", plain, map[string]any{"theme": "dark", "session_timeout": 3600}), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "PUT", "/api/v1/users/me/preferences", plain, map[string]any{"session_timeout": -1}), 400, response.CodeParamInvalid)
 }

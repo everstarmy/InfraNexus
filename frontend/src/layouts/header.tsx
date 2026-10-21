@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Bell, BellOff, CheckCheck, ChevronDown, LogOut, Moon, Search, Sun } from "lucide-react"
+import { Bell, BellOff, CheckCheck, ChevronDown, LogOut, Moon, Search, Settings, Sun } from "lucide-react"
+import { UserPreferencesDialog } from "./components/user-preferences-dialog"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -54,6 +55,7 @@ export function Header({ onLogout }: { onLogout: () => void }) {
   const { items, unread, status, markAllRead, clear } = useNotifications()
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"))
   const [searchOpen, setSearchOpen] = useState(false)
+  const [prefOpen, setPrefOpen] = useState(false)
   const current = findNavByPath(location.pathname)
 
   useEffect(() => {
@@ -237,12 +239,19 @@ export function Header({ onLogout }: { onLogout: () => void }) {
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setPrefOpen(true)}>
+              <Settings className="size-4" />
+              偏好与会话设置
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onClick={onLogout}>
               <LogOut />
               退出登录
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <UserPreferencesDialog open={prefOpen} onOpenChange={setPrefOpen} />
       </div>
     </header>
   )

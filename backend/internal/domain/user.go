@@ -16,9 +16,10 @@ const (
 
 // UserPreferences 用户界面与操作偏好 (利用 JSONType[T] 强类型序列化)
 type UserPreferences struct {
-	Theme        string   `json:"theme"`         // "dark" | "light" | "system"
-	Locale       string   `json:"locale"`        // "zh-CN" | "en-US"
-	PinnedRoutes []string `json:"pinned_routes"` // 侧栏快捷置顶路由
+	Theme          string   `json:"theme"`                    // "dark" | "light" | "system"
+	Locale         string   `json:"locale"`                   // "zh-CN" | "en-US"
+	PinnedRoutes   []string `json:"pinned_routes"`            // 侧栏快捷置顶路由
+	SessionTimeout int      `json:"session_timeout,omitempty"`// 自定义空闲超时 (秒)，0 表示跟随系统默认
 }
 
 type User struct {

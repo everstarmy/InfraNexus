@@ -31,14 +31,22 @@ type sessionWire struct {
 	CreatedAt         int64  `json:"created_at"`
 	ExpiresAt         int64  `json:"expires_at"`
 	AbsoluteExpiresAt int64  `json:"absolute_expires_at"`
+	IdleTimeout       int64  `json:"idle_timeout,omitempty"`
 }
 
 func toWire(s domain.Session) sessionWire {
-	return sessionWire{s.ID, s.UserID.String(), s.CreatedAt.UnixMilli(), s.ExpiresAt.UnixMilli(), s.AbsoluteExpiresAt.UnixMilli()}
+	return sessionWire{s.ID, s.UserID.String(), s.CreatedAt.UnixMilli(), s.ExpiresAt.UnixMilli(), s.AbsoluteExpiresAt.UnixMilli(), s.IdleTimeout}
 }
 func fromWire(w sessionWire) (domain.Session, error) {
 	id, err := uuid.Parse(w.UserID)
-	return domain.Session{ID: w.ID, UserID: id, CreatedAt: time.UnixMilli(w.CreatedAt), ExpiresAt: time.UnixMilli(w.ExpiresAt), AbsoluteExpiresAt: time.UnixMilli(w.AbsoluteExpiresAt)}, err
+	return domain.Session{
+		ID:                w.ID,
+		UserID:            id,
+		CreatedAt:         time.UnixMilli(w.CreatedAt),
+		ExpiresAt:         time.UnixMilli(w.ExpiresAt),
+		AbsoluteExpiresAt: time.UnixMilli(w.AbsoluteExpiresAt),
+		IdleTimeout:       w.IdleTimeout,
+	}, err
 }
 func NewAuthRepository(rdb *redis.Client) domain.AuthRepository {
 	return &authRepository{redis: rdb, sessions: make(map[string]domain.Session), families: make(map[string]tokenFamily)}
@@ -77,7 +85,7 @@ func (r *authRepository) SaveSession(ctx context.Context, s domain.Session, oldI
 	return saveSessionScript.Run(ctx, r.redis, []string{sessionKey(s.ID), sessionKey(oldID)}, oldID, data, ttl.Milliseconds()).Err()
 }
 
-var renewSessionScript = redis.NewScript(`local v=redis.call('GET',KEYS[1]); if not v then return nil end; local s=cjson.decode(v); local now=tonumber(ARGV[1]); if tonumber(s.expires_at)<=now or tonumber(s.absolute_expires_at)<=now then redis.call('DEL',KEYS[1]); return nil end; local expiry=math.min(now+tonumber(ARGV[2]),tonumber(s.absolute_expires_at)); s.expires_at=expiry; redis.call('SET',KEYS[1],cjson.encode(s),'PX',math.max(1,expiry-now)); return cjson.encode(s)`)
+var renewSessionScript = redis.NewScript(`local v=redis.call('GET',KEYS[1]); if not v then return nil end; local s=cjson.decode(v); local now=tonumber(ARGV[1]); if tonumber(s.expires_at)<=now or tonumber(s.absolute_expires_at)<=now then redis.call('DEL',KEYS[1]); return nil end; local idle=tonumber(s.idle_timeout); if not idle or idle<=0 then idle=tonumber(ARGV[2]) end; local expiry=math.min(now+idle,tonumber(s.absolute_expires_at)); s.expires_at=expiry; redis.call('SET',KEYS[1],cjson.encode(s),'PX',math.max(1,expiry-now)); return cjson.encode(s)`)
 
 func (r *authRepository) RenewSession(ctx context.Context, id string, now time.Time, idle time.Duration) (*domain.Session, error) {
 	if r.redis == nil {
@@ -88,7 +96,11 @@ func (r *authRepository) RenewSession(ctx context.Context, id string, now time.T
 			delete(r.sessions, id)
 			return nil, nil
 		}
-		s.ExpiresAt = now.Add(idle)
+		effectiveIdle := idle
+		if s.IdleTimeout > 0 {
+			effectiveIdle = time.Duration(s.IdleTimeout) * time.Millisecond
+		}
+		s.ExpiresAt = now.Add(effectiveIdle)
 		if s.ExpiresAt.After(s.AbsoluteExpiresAt) {
 			s.ExpiresAt = s.AbsoluteExpiresAt
 		}
@@ -112,6 +124,34 @@ func (r *authRepository) RenewSession(ctx context.Context, id string, now time.T
 	}
 	s, err := fromWire(w)
 	return &s, err
+}
+
+var updateSessionIdleScript = redis.NewScript(`local v=redis.call('GET',KEYS[1]); if not v then return 0 end; local s=cjson.decode(v); s.idle_timeout=tonumber(ARGV[1]); local now=tonumber(ARGV[2]); local idle=tonumber(ARGV[1]); if not idle or idle<=0 then idle=tonumber(ARGV[3]) end; local expiry=math.min(now+idle,tonumber(s.absolute_expires_at)); s.expires_at=expiry; redis.call('SET',KEYS[1],cjson.encode(s),'PX',math.max(1,expiry-now)); return 1`)
+
+func (r *authRepository) UpdateSessionIdle(ctx context.Context, id string, idleMs int64, defaultIdleMs int64) error {
+	if id == "" {
+		return nil
+	}
+	if r.redis == nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if s, ok := r.sessions[id]; ok {
+			s.IdleTimeout = idleMs
+			eff := idleMs
+			if eff <= 0 {
+				eff = defaultIdleMs
+			}
+			now := time.Now()
+			s.ExpiresAt = now.Add(time.Duration(eff) * time.Millisecond)
+			if s.ExpiresAt.After(s.AbsoluteExpiresAt) {
+				s.ExpiresAt = s.AbsoluteExpiresAt
+			}
+			r.sessions[id] = s
+		}
+		return nil
+	}
+	now := time.Now().UnixMilli()
+	return updateSessionIdleScript.Run(ctx, r.redis, []string{sessionKey(id)}, idleMs, now, defaultIdleMs).Err()
 }
 func (r *authRepository) DeleteSession(ctx context.Context, id string) error {
 	if r.redis == nil {
