@@ -251,6 +251,12 @@ export default function PermissionsPage() {
         icon={KeyRound}
         title="权限清单"
         description="维护菜单、按钮与 API 三级权限点；API 权限由 Casbin 在服务端强制校验"
+        badge={
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300">
+            <span className="size-1.5 rounded-full bg-violet-500 animate-pulse" />
+            RBAC 细粒度权限模型
+          </span>
+        }
         actions={
           <>
             {can("permissions:sync") && (
@@ -260,7 +266,7 @@ export default function PermissionsPage() {
               </Button>
             )}
             {can("permissions:create") && (
-              <Button onClick={() => setForm({ mode: "create", parentId: null })}>
+              <Button onClick={() => setForm({ mode: "create", parentId: null })} className="shadow-xs">
                 <Plus />
                 新建权限点
               </Button>
@@ -276,7 +282,7 @@ export default function PermissionsPage() {
         <StatCard label="内置节点" value={counts.builtIn} icon={ShieldCheck} tone="default" loading={query.isLoading} hint="随系统升级维护，不可删除" />
       </StatGrid>
 
-      <Card>
+      <Card className="border border-border/80 bg-card shadow-xs rounded-xl">
         <CardContent>
           <DataTable
             columns={columns}

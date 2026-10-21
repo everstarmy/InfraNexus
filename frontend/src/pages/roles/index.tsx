@@ -248,9 +248,15 @@ export default function RolesPage() {
         icon={ShieldCheck}
         title="角色管理"
         description="定义角色与授权范围，策略实时同步至 Casbin 鉴权引擎"
+        badge={
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-300">
+            <span className="size-1.5 rounded-full bg-sky-500 animate-pulse" />
+            Casbin 策略同步生效中
+          </span>
+        }
         actions={
           can("roles:create") && (
-            <Button onClick={() => setForm("new")}>
+            <Button onClick={() => setForm("new")} className="shadow-xs">
               <ShieldPlus />
               新建角色
             </Button>
@@ -265,7 +271,7 @@ export default function RolesPage() {
         <StatCard label="已停用角色" value={stats.disabled} icon={ShieldOff} tone="default" loading={query.isLoading} hint="停用后其权限对所有成员失效" />
       </StatGrid>
 
-      <Card>
+      <Card className="border border-border/80 bg-card shadow-xs rounded-xl">
         <CardContent>
           <DataTable
             columns={columns}

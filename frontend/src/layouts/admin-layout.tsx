@@ -24,9 +24,9 @@ export function AdminLayout() {
   return (
     <SidebarProvider className="h-svh w-full overflow-hidden">
       <AppSidebar />
-      <SidebarInset className="flex h-svh w-full flex-col overflow-hidden bg-muted/40 dark:bg-background">
+      <SidebarInset className="flex h-svh w-full flex-col overflow-hidden bg-slate-100/60 dark:bg-background">
         <Header onLogout={handleLogout} />
-        <main className="w-full flex-1 overflow-x-hidden overflow-y-auto">
+        <main className="w-full flex-1 overflow-x-hidden overflow-y-auto bg-slate-100/60 dark:bg-background">
           <div className="w-full space-y-5 p-4 md:p-6 2xl:px-8">
             <Outlet />
           </div>

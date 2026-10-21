@@ -416,9 +416,15 @@ export default function UsersPage() {
         icon={Users}
         title="用户管理"
         description="管理平台人员档案、所属部门、角色授权与账号状态"
+        badge={
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+            <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            共 {total} 名成员 · {stats?.active ?? 0} 人正常
+          </span>
+        }
         actions={
           can("users:create") && (
-            <Button onClick={() => setFormUser("new")}>
+            <Button onClick={() => setFormUser("new")} className="shadow-xs">
               <UserPlus />
               新建用户
             </Button>
@@ -435,7 +441,7 @@ export default function UsersPage() {
 
       <div className="grid grid-cols-12 gap-4">
         {treeOpen && (
-          <Card className="col-span-12 h-fit gap-3 self-start lg:sticky lg:top-0 lg:col-span-4 xl:col-span-3">
+          <Card className="col-span-12 h-fit gap-3 self-start border border-border/80 bg-card shadow-xs rounded-xl lg:sticky lg:top-0 lg:col-span-4 xl:col-span-3">
             <CardHeader className="flex flex-row items-center justify-between gap-2">
               <CardTitle className="text-sm">组织架构</CardTitle>
               <div className="flex items-center gap-1.5">
@@ -460,7 +466,7 @@ export default function UsersPage() {
           </Card>
         )}
 
-        <Card className={cn("col-span-12 min-w-0 gap-3", treeOpen && "lg:col-span-8 xl:col-span-9")}>
+        <Card className={cn("col-span-12 min-w-0 gap-3 border border-border/80 bg-card shadow-xs rounded-xl", treeOpen && "lg:col-span-8 xl:col-span-9")}>
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
               {!treeOpen && (

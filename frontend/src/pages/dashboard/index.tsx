@@ -119,16 +119,22 @@ export default function DashboardPage() {
 
   return (
     <>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="hidden size-10 items-center justify-center rounded-xl border bg-card text-primary shadow-xs sm:flex">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="hidden size-11 items-center justify-center rounded-xl border border-border/80 bg-gradient-to-b from-card to-muted/40 text-primary shadow-xs ring-1 ring-primary/10 sm:flex">
             <LayoutDashboard className="size-5" />
           </div>
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
-              {greeting()}，{user?.nickname || user?.username}
-            </h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+          <div className="space-y-0.5">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-xl font-semibold tracking-tight text-foreground md:text-2xl">
+                {greeting()}，{user?.nickname || user?.username}
+              </h1>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                平台运行正常
+              </span>
+            </div>
+            <p className="text-sm text-muted-foreground">
               {new Intl.DateTimeFormat("zh-CN", { dateStyle: "full" }).format(new Date())} · 以下为平台实时运行概况
             </p>
           </div>
@@ -164,7 +170,7 @@ export default function DashboardPage() {
       </StatGrid>
 
       <div className="grid grid-cols-12 gap-4">
-        <Card className="col-span-12 xl:col-span-8">
+        <Card className="col-span-12 xl:col-span-8 border border-border/80 bg-card shadow-xs rounded-xl">
           <CardHeader>
             <CardTitle className="text-sm">账号构成</CardTitle>
             <CardDescription className="text-xs">按认证来源与账号状态拆分的人员分布</CardDescription>
@@ -210,7 +216,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="col-span-12 xl:col-span-4">
+        <Card className="col-span-12 xl:col-span-4 border border-border/80 bg-card shadow-xs rounded-xl">
           <CardHeader className="flex flex-row items-start justify-between">
             <div>
               <CardTitle className="text-sm">企业目录</CardTitle>

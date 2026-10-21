@@ -270,9 +270,15 @@ export default function DepartmentsPage() {
         icon={Network}
         title="部门管理"
         description="维护企业组织架构树，支持多级部门、负责人与排序调整"
+        badge={
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+            <span className="size-1.5 rounded-full bg-primary animate-pulse" />
+            共 {stats.total} 个部门 · {stats.members} 名成员
+          </span>
+        }
         actions={
           can("departments:create") && (
-            <Button onClick={() => setForm({ mode: "create", parentId: null })}>
+            <Button onClick={() => setForm({ mode: "create", parentId: null })} className="shadow-xs">
               <FolderPlus />
               新建部门
             </Button>
