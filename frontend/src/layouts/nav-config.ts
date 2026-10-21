@@ -43,7 +43,7 @@ export const navGroups: NavGroup[] = [
         title: "组织架构",
         url: "/users",
         icon: Building2,
-        permission: "users",
+        permission: "org",
         description: "人员档案、角色分配与部门树",
         children: [
           {
@@ -66,7 +66,7 @@ export const navGroups: NavGroup[] = [
         title: "权限中心",
         url: "/roles",
         icon: ShieldCheck,
-        permission: "roles",
+        permission: "access",
         description: "角色定义、权限分配与授权矩阵",
         children: [
           {

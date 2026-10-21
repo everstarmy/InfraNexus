@@ -27,6 +27,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -52,16 +55,84 @@ const ActivePill = () => (
 
 function NavMenuItem({ item, activeUrl }: { item: NavItem; activeUrl: string }) {
   const Icon = item.icon
+  const { state, isMobile } = useSidebar()
+  const isCollapsed = state === "collapsed" && !isMobile
   const hasChildren = item.children && item.children.length > 0
 
   if (!hasChildren) {
     const isActive = activeUrl === item.url || activeUrl.startsWith(`${item.url}/`)
+
+    if (isCollapsed) {
+      return (
+        <SidebarMenuItem>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              openOnHover
+              delay={70}
+              closeDelay={140}
+              render={
+                <SidebarMenuButton
+                  isActive={isActive}
+                  className={buttonMotion}
+                  render={
+                    <Link
+                      to={item.url}
+                      onPointerEnter={() => preloadPage(item.url)}
+                      onFocus={() => preloadPage(item.url)}
+                      onTouchStart={() => preloadPage(item.url)}
+                    />
+                  }
+                />
+              }
+            >
+              {isActive && <ActivePill />}
+              <Icon className={cn("size-4 shrink-0 transition-colors", isActive ? "text-primary" : "text-muted-foreground")} />
+              <span>{item.title}</span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="right"
+              align="start"
+              sideOffset={8}
+              className="w-52 rounded-xl p-1.5 shadow-lg border border-border/80"
+            >
+              <DropdownMenuGroup>
+                <DropdownMenuItem
+                  render={
+                    <Link
+                      to={item.url}
+                      onPointerEnter={() => preloadPage(item.url)}
+                      onFocus={() => preloadPage(item.url)}
+                    />
+                  }
+                  className={cn(
+                    "flex flex-col items-start gap-1 rounded-lg px-2.5 py-2 text-sm transition-colors",
+                    isActive
+                      ? "bg-primary/10 font-medium text-primary"
+                      : "text-foreground hover:bg-accent"
+                  )}
+                >
+                  <div className="flex items-center gap-2 font-medium">
+                    <Icon className="size-4 shrink-0" />
+                    <span>{item.title}</span>
+                  </div>
+                  {item.description && (
+                    <span className="text-xs text-muted-foreground font-normal leading-normal">
+                      {item.description}
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarMenuItem>
+      )
+    }
+
     return (
       <SidebarMenuItem>
         <SidebarMenuButton
           isActive={isActive}
           className={buttonMotion}
-          tooltip={item.title}
           render={
             <Link
               to={item.url}
@@ -83,6 +154,112 @@ function NavMenuItem({ item, activeUrl }: { item: NavItem; activeUrl: string }) 
     (c) => activeUrl === c.url || activeUrl.startsWith(`${c.url}/`)
   )
 
+  // When sidebar is collapsed to icon rail: hover over the icon triggers flyout submenu to the right!
+  if (isCollapsed) {
+    return (
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            openOnHover
+            delay={70}
+            closeDelay={140}
+            render={
+              <SidebarMenuButton
+                className={buttonMotion}
+                isActive={isChildActive}
+              />
+            }
+          >
+            {isChildActive && <ActivePill />}
+            <Icon className={cn("size-4 shrink-0 transition-colors", isChildActive ? "text-primary" : "text-muted-foreground")} />
+            <span>{item.title}</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="right"
+            align="start"
+            sideOffset={8}
+            className="w-48 rounded-xl p-1.5 shadow-lg border border-border/80"
+          >
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="px-2 py-1 text-xs font-semibold text-muted-foreground">
+                {item.title}
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator className="my-1" />
+            <DropdownMenuGroup>
+              {item.children!.map((child) => {
+                const ChildIcon = child.icon
+                const isSubActive = activeUrl === child.url || activeUrl.startsWith(`${child.url}/`)
+                const hasSubChildren = child.children && child.children.length > 0
+
+                if (hasSubChildren) {
+                  return (
+                    <DropdownMenuSub key={child.url}>
+                      <DropdownMenuSubTrigger className={cn("gap-2 text-sm", isSubActive && "font-medium text-primary")}>
+                        {ChildIcon && <ChildIcon className="size-4 shrink-0" />}
+                        <span>{child.title}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-44 rounded-xl p-1.5 shadow-lg border border-border/80">
+                        {child.children!.map((subChild) => {
+                          const SubIcon = subChild.icon
+                          const isGrandChildActive = activeUrl === subChild.url || activeUrl.startsWith(`${subChild.url}/`)
+                          return (
+                            <DropdownMenuItem
+                              key={subChild.url}
+                              render={
+                                <Link
+                                  to={subChild.url}
+                                  onPointerEnter={() => preloadPage(subChild.url)}
+                                  onFocus={() => preloadPage(subChild.url)}
+                                />
+                              }
+                              className={cn(
+                                "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
+                                isGrandChildActive
+                                  ? "bg-primary/10 font-medium text-primary"
+                                  : "text-foreground hover:bg-accent"
+                              )}
+                            >
+                              {SubIcon && <SubIcon className="size-4 shrink-0" />}
+                              <span>{subChild.title}</span>
+                            </DropdownMenuItem>
+                          )
+                        })}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  )
+                }
+
+                return (
+                  <DropdownMenuItem
+                    key={child.url}
+                    render={
+                      <Link
+                        to={child.url}
+                        onPointerEnter={() => preloadPage(child.url)}
+                        onFocus={() => preloadPage(child.url)}
+                      />
+                    }
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
+                      isSubActive
+                        ? "bg-primary/10 font-medium text-primary"
+                        : "text-foreground hover:bg-accent"
+                    )}
+                  >
+                    {ChildIcon && <ChildIcon className="size-4 shrink-0" />}
+                    <span>{child.title}</span>
+                  </DropdownMenuItem>
+                )
+              })}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    )
+  }
+
+  // When expanded: standard in-place collapsible submenu
   return (
     <SidebarMenuItem>
       <Collapsible defaultOpen={isChildActive || true} className="group/collapsible w-full">
@@ -90,7 +267,6 @@ function NavMenuItem({ item, activeUrl }: { item: NavItem; activeUrl: string }) 
           render={
             <SidebarMenuButton
               className={buttonMotion}
-              tooltip={item.title}
               isActive={isChildActive}
             />
           }
@@ -140,6 +316,7 @@ function NavUser({ onLogout }: { onLogout?: () => void }) {
   const displayName = user.nickname || user.username
   const initials = (displayName[0] || "U").toUpperCase()
   const roleNames = user.roles?.map((r) => r.name).join("、") || user.email || "系统用户"
+  const isCollapsed = state === "collapsed" && !isMobile
 
   return (
     <>
@@ -147,10 +324,13 @@ function NavUser({ onLogout }: { onLogout?: () => void }) {
         <SidebarMenuItem>
           <DropdownMenu>
             <DropdownMenuTrigger
+              openOnHover={isCollapsed}
+              delay={70}
+              closeDelay={140}
               render={
                 <SidebarMenuButton
                   size="lg"
-                  tooltip={state === "collapsed" ? displayName : undefined}
+                  tooltip={undefined}
                   className="transition-[width,height,padding,background-color,transform] duration-200 ease-out active:scale-[0.98] data-popup-open:bg-sidebar-accent data-popup-open:text-sidebar-accent-foreground motion-reduce:transition-none"
                 />
               }
@@ -168,10 +348,10 @@ function NavUser({ onLogout }: { onLogout?: () => void }) {
               <ChevronsUpDown className="ml-auto size-4 text-muted-foreground group-data-[collapsible=icon]:hidden" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
-              className="w-60 rounded-lg duration-200"
+              className="w-60 rounded-xl duration-200 border border-border/80 shadow-lg"
               side={isMobile ? "bottom" : "right"}
               align="end"
-              sideOffset={6}
+              sideOffset={8}
             >
               <DropdownMenuGroup>
                 <DropdownMenuLabel className="p-0 font-normal">
@@ -238,7 +418,7 @@ export function AppSidebar({ onLogout, ...props }: AppSidebarProps) {
             return item
           })
           .filter((item) => {
-            if (item.children && item.children.length > 0) return true
+            if (item.children) return item.children.length > 0
             return can(item.permission)
           }),
       }))
