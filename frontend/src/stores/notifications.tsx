@@ -30,6 +30,7 @@ interface NotificationsContextType {
   markRead: (id: string) => void;
   markAllRead: () => void;
   clear: () => void;
+  retry: () => void;
 }
 
 const NotificationsContext =
@@ -84,6 +85,7 @@ export function NotificationsProvider({
   const [soundReady, setSoundReady] = React.useState(false);
   const identityRef = React.useRef(userId);
   const identityGenerationRef = React.useRef(0);
+  const retryNowRef = React.useRef<(() => void) | null>(null);
   const soundEnabledRef = React.useRef(soundEnabled);
   const audioContextRef = React.useRef<AudioContext | null>(null);
   identityRef.current = userId;
@@ -209,6 +211,10 @@ export function NotificationsProvider({
     let lastEventId = "";
     let connectionDropped = false;
     let disposed = false;
+    let stableTimer: ReturnType<typeof setTimeout> | undefined;
+    const seenIDs = new Set<string>();
+    const seenIDOrder: string[] = [];
+    const lastProgressUpdate = new Map<string, number>();
 
     const invalidateWorkspace = () => {
       for (const queryKey of [
@@ -222,9 +228,18 @@ export function NotificationsProvider({
       }
     };
 
-    const rememberEvent = (event: Event) => {
+    const acceptEvent = (event: Event) => {
       const id = (event as MessageEvent).lastEventId;
-      if (id) lastEventId = id;
+      if (!id) return true;
+      if (seenIDs.has(id)) return false;
+      lastEventId = id;
+      seenIDs.add(id);
+      seenIDOrder.push(id);
+      if (seenIDOrder.length > 2_048) {
+        const oldest = seenIDOrder.shift();
+        if (oldest) seenIDs.delete(oldest);
+      }
+      return true;
     };
 
     setStatus("connecting");
@@ -244,8 +259,18 @@ export function NotificationsProvider({
         withCredentials: true,
       });
       source = activeSource;
-      activeSource.addEventListener("connected", () => {
+      activeSource.addEventListener("connected", (event) => {
         if (!isCurrentIdentity()) return;
+        const cursor = (event as MessageEvent).lastEventId;
+        if (cursor) lastEventId = cursor;
+        if (stableTimer) clearTimeout(stableTimer);
+        stableTimer = setTimeout(() => {
+          if (
+            isCurrentIdentity() &&
+            activeSource.readyState === EventSource.OPEN
+          )
+            retryAttempt = 0;
+        }, 30_000);
         if (connectionDropped) {
           push({
             title: "实时通道已恢复",
@@ -254,12 +279,11 @@ export function NotificationsProvider({
           });
           connectionDropped = false;
         }
-        retryAttempt = 0;
         setStatus("online");
       });
       activeSource.addEventListener("snapshot.required", (event) => {
         if (!isCurrentIdentity()) return;
-        rememberEvent(event);
+        if (!parse(event as MessageEvent) || !acceptEvent(event)) return;
         invalidateWorkspace();
         push({
           title: "实时数据已重新校准",
@@ -273,13 +297,14 @@ export function NotificationsProvider({
         source = null;
         if (retryTimer) clearTimeout(retryTimer);
         retryTimer = undefined;
+        if (stableTimer) clearTimeout(stableTimer);
+        stableTimer = undefined;
         setStatus("offline");
       });
       activeSource.addEventListener("ldap.sync.started", (event) => {
         if (!isCurrentIdentity()) return;
-        rememberEvent(event);
         const data = parse(event as MessageEvent);
-        if (!data) return;
+        if (!data || !acceptEvent(event)) return;
         push({
           title: "目录同步已开始",
           description: `${data.mode === "incremental" ? "增量" : "全量"}同步（${data.trigger === "schedule" ? "定时触发" : "手动触发"}），正在读取目录并生成计划…`,
@@ -289,9 +314,16 @@ export function NotificationsProvider({
       });
       activeSource.addEventListener("ldap.sync.progress", (event) => {
         if (!isCurrentIdentity()) return;
-        rememberEvent(event);
         const data = parse(event as MessageEvent);
-        if (!data?.task_id) return;
+        if (!data?.task_id || !acceptEvent(event)) return;
+        const now = Date.now();
+        const previousUpdate = lastProgressUpdate.get(data.task_id);
+        if (previousUpdate !== undefined && now - previousUpdate < 250) return;
+        lastProgressUpdate.set(data.task_id, now);
+        if (lastProgressUpdate.size > 128) {
+          const oldestTask = lastProgressUpdate.keys().next().value;
+          if (oldestTask) lastProgressUpdate.delete(oldestTask);
+        }
         const processed = data.processed ?? data.completed ?? 0;
         const progress = data.total
           ? Math.min(100, Math.floor((processed / data.total) * 100))
@@ -322,9 +354,8 @@ export function NotificationsProvider({
       });
       activeSource.addEventListener("ldap.sync.finished", (event) => {
         if (!isCurrentIdentity()) return;
-        rememberEvent(event);
         const data = parse(event as MessageEvent);
-        if (!data) return;
+        if (!data || !acceptEvent(event)) return;
         const summary = `新增 ${data.created ?? 0} · 更新 ${data.updated ?? 0} · 停用 ${data.disabled ?? 0} · 失败 ${data.failed ?? 0}`;
         const tone: NotificationTone =
           data.status === "success"
@@ -380,29 +411,57 @@ export function NotificationsProvider({
         invalidateWorkspace();
       });
       activeSource.onopen = () => {
-        if (isCurrentIdentity()) setStatus("online");
+        if (isCurrentIdentity()) setStatus("connecting");
       };
       activeSource.onerror = () => {
         if (!isCurrentIdentity()) return;
+        if (stableTimer) clearTimeout(stableTimer);
+        stableTimer = undefined;
         connectionDropped = true;
-        setStatus("connecting");
         activeSource.close();
         if (source === activeSource) source = null;
         if (retryTimer) clearTimeout(retryTimer);
+        if (retryAttempt >= 8) {
+          setStatus("offline");
+          retryTimer = undefined;
+          return;
+        }
+        setStatus("connecting");
         const ceiling = Math.min(30_000, 500 * 2 ** Math.min(retryAttempt, 6));
         const delay = Math.round(ceiling * (0.8 + Math.random() * 0.4));
         retryAttempt += 1;
-        retryTimer = setTimeout(connect, delay);
+        retryTimer = setTimeout(() => {
+          retryTimer = undefined;
+          connect();
+        }, delay);
       };
     };
 
+    const retryNow = () => {
+      if (!isCurrentIdentity() || disposed) return;
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = undefined;
+      if (stableTimer) clearTimeout(stableTimer);
+      stableTimer = undefined;
+      source?.close();
+      source = null;
+      retryAttempt = 0;
+      connectionDropped = true;
+      setStatus("connecting");
+      connect();
+    };
+    retryNowRef.current = retryNow;
     connect();
     return () => {
       disposed = true;
       if (retryTimer) clearTimeout(retryTimer);
+      if (stableTimer) clearTimeout(stableTimer);
+      if (retryNowRef.current === retryNow) retryNowRef.current = null;
       source?.close();
     };
   }, [userId, push, announce, queryClient]);
+
+  const retry = React.useCallback(() => retryNowRef.current?.(), []);
 
   const value = React.useMemo<NotificationsContextType>(
     () => ({
@@ -421,6 +480,7 @@ export function NotificationsProvider({
       markAllRead: () =>
         setItems((prev) => prev.map((n) => ({ ...n, read: true }))),
       clear: () => setItems([]),
+      retry,
     }),
     [
       items,
@@ -430,6 +490,7 @@ export function NotificationsProvider({
       soundReady,
       requestDesktopNotifications,
       toggleNotificationSound,
+      retry,
     ],
   );
 

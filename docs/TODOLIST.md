@@ -4,90 +4,104 @@
 
 ## 2026-10-22 当前看板：M0–M6 深度复审整改
 
-实施契约、任务依赖、兼容策略与发布门禁见 [深度复审整改方案](DEEP_REVIEW_REMEDIATION_PLAN.md)。当前评级 **Needs Fixes**。以下均为待实施；此前发现问题、生成方案或历史测试通过均不等于修复完成。
+实施契约、任务依赖、兼容策略与发布门禁见 [深度复审整改方案](DEEP_REVIEW_REMEDIATION_PLAN.md)。当前评级 **Needs Fixes**：R01、R03、R04 的本地验收已完成；其他条目已落地部分代码和回归，但仍有测试矩阵或外部环境门禁未完成。逐项证据见下表和 [本轮发布验证记录](RELEASE_VALIDATION.md)。
 
 完成规则：每项需补变更/提交、正式回归名称、实际命令与结果、环境和未覆盖项。`[x]` 只表示达到本轮验收；环境缺失导致 Skip、只通过 mock 或仅完成代码，不可自动勾选。责任角色见方案，不预设人员或并行代理。
 
 ### A：P0 授权与事务修复
 
-- [ ] **R01 / H1 / High：授权写入统一串行化**
-  - [ ] 先建立旧快照重建与并发撤权的屏障回归，在真实 PostgreSQL 复现并记录最终关联/策略差异。
-  - [ ] 所有策略写事务第一步获得授权单例锁；覆盖角色状态/删除/授权、权限更新/删除、路由同步和启动/修复重建。
-  - [ ] 固定锁序、缺行失败、有界重试与取消；关联、派生规则、revision、Outbox 保持原子性。
-  - [ ] 验收：SQLite/PostgreSQL 并发矩阵、撤权不可恢复、事务故障回滚、锁等待与查询开销记录。
+- [x] **R01 / H1 / High：授权写入统一串行化**
+  - [x] SQLite/PostgreSQL 并发重建与撤权回归使用同步起跑屏障，并断言最终关联和派生策略都已撤销。
+  - [x] 角色状态/删除/授权、权限更新/删除、路由同步、单角色修复和全量重建均先锁授权状态单例。
+  - [x] 缺少单例行时失败；事务锁序固定；SQLite/PostgreSQL 锁错误有界重试并尊重 context；关联、策略、revision 和 Outbox 同事务回滚。
+  - [x] 可重试回调每轮重置事务外返回状态，避免失败尝试污染最终结果；路由权限并发幂等 race 回归连续 5 轮通过。
+  - [x] SQLite/PostgreSQL 并发与故障回滚通过；补 PG revision 查询与 48 并行写者锁等待基准，数据见 RELEASE_VALIDATION。
 - [ ] **R02 / H3 / High：loadedRev 全路径同步访问**
-  - [ ] 转为 atomic.Int64，覆盖初始化、快路径、锁内比较、成功发布及 worker 读取。
-  - [ ] 保留刷新互斥与稳定快照校验，失败不能推进 loadedRev。
-  - [ ] 验收：并发首次刷新、worker/请求交错、加载失败与连续变更的正式 race 回归。
-- [ ] **R03 / M2 / Medium：LDAP 原子建档**
-  - [ ] 复用 CreateWithRoles；无部门策略也保证用户与默认角色同事务，有部门时加入组织 UoW。
-  - [ ] 验收：默认角色删除/写入失败/关联失败不残留用户，不制造无意义组织 revision。
-- [ ] **R04 / H2 / High：resolver 缓存与统计提交隔离**（依赖 R03）
-  - [ ] 每次事务尝试复制 cache/created；仅外层提交成功后合并，回调/提交失败和重试均丢弃尝试状态。
-  - [ ] 缓存命中已删除部门可失效并重新查询；只累计已提交部门。
-  - [ ] 验收：第一条回滚不影响同部门下一条；可重试故障后无失效 UUID 和重复统计。
+  - [x] 转为 atomic.Int64，初始化、快路径、锁内比较、成功发布及 worker 读取均使用原子访问。
+  - [x] 保留刷新互斥与稳定快照校验；加载失败不推进 loadedRev，失败关闭。
+  - [ ] 已通过并发首次刷新、加载失败和全量 race；仍需显式覆盖 worker 与请求刷新交错及连续 revision 变化。
+- [x] **R03 / M2 / Medium：LDAP 原子建档**
+  - [x] 复用 CreateWithRoles；无部门路径用户与默认角色同事务，有部门时用户、角色、部门与组织 revision 纳入组织 UoW。
+  - [x] 缺失默认角色时用户回滚；成功后确认角色/部门存在且组织 revision 只推进一次，无部门创建不制造组织 revision。
+- [x] **R04 / H2 / High：resolver 缓存与统计提交隔离**（依赖 R03）
+  - [x] 每次事务尝试复制 cache/created；外层提交成功后才合并，失败或重试丢弃尝试状态。
+  - [x] 缓存命中会复核部门是否仍存在，删除缓存后重新查找；统计只保留已提交部门。
+  - [x] 回滚后同部门重试、已删除部门缓存失效及最终统计均有正式回归。
 
 ### B：P1 身份、生命周期与实时一致性
 
 - [ ] **R05 / M1 / Medium：并发 JIT 唯一冲突恢复**（依赖 R03、R04）
-  - [ ] SQLite/PostgreSQL 身份唯一冲突映射为领域错误，区分邮箱冲突和其他数据库失败。
-  - [ ] 失败事务结束后读取获胜身份，严格校验 domain/ExternalID/auth_type/status；无稳定 ExternalID 不自动绑定同名账号。
-  - [ ] provision 查询只允许 NotFound 进入创建计划，其他错误不吞掉。
-  - [ ] 验收：多请求首次登录同一档案；不同身份同名、邮箱占用、停用及数据库故障不错误登录。
+  - [x] SQLite/PostgreSQL 身份唯一冲突映射为 domain 错误；邮箱等其他唯一约束不会误判为同一目录身份。
+  - [x] 唯一冲突事务结束后再读获胜身份；校验 domain/ExternalID/auth_type/status；没有稳定 ExternalID 时拒绝同名自动绑定。
+  - [x] provision 仅把 ErrRecordNotFound 当作可创建，其他预查询错误直接返回。
+  - [ ] 同身份并发与同名本地账号拒绝已有回归；邮箱占用、停用目录档案及普通数据库故障传播仍需补正式服务层用例。
 - [ ] **R06 / M3 / Medium：空闲授权 PubSub 释放**
-  - [ ] 空闲接收可被 ctx 取消唤醒，清理 PubSub、输出 channel 与取消回调，保留有界合并。
-  - [ ] 验收：零消息/满缓冲取消、Redis 断开/重订阅、反复启动停止；真实连接回收与 race 无报告。
+  - [x] 空闲接收在 ctx 取消时主动关闭 PubSub 并唤醒消费者；输出 channel 单一所有者关闭，有界合并保留。
+  - [ ] 真实 Redis 跨实例发布、零消息/满缓冲取消和 race 已通过；Redis 断开重订阅、反复启停及底层订阅连接回收观测仍未完成。
 - [ ] **R07 / M4 / Medium：LDAP 网络取消及总时限**
-  - [ ] DialContext、TLS 握手、StartTLS/Bind/Search/分页取消贯通，连接与取消回调可靠释放。
-  - [ ] 区分单操作超时与整个认证/测试/搜索预算，配置默认值和范围同步文档。
-  - [ ] 验收：各阶段阻塞取消、连续分页超总预算、正常大目录；不完整搜索不得执行缺失用户停用。
+  - [x] 使用 DialContext、HandshakeContext 和连接取消关闭覆盖 TLS/StartTLS/Bind/Search/分页调用链；保留 context 错误语义。
+  - [x] 单操作 timeout 范围与默认值同步 API 文档；Authenticate/Test 有 30 秒总预算，SearchUsers 有独立固定 10 分钟总预算。
+  - [ ] 已用真实 TCP listener 验证阻塞 Bind 取消；TLS/StartTLS/Search/分页阻塞、连续分页预算耗尽、正常大目录及不完整搜索禁止停用缺失用户仍需验证。
 - [ ] **R08 / M5 / Medium：SSE 检查点、去重与退避**
-  - [ ] connected 返回原始已解析 cursor，前端立即保存；有界去重覆盖通知/Toast/声音/桌面通知和任务副作用。
-  - [ ] 稳定在线窗口后重置退避，持续失败冷却并允许手动重试；保留认证失效停止及身份代际隔离。
-  - [ ] 如持久化 cursor，定义身份/schema 隔离和刷新后的快照校准，不持久化敏感正文。
-  - [ ] 验收：零业务事件首断线、重复 started/finished、裁剪/滞后、反复 connected 后失败、身份切换/卸载/过期和 Clock 退避断言。
+  - [x] connected 事件返回服务端当前已解析 cursor，前端立即保存；2,048 项有界去重在业务副作用之前生效，通知列表限 30 条。
+  - [x] 连续失败使用抖动退避、最大次数与手动重试；稳定在线 30 秒后才重置退避，认证过期停止，身份代际隔离迟到事件。
+  - [x] cursor 只保存在当前用户连接生命周期内，不跨刷新持久化敏感正文；snapshot.required 触发数据重新校准。
+  - [ ] 已验证零业务消息首断线、重复 started、snapshot 校准、账号切换、过期和 Clock 重连；finished 重复、游标裁剪/滞后、稳定窗口复位及最大退避后手动重试仍需单独断言。
 - [ ] **R09 / M6 / Medium：SSE 慢写与停机上界**（依赖 R08）
-  - [ ] 核实 Fiber/fasthttp 写入和关闭机制；实现可验证的写 deadline/最大连接寿命及应用取消。
-  - [ ] 流子 context 来自应用生命周期，不捕获复用 fiber.Ctx；明确全局 WriteTimeout 对其他请求与正常 SSE 的影响。
-  - [ ] 验收：真实 socket 关闭、停止读取、黑洞/网关中断、Redis 故障和停机；按预算记录回收时间与资源数量。
+  - [x] 使用 Fiber/fasthttp per-route 2 分钟连接寿命、默认 WriteTimeout 和应用 shutdown 取消；真实 TCP socket 测试确认停机关闭连接。
+  - [x] SSE 流循环使用应用生命周期 context，异步 writer 不持有 fiber.Ctx；有界 Redis Read 周期和连接轮换保留 cursor。
+  - [ ] 真实 socket 停机已覆盖；停止读取、TCP 黑洞/目标代理、Redis 故障下的回收时间与资源数量仍需环境演练。
 - [ ] **R10 / M7 / Medium：完整用户编辑 CAS**
-  - [ ] 表单初始化固定 edit_revision，提交携带基线；后台 refetch 不覆盖草稿或静默提升版本。
-  - [ ] 409 保稿与明确比较/确认；失败保持 dirty，成功清理，保存中防重复。
-  - [ ] 盘点 Web/API/CLI 调用方，确定 revision 必填发布窗口并更新 API 文档；保留兼容路径时不可宣称全部并发安全。
-  - [ ] 验收：A 改邮箱/B 改昵称、双表单、缺失/零/旧版本、409 重试与导航保护。
+  - [x] 表单固定 edit_revision 基线；后台刷新不覆盖草稿或静默提升版本。
+  - [x] 409 保留草稿并显示两侧差异，用户明确确认后才用最新 revision 重试；失败摘要聚焦，成功关闭，保存中禁止重复。
+  - [x] 仓库内 Web 调用方已同步必填 revision，后端拒绝缺失/零 revision，API 文档说明外部客户端升级要求。
+  - [ ] 已验证缺失/零/旧 revision、409 保稿和确认重试；双表单并发、字段交叉更新与导航保护的用户资料专属用例仍需补齐。
 - [ ] **R12 / M9 / Medium：可信交互回归基础**（先于依赖它的业务验收）
-  - [ ] 状态开关成功/失败 mock 使用独立响应闸门，finally 释放；断言 pending、防重、行隔离和撤销 revision。
-  - [ ] 认证失效后不重连改用 Clock；矩阵拆分或明确总预算，保留 pageerror/Axe/布局断言。
-  - [ ] 五个后端与两个前端审计探针转正式回归，不依赖 /tmp；确认修复前失败、修复后通过。
-  - [ ] 验收：定向用例至少连续三轮无偶发失败，完整套件无 skip-to-green；真实链路另有冒烟用例。
+  - [x] 用户状态更新使用独立响应闸门和 finally 清理，断言 pending、防重、行隔离及撤销时递增 revision。
+  - [x] 通知退避与身份过期用 Playwright Clock；响应式矩阵保留 pageerror、Axe 和布局断言。
+  - [x] 并发/回滚/取消后端探针和通知、用户 CAS 前端探针均纳入仓库正式测试。
+  - [ ] 关键通知/状态/CAS E2E 连续三轮通过；完整 E2E 24/24 无跳过。真实后端登录到 LDAP/SSE 冒烟仍待 Staging。
 
 ### C：P2 性能与体验
 
 - [ ] **R11 / M8 / Medium：部门树虚拟化与性能门禁**（依赖 R12；数千部门发布必须完成）
-  - [ ] 可见节点扁平化、稳定 ID 虚拟列表、行 memo/索引；新增依赖有选型记录并同步锁文件。
-  - [ ] 保留搜索定位、拖拽跨窗口、键盘/触屏菜单替代与 ARIA 树层级/位置语义。
-  - [ ] 固定 runner 并在实施前校准预算：候选 10k 可操作 p95≤2s、输入 p95<100ms、DOM≤10,000、最长任务≤200ms。
-  - [ ] 验收：至少三轮 1k/10k 平级/混合树、深度≤15、四视口和明暗/reduced-motion；预算写入测试断言。
+  - [ ] 可见节点扁平化、稳定 ID 虚拟列表与预计算索引已完成；未额外引入依赖。行 memo 和拖拽跨虚拟窗口仍需补齐或以实测证据调整方案。
+  - [x] 搜索定位、高亮、键盘树语义、触屏节点菜单及 ARIA 树层级/位置语义已保留；拖拽跨节点回归通过。
+  - [x] 固定本机 runner 并把候选门槛写入断言：10k 启动 p95≤2s、输入 p95<100ms、DOM<10,000、最长任务≤200ms。
+  - [x] 1k/10k 平级/混合树各三轮、深度≤15、四视口、明暗和 reduced-motion 矩阵通过；结果见 RELEASE_VALIDATION。
 - [ ] **R13 / Low：触控、焦点与动效微调**
-  - [ ] 无 hover 设备常显编辑/菜单入口并扩大命中区；Cmd+K 避让 alertdialog/defaultPrevented。
-  - [ ] 冲突和保存错误聚焦摘要；进度播报节流；折叠面板使用单一动画机制。
-  - [ ] 验收：键盘/触屏路径、减少动态效果与焦点恢复；VoiceOver/NVDA 人工记录独立于 Axe。
+  - [x] 无 hover 设备常显编辑/菜单入口并扩大触控命中区；Cmd+K 避让 alertdialog 与 defaultPrevented。
+  - [x] 冲突/保存错误摘要自动聚焦；进度播报节流；侧栏折叠统一为单一 keyframe 动画并支持 reduced-motion。
+  - [ ] 键盘、触屏、焦点恢复、reduced-motion 已有自动回归；VoiceOver/NVDA 人工记录仍待完成。
 
 ### D：发布收口
 
 - [ ] **R14：回归、兼容与发布证据**（依赖适用 R01–R13）
-  - [ ] 隔离 PostgreSQL/SQLite/真实 Redis 跑并发、回滚、取消和跨实例矩阵；环境缺失/Skip 不记完成。
-  - [ ] 完整 Go race/vet、Vitest、build、E2E、性能预算通过，记录提交、环境、命令及结果。
-  - [ ] 真实测试 LDAP + 目标网关验证登录、授权撤销、任务/SSE 恢复、黑洞与停机；mock 不替代此门禁。
-  - [ ] 只读核查历史策略差异、LDAP 缺角色/部门异常与计数，形成定向修复清单，不自动补权。
-  - [ ] API/config/迁移与兼容窗口说明同步；如确需 schema 变更仅新增迁移并验收双引擎升级/幂等/失败恢复。
-  - [ ] 发布前更新本轮 RELEASE_VALIDATION；G1–G6 适用门禁通过后再将评级改为 Ready for Release。
+  - [x] 隔离 PostgreSQL、SQLite、真实 Redis 的并发、回滚、取消和跨实例矩阵通过；环境变量已设置，目标用例未被 Skip。
+  - [x] 全量 Go race/vet、Vitest、build、E2E、性能门禁通过；环境、命令、结果和限制已写入 RELEASE_VALIDATION。
+  - [ ] 真实测试 LDAP + 目标网关验证登录、授权撤销、任务/SSE 恢复、黑洞与停机；mock 和本地 TCP Bind 测试不替代此门禁。
+  - [ ] 只读核查部署数据中的历史策略差异、LDAP 缺角色/部门异常与计数，形成定向修复清单，不自动补权。
+  - [x] API 文档同步 revision 与 LDAP timeout 契约；本轮未改 schema，无需新增迁移。
+  - [ ] 本轮 RELEASE_VALIDATION 已更新；真实环境、R07/R09/R13 等适用门禁补齐后再改为 Ready for Release。
 
-本轮完成证据登记（实施后填写，当前无修复完成项）：
+本轮完成证据登记（代码改动在基线 `55de743` 上；每项状态只表示下述范围与证据）：
 
 | 任务 ID | 变更/提交 | 回归、环境及实际结果 | 限制/兼容影响 | 状态 |
 | --- | --- | --- | --- | --- |
-| R01–R14 | 尚未实施 | 方案定义验收，尚无本轮修复后证据 | 以各任务与发布门禁为准 | 待实施 |
+| R01 | `authorization_policy.go`、角色/权限仓储 | SQLite + PG17 并发撤权/重建、Outbox 回滚；revision 与 48 并发 writer 基准。 | 串行锁竞争基准是本机合成负载，需在 Staging 校验预算。 | 本地验收完成 |
+| R02 | `authz_service.go` | atomic.Int64；并发首次加载、加载失败不推进 revision；全量 Go race 通过。 | 缺 worker/request 交错与连续 revision 变化专用屏障用例。 | 部分完成 |
+| R03 | `ldap_service.go`、`user_repository.go` | CreateWithRoles；角色缺失回滚、用户/角色/部门原子成功、组织 revision 断言。 | 需真实目录链路补冒烟。 | 本地验收完成 |
+| R04 | `ldap_service.go`、`ldap_sync.go` | resolver 每次尝试克隆，提交成功后合并；缓存部门删除失效和统计正式回归。 | PG 真实 LDAP 任务链路待 Staging。 | 本地验收完成 |
+| R05 | `user_repository.go`、`ldap_service.go`、domain 错误 | SQLite + PG17 并发 JIT 竞争；相同身份同档案、同名本地账号拒绝绑定。 | 邮箱占用、停用身份和普通 DB 错误的服务层负向用例待补。 | 部分完成 |
+| R06 | `authorization_state_repository.go` | Redis 8 跨实例通知、空闲/满缓冲取消和 race 三轮通过。 | 断线重订阅与订阅连接回收计量未完成。 | 部分完成 |
+| R07 | `ldap_directory.go`、`docs/API.md` | Authenticate/Test 固定 30 秒总预算，SearchUsers 10 分钟；TCP 阻塞 Bind 可取消。 | TLS/StartTLS/Search/分页预算和真实大目录/不完整同步尚未验证。 | 部分完成 |
+| R08 | `sse_handler.go`、`notifications.tsx` | cursor、去重、snapshot、认证过期、身份切换 E2E；通知/状态/CAS 关键 E2E 连跑三轮通过。 | 稳定复位、最大退避手动重试、finished 重复与裁剪 cursor 仍需定向断言。 | 部分完成 |
+| R09 | `sse_handler.go`、`bootstrap/fiber.go`、`bootstrap/app.go` | 真实 socket 上应用取消关闭 SSE；连接寿命、write timeout 与 shutdown context 已实现。 | 停止读取、TCP 黑洞及目标代理/网关故障未演练。 | 部分完成 |
+| R10 | 用户资料 Service/Repository、表单、API 文档 | 正整数 CAS；缺失/零/旧 revision 与 409 保稿/确认重试回归通过。 | 双表单并发、交叉字段更新与导航保护专用用户表单 E2E 待补。 | 部分完成 |
+| R11 | `department-tree.tsx`、性能基线 | 1k/10k 平级与混合树各 3 轮，四视口/主题/动态效果矩阵通过，预算有断言。 | 行 memo 与跨虚拟窗口拖拽尚未实现；当前测量满足门槛但需据此完善或调整契约。 | 部分完成 |
+| R12 | E2E 通知/状态/CAS 与后端正式测试 | 关键回归连续三轮通过；完整 Go race/vet、Vitest 和 24/24 E2E 通过，无跳过。 | 真实后端端到端冒烟需要 Staging。 | 部分完成 |
+| R13 | 部门树、用户表单、侧栏、通知播报 | 触屏、键盘、焦点/reduced-motion 自动检查通过；Axe 六模块零违规。 | VoiceOver/NVDA 人工读屏待验。 | 部分完成 |
+| R14 | 本文与 `RELEASE_VALIDATION.md` | 全量本地隔离矩阵完成；API 兼容契约记录；当前评级保留 Needs Fixes。 | 真实 LDAP/目标网关/部署数据审计和人工读屏是未完成发布门禁。 | 环境阻断 |
 
 ---
 

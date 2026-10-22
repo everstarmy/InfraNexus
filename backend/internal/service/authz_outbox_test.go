@@ -158,9 +158,12 @@ func TestAuthorizationEnforcementFailsClosedWhenPolicyReloadFails(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	service := NewAuthorizationService(enforcer, nil, nil, fixedAuthorizationState{revision: 2}, nil, nil)
+	service := NewAuthorizationService(enforcer, nil, nil, fixedAuthorizationState{revision: 2}, nil, nil).(*authorizationService)
 	allowed, err := service.Enforce(t.Context(), "operator", "/api/v1/users", "GET")
 	if allowed || err == nil {
 		t.Fatalf("Enforce() = (%v, %v), want denied with a policy load error", allowed, err)
+	}
+	if got := service.loadedRev.Load(); got != -1 {
+		t.Fatalf("failed policy reload published loaded revision %d, want -1", got)
 	}
 }

@@ -2,6 +2,50 @@
 
 > 深度复审更新（2026-10-22）：本文件是 M6 当时的验证记录，保留原始结果供追溯。后续定向审计已复现授权数据竞争、LDAP 原子性/缓存/JIT、订阅释放与 SSE 客户端边界缺陷，当前评级调整为 **Needs Fixes**。本文件的历史通过不能替代新增场景验收；当前改造与发布门禁见 [深度复审整改方案](DEEP_REVIEW_REMEDIATION_PLAN.md)，进度见 [TODOLIST](TODOLIST.md)。
 
+## 2026-10-22 深度复审整改执行记录
+
+本节记录当前整改变更的本地与隔离环境验证。代码基线为 `55de743`，所有命令均在包含本轮工作树差异的源码上执行。当前评级仍为 **Needs Fixes**：代码级门禁已大部通过，真实测试 LDAP、目标网关故障演练、部署数据只读核查及人工 VoiceOver/NVDA 检查尚未执行。
+
+验证环境：Go 1.27.2、Node.js 24.11.1、npm 11.6.2、Playwright Chromium 156.0.8078.4；PostgreSQL 17.11 与 Redis 8.6.3 使用本地临时 Docker 服务（端口分别为 55432、56379），数据库名、口令和测试数据均为一次性审计值。未连接部署环境、生产数据库或真实 LDAP。
+
+| 范围 | 本轮结果 |
+| --- | --- |
+| Go 全量 race | 最终工作树回归通过：`INFRANEXUS_TEST_POSTGRES_DSN=<isolated> INFRANEXUS_TEST_REDIS_ADDR=<isolated> go test -race -count=1 -p=1 ./...`；SQLite、真实 PostgreSQL、真实 Redis 测试均参与，无 race 报告。隔离数据库 Bootstrap 包耗时 145.099 秒。路由权限重试状态修正另以 `-race -count=5` 定向回归通过。 |
+| Go 定向并发与取消 | 通过：授权并发撤权/重建、PG 策略事务、JIT 并发与身份冲突、LDAP 建档回滚、空闲/满缓冲 Redis 订阅取消、阻塞 Bind 取消、SSE 应用停机等目标测试以 `-race -count=3` 连续三轮通过；本轮另行补入认证/连接测试 30 秒总预算。 |
+| Go 静态检查 | 通过：`go vet ./...`。 |
+| 授权查询与锁开销 | PG 17，100 次：revision 读取均值约 156 µs、p50 137 µs、p95 249 µs。共享锁竞争基准以 12 个 GOMAXPROCS、4 倍并行度（最多 48 个并发写者）运行 100 次：吞吐口径 862 µs/op，单次获取延迟 p50 31.6 ms、p95 77.7 ms。后者是刻意制造的高并发单行锁排队场景，不代表常态请求延迟；尚未与生产负载或旧实现做同机 A/B。 |
+| Vitest 与构建 | Vitest 5 个文件、17 个测试通过；`npm run build` 通过。入口 JS 523.54 kB（166.78 kB gzip），仍超过 Vite 500 kB 建议值。 |
+| Playwright E2E | 24/24 通过，无跳过用例；含通知首断线 cursor、去重/身份切换、用户资料 409 保稿与焦点、并发状态操作、部门键盘/触屏菜单、响应式矩阵和 Axe。六模块 Axe 未发现违规。验证过程中保留一条 `ResizeObserver loop completed with undelivered notifications` 浏览器控制台告警；用例 `pageerror` 断言通过，建议在目标浏览器持续观察。 |
+| 部门树性能 | `npm run test:perf` 通过；1k 平级、10k 平级和 10k 混合树各三轮。启动 p95 分别约 943 ms、946 ms、1,015 ms；20 次过滤 p95 分别约 19.5 ms、13.6 ms、16.5 ms；DOM 1,235–1,270 个，虚拟行 31 个，混合树最长任务 73 ms。均满足 2,000 ms / 100 ms / 10,000 / 200 ms 门槛。四种视口、明暗主题和 reduced-motion/no-preference 组合均执行。 |
+| 动效与触屏 | 侧栏折叠改为单一 CSS keyframe 动画；reduced-motion 下动画和 transition 时长为 0，Base UI 双重动画告警已消失。新增 390 px 触屏菜单可见并可操作回归。 |
+
+完整验证命令：
+
+```sh
+cd backend
+INFRANEXUS_TEST_POSTGRES_DSN='<isolated PostgreSQL DSN>' \
+INFRANEXUS_TEST_REDIS_ADDR='<isolated Redis address>' \
+go test -race -count=1 -p=1 ./...
+INFRANEXUS_TEST_POSTGRES_DSN='<isolated PostgreSQL DSN>' \
+INFRANEXUS_TEST_REDIS_ADDR='<isolated Redis address>' \
+go vet ./...
+
+cd ../frontend
+npm test
+npm run build
+PLAYWRIGHT_BROWSERS_PATH='<installed Playwright browser path>' npm run test:e2e
+PLAYWRIGHT_BROWSERS_PATH='<installed Playwright browser path>' npm run test:perf
+```
+
+| 发布门禁 | 本地结果 | 上线前仍需补充 |
+| --- | --- | --- |
+| G1 授权 | 本地代码、SQLite/PostgreSQL 并发撤权、失败关闭、Outbox 回滚和 race 检查通过；PG 查询/锁竞争有本轮数据。 | 在目标多实例部署拓扑复核授权写入延迟与超时预算。 |
+| G2 LDAP | 原子建档、缓存提交隔离、并发 JIT、错误身份拒绝和真实 TCP 阻塞 Bind 取消回归通过；认证/连接测试 30 秒、目录搜索 10 分钟总预算已实施。 | 真实 LDAP/AD 的 TLS、StartTLS、Search/分页取消与连续分页预算、正常大目录和不完整目录保护尚未在测试目录端到端验证。 |
+| G3 实时链路 | Redis 空闲订阅取消、事件检查点、重连去重和真实 socket 应用停机回归通过。 | 客户端停止读取、TCP 黑洞、目标代理超时和实际停机资源回收尚未在目标网关演练。 |
+| G4 交互与测试 | Go race/vet、Vitest、build、24 项 E2E 与 Axe 通过。 | 用户资料双表单并发、真实服务链路冒烟仍需 Staging 补充。 |
+| G5 规模与体验 | 本地 1k/10k 性能预算通过；键盘、触屏、reduced-motion 自动检查通过。 | 实际租户目录形态与 VoiceOver/NVDA 人工读屏尚未覆盖。 |
+| G6 环境与运维 | 本地隔离 PG/Redis 矩阵通过；API 文档已同步 revision 和 LDAP timeout 契约；本轮没有 schema 迁移。 | 部署数据只读策略/LDAP 异常盘点、真实目录、目标网关、备份恢复及生产回退开关仍需环境负责人执行。 |
+
 验证日期：2026-10-22。结论：M6 的代码级、数据库级、浏览器级和性能基线验收已完成，可进入隔离 Staging 验证。生产开放前仍需完成本文末尾列出的环境相关检查；本记录不表示已连接生产数据库或真实 LDAP 目录。
 
 ## 固定验证环境

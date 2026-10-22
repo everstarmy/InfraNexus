@@ -120,7 +120,22 @@ func TestLegacyPostgresAdminKeepsPublicPasswordUntilExplicitRotation(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sqlDB.Close()
+	sqlDB.SetMaxOpenConns(1)
+	schema := "infranexus_legacy_admin_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if err := db.Exec("CREATE SCHEMA " + schema).Error; err != nil {
+		t.Fatalf("create isolated PostgreSQL schema: %v", err)
+	}
+	if err := db.Exec("SET search_path TO " + schema).Error; err != nil {
+		t.Fatalf("select isolated PostgreSQL schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Exec("DROP SCHEMA " + schema + " CASCADE").Error; err != nil {
+			t.Errorf("drop isolated PostgreSQL schema: %v", err)
+		}
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("close PostgreSQL connection: %v", err)
+		}
+	})
 	exerciseLegacyAdminUpgrade(t, db)
 }
 

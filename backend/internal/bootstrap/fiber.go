@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -10,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 	"github.com/gofiber/fiber/v3/middleware/responsetime"
+	"github.com/valyala/fasthttp"
 
 	"infranexus/internal/core/errors"
 	"infranexus/internal/domain"
@@ -23,6 +25,20 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 	fiberApp := fiber.New(fiber.Config{
 		AppName:      app.Config.App.Name,
 		ErrorHandler: errors.GlobalErrorHandler,
+		WriteTimeout: 30 * time.Second,
+	})
+	fiberApp.Server().HeaderReceived = func(header *fasthttp.RequestHeader) fasthttp.RequestConfig {
+		if strings.HasPrefix(string(header.RequestURI()), "/api/v1/sse/notifications") {
+			// SSE connections are deliberately rotated after two minutes. The
+			// client resumes from Last-Event-ID, while a stalled socket is bounded.
+			return fasthttp.RequestConfig{WriteTimeout: 2 * time.Minute}
+		}
+		return fasthttp.RequestConfig{}
+	}
+	fiberApp.Server().CloseOnShutdown = true
+	fiberApp.Hooks().OnPreShutdown(func() error {
+		app.cancelLifecycle()
+		return nil
 	})
 
 	// 1. 全局中间件流水线
@@ -98,7 +114,7 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 		users:       handler.NewUserHandler(userSvc, authSvc),
 		roles:       handler.NewRoleHandler(roleSvc),
 		permissions: handler.NewPermissionHandler(permSvc),
-		sse:         handler.NewSSEHandler(eventStore, authSvc, authzSvc, app.Logger),
+		sse:         handler.NewSSEHandler(eventStore, authSvc, authzSvc, app.Logger, app.lifecycleContext()),
 		departments: handler.NewDepartmentHandler(deptSvc),
 		options:     handler.NewOptionsHandler(roleSvc, deptSvc),
 		ldap:        handler.NewLDAPHandler(ldapSvc),

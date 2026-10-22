@@ -72,7 +72,7 @@ type UpdateUserRequest struct {
 	Nickname         *string `json:"nickname" validate:"omitempty,max=64"`
 	Avatar           *string `json:"avatar" validate:"omitempty,max=255"`
 	Email            *string `json:"email" validate:"omitempty,email,max=128"`
-	ExpectedRevision int64   `json:"expected_revision" validate:"omitempty,gt=0"`
+	ExpectedRevision int64   `json:"expected_revision" validate:"required,gt=0"`
 }
 
 type UpdateUserDepartmentRequest struct {

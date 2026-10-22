@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,6 +48,40 @@ func BenchmarkM6PostgresAuthorizationRevisionRead(b *testing.B) {
 	reportM6LatencyPercentiles(b, latencies)
 }
 
+func BenchmarkM6PostgresAuthorizationWriteLockContention(b *testing.B) {
+	db := openM6BenchmarkPostgres(b)
+	if err := db.AutoMigrate(&domain.AuthorizationState{}); err != nil {
+		b.Fatal(err)
+	}
+	state := domain.AuthorizationState{ID: domain.AuthorizationStateID, Revision: 1}
+	if err := db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "id"}},
+		DoUpdates: clause.Assignments(map[string]any{"revision": 1}),
+	}).Create(&state).Error; err != nil {
+		b.Fatal(err)
+	}
+
+	latencies := make([]time.Duration, b.N)
+	var next atomic.Int64
+	ctx := b.Context()
+	b.ReportAllocs()
+	b.SetParallelism(4)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			started := time.Now()
+			if err := withAuthorizationWrite(ctx, db, func(*gorm.DB) error { return nil }); err != nil {
+				b.Errorf("acquire authorization write lock: %v", err)
+				return
+			}
+			index := next.Add(1) - 1
+			latencies[index] = time.Since(started)
+		}
+	})
+	b.StopTimer()
+	reportM6LatencyPercentiles(b, latencies[:next.Load()])
+}
+
 func BenchmarkM6PostgresLDAPProgressLeaseWrite(b *testing.B) {
 	db := openM6BenchmarkPostgres(b)
 	if err := db.AutoMigrate(&domain.LDAPConfig{}, &domain.LDAPSyncLog{}); err != nil {
@@ -72,15 +107,15 @@ func BenchmarkM6PostgresLDAPProgressLeaseWrite(b *testing.B) {
 
 	total := 1_000
 	log := &domain.LDAPSyncLog{
-		ID:         uuid.New(),
-		ConfigID:   configID,
-		Domain:     config.Domain,
-		Trigger:    domain.SyncTriggerManual,
-		Mode:       "full",
-		Status:     domain.SyncStatusRunning,
-		StartedAt:  now,
-		Phase:      domain.SyncPhaseApplying,
-		Total:      &total,
+		ID:        uuid.New(),
+		ConfigID:  configID,
+		Domain:    config.Domain,
+		Trigger:   domain.SyncTriggerManual,
+		Mode:      "full",
+		Status:    domain.SyncStatusRunning,
+		StartedAt: now,
+		Phase:     domain.SyncPhaseApplying,
+		Total:     &total,
 	}
 	repository := NewLDAPRepository(db)
 	acquired, err := repository.CreateSyncTask(b.Context(), configID, config.UpdatedAt, now, now.Add(time.Hour), log)

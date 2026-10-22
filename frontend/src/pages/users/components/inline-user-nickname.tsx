@@ -141,7 +141,7 @@ export function InlineUserNickname({
             setConflict(false)
             setEditing(true)
           }}
-          className="shrink-0 opacity-0 transition-opacity group-hover/nickname:opacity-100 group-focus-within/nickname:opacity-100 focus-visible:opacity-100"
+          className="shrink-0 opacity-0 transition-opacity group-hover/nickname:opacity-100 group-focus-within/nickname:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:size-10 [@media(hover:none)]:opacity-100"
         >
           <Pencil />
         </Button>

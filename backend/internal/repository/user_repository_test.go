@@ -2,10 +2,13 @@ package repository
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -33,6 +36,112 @@ func TestCreateWithRolesRollsBackUserWhenRoleIsMissing(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("transaction left a partial user row: %d", count)
+	}
+}
+
+func TestCreateWithRolesMapsConcurrentIdentityWinner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user-identity-race.db")
+	db, err := gorm.Open(sqlite.Open("file:"+path+"?_busy_timeout=5000"), &gorm.Config{Logger: logger.Discard, TranslateError: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(4)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&domain.Department{}, &domain.Role{}, &domain.User{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewUserRepository(db)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wait sync.WaitGroup
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			user := &domain.User{Username: "same-directory-user", Domain: "corp.example", ExternalID: "stable-guid", Email: "same-directory@example.test", AuthType: domain.AuthTypeLDAP, Status: domain.StatusEnabled, Password: ""}
+			results <- repo.CreateWithRoles(t.Context(), user, nil)
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+	created, conflicts := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			created++
+		case errors.Is(err, domain.ErrIdentityConflict):
+			conflicts++
+		default:
+			t.Fatalf("CreateWithRoles() error = %v, want a committed winner and typed identity conflict", err)
+		}
+	}
+	if created != 1 || conflicts != 1 {
+		t.Fatalf("concurrent create results = created %d, conflicts %d; want one each", created, conflicts)
+	}
+	var count int64
+	if err := db.Model(&domain.User{}).Where("domain = ? AND username = ?", "corp.example", "same-directory-user").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("concurrent JIT left %d user rows, want one", count)
+	}
+}
+
+func TestCreateWithRolesMapsConcurrentIdentityWinnerPostgres(t *testing.T) {
+	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
+	}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard, TranslateError: true})
+	if err != nil {
+		t.Fatalf("connect test PostgreSQL database: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(4)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&domain.Department{}, &domain.Role{}, &domain.User{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewUserRepository(db)
+	username := "race-" + uuid.NewString()[:8]
+	domainName := "corp-" + uuid.NewString()[:8]
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wait sync.WaitGroup
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			user := &domain.User{Username: username, Domain: domainName, ExternalID: "stable-guid", Email: username + "@example.test", AuthType: domain.AuthTypeLDAP, Status: domain.StatusEnabled}
+			results <- repo.CreateWithRoles(t.Context(), user, nil)
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+	created, conflicts := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			created++
+		case errors.Is(err, domain.ErrIdentityConflict):
+			conflicts++
+		default:
+			t.Fatalf("CreateWithRoles() error = %v, want a committed winner and typed identity conflict", err)
+		}
+	}
+	if created != 1 || conflicts != 1 {
+		t.Fatalf("concurrent create results = created %d, conflicts %d; want one each", created, conflicts)
 	}
 }
 

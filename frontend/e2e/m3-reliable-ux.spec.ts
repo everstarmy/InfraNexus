@@ -90,6 +90,10 @@ test("dashboard distinguishes a failed initial load, retries, and reports its da
   await page.emulateMedia({ reducedMotion: "reduce" })
   const statusDot = page.getByRole("status").filter({ hasText: "数据已加载" }).locator("span").first()
   await expect.poll(() => statusDot.evaluate((element) => getComputedStyle(element).animationName)).toBe("none")
+  const collapsiblePanel = page.locator('[data-slot="collapsible-content"]').first()
+  await expect(collapsiblePanel).toBeVisible()
+  await expect.poll(() => collapsiblePanel.evaluate((element) => getComputedStyle(element).animationDuration)).toBe("0s")
+  await expect.poll(() => collapsiblePanel.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe("0s")
 
   await page.getByRole("button", { name: "切换至深色模式" }).click()
   await expect.poll(() => page.locator("html").evaluate((element) => element.classList.contains("dark"))).toBe(true)

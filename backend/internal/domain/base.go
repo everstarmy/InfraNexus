@@ -17,6 +17,7 @@ const (
 var (
 	ErrEditRevisionConflict = errors.New("edit revision conflict")
 	ErrTreeRevisionConflict = errors.New("organization tree revision conflict")
+	ErrIdentityConflict     = errors.New("directory identity already exists")
 )
 
 // BaseEntity 领域模型通用基类，全表主键统一使用 UUID

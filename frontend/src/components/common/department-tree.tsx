@@ -15,13 +15,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
-import {
-  collectIds,
-  filterTree,
-  findNode,
-  findPath,
-  flattenTree,
-} from "@/lib/tree";
+import { filterTree, flattenTree } from "@/lib/tree";
 import type { DepartmentNode } from "@/services/departments";
 
 export const ALL_KEY = "all";
@@ -79,21 +73,69 @@ function highlightMatch(value: string, keyword: string) {
   );
 }
 
-function visibleNodeIds(
+interface FlatDepartmentNode {
+  node: DepartmentNode;
+  depth: number;
+  position: number;
+  siblingCount: number;
+}
+
+const TREE_ROW_HEIGHT = 34;
+const TREE_OVERSCAN = 8;
+const TREE_VIRTUALIZE_THRESHOLD = 200;
+
+function flattenVisibleNodes(
   nodes: DepartmentNode[],
   expanded: Set<string>,
   forceOpen: boolean,
-) {
-  const ids: string[] = [];
-  const visit = (list: DepartmentNode[]) => {
-    for (const node of list) {
-      ids.push(node.id);
+): FlatDepartmentNode[] {
+  const rows: FlatDepartmentNode[] = [];
+  const visit = (list: DepartmentNode[], depth: number) => {
+    list.forEach((node, index) => {
+      rows.push({
+        node,
+        depth,
+        position: index + 1,
+        siblingCount: list.length,
+      });
       if (node.children.length && (forceOpen || expanded.has(node.id)))
-        visit(node.children);
-    }
+        visit(node.children, depth + 1);
+    });
   };
-  visit(nodes);
-  return ids;
+  visit(nodes, 0);
+  return rows;
+}
+
+function buildDepartmentIndex(nodes: DepartmentNode[]) {
+  const byId = new Map<string, DepartmentNode>();
+  const pathById = new Map<string, DepartmentNode[]>();
+  const subtreeCountById = new Map<string, number>();
+  const visit = (list: DepartmentNode[], parents: DepartmentNode[]) => {
+    for (const node of list) {
+      const path = [...parents, node];
+      byId.set(node.id, node);
+      pathById.set(node.id, path);
+      let count = 1;
+      for (const child of node.children) count += visit([child], path);
+      subtreeCountById.set(node.id, count);
+    }
+    return list.reduce(
+      (count, node) => count + (subtreeCountById.get(node.id) ?? 0),
+      0,
+    );
+  };
+  visit(nodes, []);
+  return { byId, pathById, subtreeCountById };
+}
+
+function findTreeScrollElement(element: HTMLElement | null) {
+  let parent = element?.parentElement ?? null;
+  while (parent) {
+    const overflowY = window.getComputedStyle(parent).overflowY;
+    if (overflowY === "auto" || overflowY === "scroll") return parent;
+    parent = parent.parentElement;
+  }
+  return null;
 }
 
 export function DepartmentTree({
@@ -113,6 +155,9 @@ export function DepartmentTree({
 }: DepartmentTreeProps) {
   const treeId = React.useId();
   const treeRef = React.useRef<HTMLUListElement>(null);
+  const scrollElementRef = React.useRef<HTMLElement | null>(null);
+  const [scrollTop, setScrollTop] = React.useState(0);
+  const [viewportHeight, setViewportHeight] = React.useState(0);
   const [query, setQuery] = React.useState("");
   const [expanded, setExpanded] = React.useState<Set<string>>(() =>
     collectExpandable(nodes, 0, defaultExpandDepth - 1, new Set()),
@@ -162,15 +207,64 @@ export function DepartmentTree({
         : [],
     [visible, keyword],
   );
-  const visibleIds = React.useMemo(
-    () => visibleNodeIds(visible, expanded, !!keyword),
+  const flatNodes = React.useMemo(
+    () => flattenVisibleNodes(visible, expanded, !!keyword),
     [visible, expanded, keyword],
+  );
+  const treeIndex = React.useMemo(() => buildDepartmentIndex(nodes), [nodes]);
+  const visibleIds = React.useMemo(
+    () => flatNodes.map(({ node }) => node.id),
+    [flatNodes],
+  );
+  const rootNodeCount = React.useMemo(
+    () => flatNodes.reduce((count, row) => count + Number(row.depth === 0), 0),
+    [flatNodes],
   );
   const specialKeys = [
     allItem ? ALL_KEY : null,
     ...visibleIds,
     unassignedItem ? UNASSIGNED_KEY : null,
   ].filter((key): key is string => !!key);
+  const shouldVirtualize = flatNodes.length > TREE_VIRTUALIZE_THRESHOLD;
+  const treeItemCount = specialKeys.length;
+
+  React.useLayoutEffect(() => {
+    const tree = treeRef.current;
+    const scrollElement = findTreeScrollElement(tree);
+    scrollElementRef.current = scrollElement;
+    if (!scrollElement) return;
+    const updateScroll = () => {
+      setScrollTop(scrollElement.scrollTop);
+      setViewportHeight(scrollElement.clientHeight);
+    };
+    const observer = new ResizeObserver(updateScroll);
+    observer.observe(scrollElement);
+    scrollElement.addEventListener("scroll", updateScroll, { passive: true });
+    updateScroll();
+    return () => {
+      observer.disconnect();
+      scrollElement.removeEventListener("scroll", updateScroll);
+    };
+  }, []);
+
+  const virtualRange = React.useMemo(() => {
+    if (!shouldVirtualize) return { start: 0, end: treeItemCount };
+    const scrollElement = scrollElementRef.current;
+    const tree = treeRef.current;
+    if (!scrollElement || !tree)
+      return { start: 0, end: Math.min(treeItemCount, 40) };
+    const treeTop =
+      tree.getBoundingClientRect().top -
+      scrollElement.getBoundingClientRect().top +
+      scrollElement.scrollTop;
+    const firstVisible = Math.floor((scrollTop - treeTop) / TREE_ROW_HEIGHT);
+    const start = Math.max(0, firstVisible - TREE_OVERSCAN);
+    const rowsInViewport = Math.ceil(viewportHeight / TREE_ROW_HEIGHT);
+    return {
+      start,
+      end: Math.min(treeItemCount, start + rowsInViewport + TREE_OVERSCAN * 2),
+    };
+  }, [scrollTop, shouldVirtualize, treeItemCount, viewportHeight]);
 
   React.useEffect(() => {
     setMatchIndex(0);
@@ -195,11 +289,37 @@ export function DepartmentTree({
 
   const focusItem = (key: string | undefined) => {
     if (!key || !treeRef.current) return;
-    const button = Array.from(
-      treeRef.current.querySelectorAll<HTMLButtonElement>(
-        "[data-tree-focus]:not(:disabled)",
-      ),
-    ).find((item) => item.dataset.treeFocus === key);
+    const index = specialKeys.indexOf(key);
+    if (index < 0) return;
+    const scrollElement = scrollElementRef.current;
+    if (
+      shouldVirtualize &&
+      scrollElement &&
+      (index < virtualRange.start || index >= virtualRange.end)
+    ) {
+      const tree = treeRef.current;
+      const treeTop =
+        tree.getBoundingClientRect().top -
+        scrollElement.getBoundingClientRect().top +
+        scrollElement.scrollTop;
+      scrollElement.scrollTop = Math.max(
+        0,
+        treeTop + index * TREE_ROW_HEIGHT - scrollElement.clientHeight / 2,
+      );
+      setScrollTop(scrollElement.scrollTop);
+      setActiveKey(key);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => focusMountedItem(key)),
+      );
+      return;
+    }
+    focusMountedItem(key);
+  };
+
+  const focusMountedItem = (key: string) => {
+    const button = treeRef.current?.querySelector<HTMLButtonElement>(
+      `[data-tree-focus="${CSS.escape(key)}"]:not(:disabled)`,
+    );
     button?.focus();
   };
 
@@ -207,14 +327,13 @@ export function DepartmentTree({
     event: React.KeyboardEvent<HTMLButtonElement>,
     node?: DepartmentNode,
   ) => {
-    const tree = event.currentTarget.closest('[role="tree"]');
-    const buttons = Array.from(
-      tree?.querySelectorAll<HTMLButtonElement>(
-        "[data-tree-focus]:not(:disabled)",
-      ) ?? [],
+    const keys = specialKeys.filter(
+      (key) =>
+        key === ALL_KEY || key === UNASSIGNED_KEY || !disabledKeys?.has(key),
     );
-    const currentIndex = buttons.indexOf(event.currentTarget);
-    const keys = buttons.map((button) => button.dataset.treeFocus ?? "");
+    const currentIndex = keys.indexOf(
+      event.currentTarget.dataset.treeFocus ?? "",
+    );
     if (
       event.key === "ArrowDown" ||
       event.key === "ArrowUp" ||
@@ -226,23 +345,28 @@ export function DepartmentTree({
         event.key === "Home"
           ? 0
           : event.key === "End"
-            ? buttons.length - 1
+            ? keys.length - 1
             : currentIndex + (event.key === "ArrowDown" ? 1 : -1);
-      const target =
-        buttons[Math.max(0, Math.min(nextIndex, buttons.length - 1))];
-      target?.focus();
-      if (target?.dataset.treeFocus) setActiveKey(target.dataset.treeFocus);
+      const targetKey = keys[Math.max(0, Math.min(nextIndex, keys.length - 1))];
+      if (targetKey) {
+        setActiveKey(targetKey);
+        focusItem(targetKey);
+      }
     } else if (event.key === "ArrowRight" && node?.children.length) {
       event.preventDefault();
       const isOpen = keyword || expanded.has(node.id);
-      if (!isOpen) toggle(node.id);
-      else focusItem(node.children[0]?.id);
+      if (!isOpen) {
+        toggle(node.id);
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => focusItem(node.children[0]?.id)),
+        );
+      } else focusItem(node.children[0]?.id);
     } else if (event.key === "ArrowLeft") {
       event.preventDefault();
       if (node?.children.length && (keyword || expanded.has(node.id)))
         toggle(node.id);
       else if (node) {
-        const path = findPath(nodes, node.id);
+        const path = treeIndex.pathById.get(node.id) ?? [];
         const parent = path.at(-2);
         if (parent) focusItem(parent.id);
       }
@@ -254,13 +378,15 @@ export function DepartmentTree({
     if (!matchNodes.length) return;
     const nextIndex = (matchIndex + 1) % matchNodes.length;
     const nextMatch = matchNodes[nextIndex];
-    const path = findPath(nodes, nextMatch.id);
+    const path = treeIndex.pathById.get(nextMatch.id) ?? [];
     setExpanded(
       (previous) =>
         new Set([...previous, ...path.slice(0, -1).map((node) => node.id)]),
     );
     setMatchIndex(nextIndex);
-    requestAnimationFrame(() => focusItem(nextMatch.id));
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => focusItem(nextMatch.id)),
+    );
   };
 
   const onNodeDragStart = (
@@ -292,10 +418,12 @@ export function DepartmentTree({
       setDropTarget(null);
       return;
     }
-    const moving = findNode(nodes, sourceId);
+    const moving = treeIndex.byId.get(sourceId);
     if (
       !moving ||
-      collectIds(moving).includes(node.id) ||
+      (treeIndex.pathById.get(node.id) ?? []).some(
+        (item) => item.id === sourceId,
+      ) ||
       disabledKeys?.has(node.id)
     ) {
       event.dataTransfer.dropEffect = "none";
@@ -325,27 +453,30 @@ export function DepartmentTree({
     setDraggedId(null);
     setDropTarget(null);
     if (!sourceId || !onMoveDrop) return;
-    const moving = findNode(nodes, sourceId);
+    const moving = treeIndex.byId.get(sourceId);
     if (
       !moving ||
-      collectIds(moving).includes(node.id) ||
+      (treeIndex.pathById.get(node.id) ?? []).some(
+        (item) => item.id === sourceId,
+      ) ||
       disabledKeys?.has(node.id)
     )
       return;
     onMoveDrop(sourceId, node.id, position);
   };
 
-  const dragSource = draggedId ? findNode(nodes, draggedId) : undefined;
+  const dragSource = draggedId ? treeIndex.byId.get(draggedId) : undefined;
   const dragTargetNode = dropTarget
-    ? findNode(nodes, dropTarget.id)
+    ? treeIndex.byId.get(dropTarget.id)
     : undefined;
   const targetPath = dragTargetNode
-    ? findPath(nodes, dragTargetNode.id)
+    ? (treeIndex.pathById.get(dragTargetNode.id) ?? [])
         .map((node) => node.name)
         .join(" / ")
     : "";
 
-  const renderNode = (node: DepartmentNode, depth: number): React.ReactNode => {
+  const renderNode = (row: FlatDepartmentNode): React.ReactNode => {
+    const { node, depth, position, siblingCount } = row;
     const hasChildren = node.children.length > 0;
     const isOpen = keyword ? true : expanded.has(node.id);
     const selected = selectedKey === node.id;
@@ -358,12 +489,19 @@ export function DepartmentTree({
       <li
         key={node.id}
         role="treeitem"
+        aria-level={depth + 1}
+        aria-posinset={position + (depth === 0 && allItem ? 1 : 0)}
+        aria-setsize={
+          siblingCount +
+          (depth === 0 ? Number(!!allItem) + Number(!!unassignedItem) : 0)
+        }
         aria-expanded={hasChildren ? isOpen : undefined}
         aria-selected={selected}
+        style={{ height: TREE_ROW_HEIGHT }}
       >
         <div
           className={cn(
-            "group/tree-row relative flex items-center gap-0.5 rounded-lg pr-1 transition-colors",
+            "group/tree-row relative flex h-8 items-center gap-0.5 rounded-lg pr-1 transition-colors motion-reduce:transition-none",
             selected ? "bg-primary/10 text-primary" : "hover:bg-muted/70",
             currentDrop === "before" && "border-t-2 border-primary",
             currentDrop === "after" && "border-b-2 border-primary",
@@ -413,7 +551,7 @@ export function DepartmentTree({
           >
             <ChevronRight
               className={cn(
-                "transition-transform duration-200",
+                "transition-transform duration-200 motion-reduce:transition-none",
                 isOpen && "rotate-90",
               )}
             />
@@ -461,7 +599,7 @@ export function DepartmentTree({
             )}
           </Button>
           {renderActions && (
-            <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/tree-row:opacity-100 group-focus-within/tree-row:opacity-100">
+            <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/tree-row:opacity-100 group-focus-within/tree-row:opacity-100 [@media(hover:none)]:opacity-100 [@media(hover:none)]:[&_button]:min-h-10 [@media(hover:none)]:[&_button]:min-w-10">
               {renderActions(node)}
             </div>
           )}
@@ -476,14 +614,6 @@ export function DepartmentTree({
             </span>
           )}
         </div>
-        {hasChildren && isOpen && (
-          <ul
-            role="group"
-            className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1"
-          >
-            {node.children.map((child) => renderNode(child, depth + 1))}
-          </ul>
-        )}
       </li>
     );
   };
@@ -494,7 +624,20 @@ export function DepartmentTree({
     count: number | undefined,
     Icon: typeof UsersRound,
   ) => (
-    <li role="treeitem" aria-selected={selectedKey === key}>
+    <li
+      role="treeitem"
+      aria-level={1}
+      aria-posinset={
+        key === ALL_KEY
+          ? 1
+          : rootNodeCount + Number(!!allItem) + 1
+      }
+      aria-setsize={
+        rootNodeCount + Number(!!allItem) + Number(!!unassignedItem)
+      }
+      aria-selected={selectedKey === key}
+      style={{ height: TREE_ROW_HEIGHT }}
+    >
       <Button
         variant="ghost"
         size="sm"
@@ -575,7 +718,7 @@ export function DepartmentTree({
           className="rounded-md border border-primary/30 bg-primary/5 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground"
         >
           {dragTargetNode && dropTarget
-            ? `放到 ${targetPath} ${dropTarget.position === "inside" ? "下级" : dropTarget.position === "before" ? "之前" : "之后"} · 将移动 ${collectIds(dragSource).length} 个部门、${dragSource.total_member_count} 位成员`
+            ? `放到 ${targetPath} ${dropTarget.position === "inside" ? "下级" : dropTarget.position === "before" ? "之前" : "之后"} · 将移动 ${treeIndex.subtreeCountById.get(dragSource.id) ?? 1} 个部门、${dragSource.total_member_count} 位成员`
             : `正在拖动「${dragSource.name}」。拖到节点上方/下方排序，中间区域移入；键盘或触屏可用节点菜单的“移动到…”和上下排序。`}
         </p>
       )}
@@ -584,11 +727,49 @@ export function DepartmentTree({
         id={treeId}
         role="tree"
         aria-label="组织架构"
-        className="min-h-0 space-y-0.5 text-sm"
+        data-tree-total={flatNodes.length}
+        data-tree-rendered={Math.max(0, virtualRange.end - virtualRange.start)}
+        className="min-h-0 text-sm"
       >
-        {allItem &&
-          virtualItem(ALL_KEY, allItem.label, allItem.count, UsersRound)}
-        {visible.map((node) => renderNode(node, 0))}
+        {virtualRange.start > 0 && (
+          <li
+            role="none"
+            aria-hidden="true"
+            style={{ height: virtualRange.start * TREE_ROW_HEIGHT }}
+          />
+        )}
+        {Array.from(
+          { length: Math.max(0, virtualRange.end - virtualRange.start) },
+          (_, offset) => {
+            const index = virtualRange.start + offset;
+            if (allItem && index === 0)
+              return (
+                <React.Fragment key={ALL_KEY}>
+                  {virtualItem(
+                    ALL_KEY,
+                    allItem.label,
+                    allItem.count,
+                    UsersRound,
+                  )}
+                </React.Fragment>
+              );
+            const nodeIndex = index - Number(!!allItem);
+            if (nodeIndex >= 0 && nodeIndex < flatNodes.length)
+              return renderNode(flatNodes[nodeIndex]);
+            if (unassignedItem && index === treeItemCount - 1)
+              return (
+                <React.Fragment key={UNASSIGNED_KEY}>
+                  {virtualItem(
+                    UNASSIGNED_KEY,
+                    unassignedItem.label,
+                    unassignedItem.count,
+                    UserX,
+                  )}
+                </React.Fragment>
+              );
+            return null;
+          },
+        )}
         {keyword && matchNodes.length === 0 && (
           <li
             role="none"
@@ -597,13 +778,15 @@ export function DepartmentTree({
             没有匹配「{query}」的部门
           </li>
         )}
-        {unassignedItem &&
-          virtualItem(
-            UNASSIGNED_KEY,
-            unassignedItem.label,
-            unassignedItem.count,
-            UserX,
-          )}
+        {virtualRange.end < treeItemCount && (
+          <li
+            role="none"
+            aria-hidden="true"
+            style={{
+              height: (treeItemCount - virtualRange.end) * TREE_ROW_HEIGHT,
+            }}
+          />
+        )}
       </ul>
     </div>
   );

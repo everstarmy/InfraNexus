@@ -19,6 +19,9 @@ import (
 
 const (
 	defaultDirectoryTimeout = 10 * time.Second
+	directoryAuthBudget     = 30 * time.Second
+	directoryTestBudget     = 30 * time.Second
+	directorySearchBudget   = 10 * time.Minute
 	directoryPageSize       = 500
 	adDisabledFlag          = 0x2
 )
@@ -45,24 +48,49 @@ func directoryTimeout(cfg *domain.LDAPConfig) time.Duration {
 }
 
 func unavailable(err error) error {
-	return fmt.Errorf("%w: %v", domain.ErrDirectoryUnavailable, err)
+	return fmt.Errorf("%w: %w", domain.ErrDirectoryUnavailable, err)
 }
 
-func (g *ldapGateway) connect(cfg *domain.LDAPConfig) (*ldap.Conn, error) {
+func directoryNetworkError(ctx context.Context, err error) error {
+	wrapped := unavailable(err)
+	if ctx.Err() != nil {
+		return errors.Join(ctx.Err(), wrapped)
+	}
+	return wrapped
+}
+
+func (g *ldapGateway) connect(ctx context.Context, cfg *domain.LDAPConfig) (*ldap.Conn, func(), error) {
 	timeout := directoryTimeout(cfg)
 	tlsConfig := &tls.Config{ServerName: cfg.ServerHost, InsecureSkipVerify: cfg.InsecureSkipVerify, MinVersion: tls.VersionTLS12}
-	conn, err := ldap.DialURL(DirectoryServerURL(cfg), ldap.DialWithDialer(&net.Dialer{Timeout: timeout}), ldap.DialWithTLSConfig(tlsConfig))
+	dialCtx, cancelDial := context.WithTimeout(ctx, timeout)
+	defer cancelDial()
+	networkConn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(cfg.ServerHost, strconv.Itoa(cfg.Port)))
 	if err != nil {
-		return nil, unavailable(err)
+		return nil, nil, unavailable(err)
 	}
+	if cfg.UseSSL {
+		tlsConn := tls.Client(networkConn, tlsConfig)
+		if err := tlsConn.HandshakeContext(dialCtx); err != nil {
+			_ = networkConn.Close()
+			return nil, nil, unavailable(err)
+		}
+		networkConn = tlsConn
+	}
+	conn := ldap.NewConn(networkConn, cfg.UseSSL)
 	conn.SetTimeout(timeout)
+	conn.Start()
+	stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	cleanup := func() {
+		stopClose()
+		_ = conn.Close()
+	}
 	if cfg.StartTLS && !cfg.UseSSL {
 		if err := conn.StartTLS(tlsConfig); err != nil {
-			_ = conn.Close()
-			return nil, unavailable(err)
+			cleanup()
+			return nil, nil, directoryNetworkError(ctx, err)
 		}
 	}
-	return conn, nil
+	return conn, cleanup, nil
 }
 
 func (g *ldapGateway) serviceBind(conn *ldap.Conn, cfg *domain.LDAPConfig, bindPassword string) error {
@@ -138,22 +166,30 @@ func (g *ldapGateway) Authenticate(ctx context.Context, cfg *domain.LDAPConfig, 
 	if strings.TrimSpace(username) == "" || password == "" {
 		return nil, domain.ErrDirectoryInvalidCredentials
 	}
-	conn, err := g.connect(cfg)
+	authCtx, cancelAuth := context.WithTimeout(ctx, directoryAuthBudget)
+	defer cancelAuth()
+	conn, closeConn, err := g.connect(authCtx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer closeConn()
 	if err := g.serviceBind(conn, cfg, bindPassword); err != nil {
+		if authCtx.Err() != nil {
+			return nil, directoryNetworkError(authCtx, err)
+		}
 		return nil, err
 	}
 	filter := strings.ReplaceAll(cfg.UserFilter, "%s", ldap.EscapeFilter(username))
 	req := ldap.NewSearchRequest(cfg.BaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 2, int(directoryTimeout(cfg).Seconds()), false, filter, mappedAttributes(cfg), nil)
 	result, err := conn.Search(req)
+	if authCtx.Err() != nil {
+		return nil, directoryNetworkError(authCtx, authCtx.Err())
+	}
 	if err != nil {
 		if ldap.IsErrorWithCode(err, ldap.LDAPResultSizeLimitExceeded) {
 			return nil, domain.ErrDirectoryInvalidCredentials
 		}
-		return nil, unavailable(err)
+		return nil, directoryNetworkError(authCtx, err)
 	}
 	if len(result.Entries) != 1 {
 		return nil, domain.ErrDirectoryInvalidCredentials
@@ -163,21 +199,32 @@ func (g *ldapGateway) Authenticate(ctx context.Context, cfg *domain.LDAPConfig, 
 		return nil, domain.ErrDirectoryAccountDisabled
 	}
 	if err := conn.Bind(result.Entries[0].DN, password); err != nil {
+		if authCtx.Err() != nil {
+			return nil, directoryNetworkError(authCtx, err)
+		}
 		if ldap.IsErrorWithCode(err, ldap.LDAPResultInvalidCredentials) || ldap.IsErrorWithCode(err, ldap.ErrorEmptyPassword) {
 			return nil, domain.ErrDirectoryInvalidCredentials
 		}
 		return nil, unavailable(err)
 	}
+	if authCtx.Err() != nil {
+		return nil, directoryNetworkError(authCtx, authCtx.Err())
+	}
 	return &user, nil
 }
 
 func (g *ldapGateway) SearchUsers(ctx context.Context, cfg *domain.LDAPConfig, bindPassword string, changedSince *time.Time) ([]domain.DirectoryUser, error) {
-	conn, err := g.connect(cfg)
+	searchCtx, cancelSearch := context.WithTimeout(ctx, directorySearchBudget)
+	defer cancelSearch()
+	conn, closeConn, err := g.connect(searchCtx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer closeConn()
 	if err := g.serviceBind(conn, cfg, bindPassword); err != nil {
+		if searchCtx.Err() != nil {
+			return nil, directoryNetworkError(searchCtx, err)
+		}
 		return nil, err
 	}
 	filter := strings.ReplaceAll(cfg.UserFilter, "%s", "*")
@@ -190,11 +237,17 @@ func (g *ldapGateway) SearchUsers(ctx context.Context, cfg *domain.LDAPConfig, b
 	}
 	req := ldap.NewSearchRequest(cfg.BaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false, filter, mappedAttributes(cfg), nil)
 	result, err := conn.SearchWithPaging(req, directoryPageSize)
+	if searchCtx.Err() != nil {
+		return nil, directoryNetworkError(searchCtx, searchCtx.Err())
+	}
 	if err != nil {
-		return nil, unavailable(err)
+		return nil, directoryNetworkError(searchCtx, err)
 	}
 	users := make([]domain.DirectoryUser, 0, len(result.Entries))
 	for _, entry := range result.Entries {
+		if searchCtx.Err() != nil {
+			return nil, directoryNetworkError(searchCtx, searchCtx.Err())
+		}
 		users = append(users, toDirectoryUser(entry, cfg))
 	}
 	return users, nil
@@ -202,19 +255,27 @@ func (g *ldapGateway) SearchUsers(ctx context.Context, cfg *domain.LDAPConfig, b
 
 func (g *ldapGateway) Test(ctx context.Context, cfg *domain.LDAPConfig, bindPassword string) (*domain.LDAPTestResult, error) {
 	start := time.Now()
+	testCtx, cancelTest := context.WithTimeout(ctx, directoryTestBudget)
+	defer cancelTest()
 	result := &domain.LDAPTestResult{ServerURL: DirectoryServerURL(cfg), SampleUsers: []string{}, Stage: "connect"}
 	finish := func(message string) (*domain.LDAPTestResult, error) {
 		result.Message = message
 		result.LatencyMs = time.Since(start).Milliseconds()
 		return result, nil
 	}
-	conn, err := g.connect(cfg)
+	conn, closeConn, err := g.connect(testCtx, cfg)
 	if err != nil {
+		if testCtx.Err() != nil {
+			return nil, testCtx.Err()
+		}
 		return finish("无法连接目录服务器：" + strings.TrimPrefix(err.Error(), domain.ErrDirectoryUnavailable.Error()+": "))
 	}
-	defer conn.Close()
+	defer closeConn()
 	result.Stage = "bind"
 	if err := g.serviceBind(conn, cfg, bindPassword); err != nil {
+		if testCtx.Err() != nil {
+			return nil, testCtx.Err()
+		}
 		if errors.Is(err, domain.ErrDirectoryBindFailed) {
 			return finish("服务账号（Bind DN）或密码错误")
 		}
@@ -224,6 +285,9 @@ func (g *ldapGateway) Test(ctx context.Context, cfg *domain.LDAPConfig, bindPass
 	filter := strings.ReplaceAll(cfg.UserFilter, "%s", "*")
 	req := ldap.NewSearchRequest(cfg.BaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 5, int(directoryTimeout(cfg).Seconds()), false, filter, mappedAttributes(cfg), nil)
 	found, err := conn.Search(req)
+	if testCtx.Err() != nil {
+		return nil, testCtx.Err()
+	}
 	if err != nil && !ldap.IsErrorWithCode(err, ldap.LDAPResultSizeLimitExceeded) {
 		return finish("用户检索失败，请检查 Base DN 与用户过滤器：" + err.Error())
 	}

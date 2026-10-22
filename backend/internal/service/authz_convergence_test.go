@@ -2,7 +2,9 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,6 +81,33 @@ func TestAuthorizationRevisionRefreshesIndependentInstancesAndRevokes(t *testing
 	}
 	if err := roles.AssignPermissions(ctx, role.ID, []uuid.UUID{permission.ID}, 1); err != nil {
 		t.Fatal(err)
+	}
+
+	concurrentInstance := service.NewAuthorizationService(newEnforcer(), roles, permissions, stateRepo, nil, nil)
+	const concurrentReaders = 32
+	startRefresh := make(chan struct{})
+	refreshResults := make(chan error, concurrentReaders)
+	var refreshWait sync.WaitGroup
+	for range concurrentReaders {
+		refreshWait.Add(1)
+		go func() {
+			defer refreshWait.Done()
+			<-startRefresh
+			allowed, err := concurrentInstance.Enforce(ctx, role.Code, permission.Path, permission.Method)
+			if err != nil {
+				refreshResults <- err
+			} else if !allowed {
+				refreshResults <- errors.New("policy was denied during concurrent initial refresh")
+			}
+		}()
+	}
+	close(startRefresh)
+	refreshWait.Wait()
+	close(refreshResults)
+	for err := range refreshResults {
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	for name, instance := range map[string]domain.AuthorizationService{"A": instanceA, "B": instanceB} {

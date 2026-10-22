@@ -83,6 +83,8 @@ func (n *redisAuthorizationNotifier) Subscribe(ctx context.Context) (<-chan int6
 	go func() {
 		defer close(out)
 		defer func() { _ = pubsub.Close() }()
+		stopClose := context.AfterFunc(ctx, func() { _ = pubsub.Close() })
+		defer stopClose()
 		for message := range pubsub.Channel() {
 			revision, err := strconv.ParseInt(message.Payload, 10, 64)
 			if err != nil {

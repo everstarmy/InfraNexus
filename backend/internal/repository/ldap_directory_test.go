@@ -1,7 +1,10 @@
 package repository
 
 import (
+	"context"
 	"errors"
+	"io"
+	"net"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +15,51 @@ import (
 	"infranexus/internal/domain"
 	"infranexus/internal/testutil/ldaptest"
 )
+
+func TestGatewayAuthenticateCancelsBlockedBind(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	accepted := make(chan struct{})
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		close(accepted)
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+
+	address := listener.Addr().(*net.TCPAddr)
+	cfg := &domain.LDAPConfig{
+		ServerHost: "127.0.0.1", Port: address.Port,
+		BindDN: testBindDN, TimeoutSeconds: 5,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() {
+		_, err := NewLDAPGateway().Authenticate(ctx, cfg, testBindPW, "zhangsan", "password")
+		result <- err
+	}()
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("LDAP client did not reach the blocked bind stage")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled bind error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("LDAP bind remained blocked after context cancellation")
+	}
+}
 
 const (
 	testBindDN = "CN=svc-infranexus,OU=Service,DC=corp,DC=local"

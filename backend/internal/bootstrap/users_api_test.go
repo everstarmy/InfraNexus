@@ -56,17 +56,22 @@ func TestUserTextUpdatesDistinguishMissingClearAndInvalidEmail(t *testing.T) {
 	bearer := adminToken(t, app)
 	user := createLocalUser(t, app, bearer, "profile-semantics", map[string]any{"nickname": "原昵称"})
 	path := "/api/v1/users/" + user.ID.String()
-	unchanged := call(t, app, "PUT", path, bearer, map[string]any{})
+	missingRevision := call(t, app, "PUT", path, bearer, map[string]any{"nickname": "不应写入"})
+	expectCode(t, missingRevision, 400, response.CodeParamInvalid)
+	zeroRevision := call(t, app, "PUT", path, bearer, map[string]any{"nickname": "不应写入", "expected_revision": 0})
+	expectCode(t, zeroRevision, 400, response.CodeParamInvalid)
+	unchanged := call(t, app, "PUT", path, bearer, map[string]any{"expected_revision": user.EditRevision})
 	expectCode(t, unchanged, 200, response.CodeSuccess)
 	if got := decode[domain.User](t, unchanged.Data).Nickname; got != "原昵称" {
 		t.Fatalf("missing nickname changed the field: %q", got)
 	}
-	cleared := call(t, app, "PUT", path, bearer, map[string]any{"nickname": ""})
+	cleared := call(t, app, "PUT", path, bearer, map[string]any{"nickname": "", "expected_revision": user.EditRevision})
 	expectCode(t, cleared, 200, response.CodeSuccess)
-	if got := decode[domain.User](t, cleared.Data).Nickname; got != "" {
+	clearedUser := decode[domain.User](t, cleared.Data)
+	if got := clearedUser.Nickname; got != "" {
 		t.Fatalf("explicit empty nickname did not clear the field: %q", got)
 	}
-	expectCode(t, call(t, app, "PUT", path, bearer, map[string]any{"email": ""}), 400, response.CodeParamInvalid)
+	expectCode(t, call(t, app, "PUT", path, bearer, map[string]any{"email": "", "expected_revision": clearedUser.EditRevision}), 400, response.CodeParamInvalid)
 	var unchangedUser domain.User
 	if err := container.DB.First(&unchangedUser, "id = ?", user.ID).Error; err != nil {
 		t.Fatal(err)
@@ -129,7 +134,7 @@ func TestUserProfileUpdateCannotChangeAuthorizationFields(t *testing.T) {
 	profileEditorToken := tokenFor(t, app, profileEditor.Username, "Str0ng!pass")
 	target := createLocalUser(t, app, admin, "profile-target", nil)
 	url := "/api/v1/users/" + target.ID.String()
-	expectCode(t, call(t, app, "PUT", url, profileEditorToken, map[string]any{"nickname": "已授权资料修改"}), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "PUT", url, profileEditorToken, map[string]any{"nickname": "已授权资料修改", "expected_revision": target.EditRevision}), 200, response.CodeSuccess)
 	for _, body := range []map[string]any{
 		{"status": 2},
 		{"role_ids": []uuid.UUID{}},

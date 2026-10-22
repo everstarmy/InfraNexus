@@ -140,6 +140,10 @@
   --animate-skeleton-shimmer: skeleton-shimmer 1.8s ease-in-out infinite;
   --animate-progress-indeterminate: progress-indeterminate 1.5s ease-in-out
     infinite;
+  --animate-sidebar-submenu-down: sidebar-submenu-down 200ms
+    cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-sidebar-submenu-up: sidebar-submenu-up 200ms
+    cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 @keyframes attention-shake {
@@ -184,6 +188,24 @@
   }
 }
 
+@keyframes sidebar-submenu-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--collapsible-panel-height);
+  }
+}
+
+@keyframes sidebar-submenu-up {
+  from {
+    height: var(--collapsible-panel-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
 @layer components {
   [data-slot="skeleton"].skeleton-shimmer {
     position: relative;
@@ -210,9 +232,9 @@
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
+    animation-duration: 0s !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 0s !important;
   }
 }
 

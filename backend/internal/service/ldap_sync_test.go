@@ -2,14 +2,52 @@ package service
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
+	coreerrors "infranexus/internal/core/errors"
 	"infranexus/internal/domain"
+	"infranexus/internal/repository"
 )
+
+type jitLookupBarrier struct {
+	mu    sync.Mutex
+	count int
+	ready chan struct{}
+}
+
+func (b *jitLookupBarrier) wait() {
+	b.mu.Lock()
+	b.count++
+	if b.count == 2 {
+		close(b.ready)
+	}
+	ready := b.ready
+	b.mu.Unlock()
+	<-ready
+}
+
+type synchronizedJITUsers struct {
+	domain.UserRepository
+	barrier *jitLookupBarrier
+}
+
+func (r synchronizedJITUsers) GetByUsername(ctx context.Context, authDomain, username string) (*domain.User, error) {
+	user, err := r.UserRepository.GetByUsername(ctx, authDomain, username)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		r.barrier.wait()
+	}
+	return user, err
+}
 
 func syncConfig(strategy string, mappings ...domain.OUMapping) *domain.LDAPConfig {
 	return &domain.LDAPConfig{
@@ -18,6 +56,226 @@ func syncConfig(strategy string, mappings ...domain.OUMapping) *domain.LDAPConfi
 		BaseDN:              "DC=corp,DC=local",
 		DisableMissingUsers: true,
 		DepartmentSync:      datatypes.NewJSONType(domain.LDAPDepartmentSync{Strategy: strategy, OUMappings: mappings}),
+	}
+}
+
+func TestLDAPApplyCreatesUserRoleAndDepartmentAtomically(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "ldap-apply-atomic.db")), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&domain.Department{}, &domain.Role{}, &domain.User{}, &domain.OrganizationState{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&domain.OrganizationState{ID: domain.OrganizationStateID, Revision: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	users := repository.NewUserRepository(db)
+	departments := repository.NewDepartmentRepository(db)
+	organization := repository.NewOrganizationUnitOfWork(db)
+	missingRoleID := uuid.New()
+	cfg := &domain.LDAPConfig{Domain: "corp.test", Type: domain.AuthTypeLDAP, DefaultRoleID: &missingRoleID}
+	p := plannedUser{
+		item:   domain.SyncPlanItem{Action: domain.SyncActionCreate, Username: "ldap-atomic"},
+		dir:    domain.DirectoryUser{Username: "ldap-atomic", ExternalID: "external-atomic", Nickname: "LDAP Atomic"},
+		values: map[string]any{"email": "ldap-atomic@example.test"},
+		target: &deptTarget{Segments: []deptSegment{{Name: "工程部", ExternalID: "ou=engineering"}}},
+	}
+	resolver := newDepartmentResolver(departments)
+	svc := &ldapService{LDAPServiceDeps: LDAPServiceDeps{Users: users, Departments: departments, Organization: organization}}
+	if _, err := svc.apply(t.Context(), cfg, resolver, p); err == nil {
+		t.Fatal("LDAP create succeeded even though its default role was missing")
+	}
+	assertCount := func(model any, want int64) {
+		t.Helper()
+		var count int64
+		if err := db.Model(model).Count(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != want {
+			t.Fatalf("%T row count = %d, want %d", model, count, want)
+		}
+	}
+	assertCount(&domain.User{}, 0)
+	assertCount(&domain.Department{}, 0)
+	if resolver.created != 0 {
+		t.Fatalf("failed transaction published %d created departments", resolver.created)
+	}
+	var state domain.OrganizationState
+	if err := db.First(&state, "id = ?", domain.OrganizationStateID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if state.Revision != 1 {
+		t.Fatalf("failed LDAP transaction advanced organization revision to %d", state.Revision)
+	}
+	withoutDepartment := p
+	withoutDepartment.item = domain.SyncPlanItem{Action: domain.SyncActionCreate, Username: "ldap-no-department"}
+	withoutDepartment.dir = domain.DirectoryUser{Username: "ldap-no-department", ExternalID: "external-no-department"}
+	withoutDepartment.values = map[string]any{"email": "ldap-no-department@example.test"}
+	withoutDepartment.target = nil
+	if _, err := svc.apply(t.Context(), cfg, resolver, withoutDepartment); err == nil {
+		t.Fatal("LDAP create without a department succeeded despite its default role being missing")
+	}
+	assertCount(&domain.User{}, 0)
+	assertCount(&domain.Department{}, 0)
+	if err := db.First(&state, "id = ?", domain.OrganizationStateID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if state.Revision != 1 {
+		t.Fatalf("LDAP create without a department advanced organization revision to %d", state.Revision)
+	}
+
+	role := domain.Role{Code: "ldap-atomic-role", Name: "LDAP atomic role", Status: domain.StatusEnabled}
+	if err := db.Create(&role).Error; err != nil {
+		t.Fatal(err)
+	}
+	cfg.DefaultRoleID = &role.ID
+	created, err := svc.apply(t.Context(), cfg, resolver, p)
+	if err != nil {
+		t.Fatalf("retry LDAP create after role repair: %v", err)
+	}
+	if created == nil || len(created.Roles) != 1 || created.Roles[0].ID != role.ID || created.DepartmentID == nil {
+		t.Fatalf("created LDAP user is missing its role or department: %+v", created)
+	}
+	assertCount(&domain.User{}, 1)
+	assertCount(&domain.Department{}, 1)
+	if resolver.created != 1 {
+		t.Fatalf("committed department count = %d, want 1", resolver.created)
+	}
+	if err := db.First(&state, "id = ?", domain.OrganizationStateID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if state.Revision != 2 {
+		t.Fatalf("successful LDAP transaction advanced organization revision to %d, want 2", state.Revision)
+	}
+}
+
+func TestLDAPProvisionConcurrentJITUsesCommittedIdentityAndRejectsNameBinding(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "ldap-jit-race.db")+"?_busy_timeout=5000"), &gorm.Config{Logger: logger.Discard, TranslateError: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(4)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&domain.Department{}, &domain.Role{}, &domain.User{}); err != nil {
+		t.Fatal(err)
+	}
+	baseUsers := repository.NewUserRepository(db)
+	users := synchronizedJITUsers{
+		UserRepository: baseUsers,
+		barrier:        &jitLookupBarrier{ready: make(chan struct{})},
+	}
+	service := &ldapService{LDAPServiceDeps: LDAPServiceDeps{
+		Users: users, Departments: repository.NewDepartmentRepository(db),
+	}}
+	cfg := &domain.LDAPConfig{Domain: "corp.test", Type: domain.AuthTypeLDAP}
+	directoryUser := domain.DirectoryUser{
+		Username: "jit-race", Email: "jit-race@corp.test", Nickname: "JIT race", ExternalID: "stable-jit-guid",
+	}
+	start := make(chan struct{})
+	results := make(chan *domain.User, 2)
+	errs := make(chan error, 2)
+	var wait sync.WaitGroup
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			user, err := service.provision(t.Context(), cfg, directoryUser)
+			results <- user
+			errs <- err
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+	close(errs)
+	var winner *domain.User
+	for user := range results {
+		if user == nil {
+			t.Fatal("concurrent JIT request did not resolve a user")
+		}
+		if winner == nil {
+			winner = user
+		} else if user.ID != winner.ID {
+			t.Fatalf("concurrent JIT requests returned different users: %s and %s", winner.ID, user.ID)
+		}
+	}
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent JIT provisioning failed: %v", err)
+		}
+	}
+	var count int64
+	if err := db.Model(&domain.User{}).Where("domain = ? AND external_id = ?", cfg.Domain, directoryUser.ExternalID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("concurrent JIT created %d identity rows, want exactly one", count)
+	}
+
+	local := &domain.User{Username: "name-collision", Domain: cfg.Domain, Email: "local@corp.test", Password: "hash", AuthType: domain.AuthTypeLocal, Status: domain.StatusEnabled}
+	if err := baseUsers.Create(t.Context(), local); err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.provision(t.Context(), cfg, domain.DirectoryUser{Username: local.Username, Email: "directory@corp.test", ExternalID: "different-guid"})
+	if err == nil || coreerrors.Classify(err).BizCode != coreerrors.ErrExternalAccountManaged.BizCode {
+		t.Fatalf("same-name local identity error = %v, want managed-account conflict", err)
+	}
+	stored, err := baseUsers.GetByID(t.Context(), local.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AuthType != domain.AuthTypeLocal || stored.ExternalID != "" {
+		t.Fatalf("name-only match altered local account identity: auth_type=%q external_id=%q", stored.AuthType, stored.ExternalID)
+	}
+}
+
+func TestDepartmentResolverEvictsDeletedCachedDepartment(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "ldap-department-cache.db")), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&domain.Department{}); err != nil {
+		t.Fatal(err)
+	}
+	departmentsRepo := repository.NewDepartmentRepository(db)
+	department := domain.Department{
+		Name: "Cached department", Code: "cached-department", Source: domain.SourceLDAP,
+		ExternalID: "ou=cached", Status: domain.StatusEnabled,
+	}
+	department.ID = uuid.New()
+	department.TreePath = domain.DepartmentPath(domain.DepartmentRootPath, department.ID)
+	if err := departmentsRepo.Create(t.Context(), &department); err != nil {
+		t.Fatal(err)
+	}
+	resolver := newDepartmentResolver(departmentsRepo)
+	segment := deptSegment{Name: department.Name, ExternalID: department.ExternalID}
+	id, err := resolver.find(t.Context(), nil, segment)
+	if err != nil || id == nil || *id != department.ID {
+		t.Fatalf("initial resolver lookup = %v, %v", id, err)
+	}
+	if err := db.Delete(&domain.Department{}, "id = ?", department.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	id, err = resolver.find(t.Context(), nil, segment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != nil {
+		t.Fatalf("deleted department cache entry resolved to stale ID %s", *id)
+	}
+	if _, ok := resolver.cache[segment.ExternalID]; ok {
+		t.Fatal("deleted department ID remained in the resolver cache")
 	}
 }
 

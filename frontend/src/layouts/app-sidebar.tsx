@@ -275,7 +275,7 @@ function NavMenuItem({ item, activeUrl }: { item: NavItem; activeUrl: string }) 
           <span className={cn("transition-colors", isChildActive ? "font-medium text-foreground" : "text-sidebar-foreground")}>{item.title}</span>
           <ChevronRight className="ml-auto size-4 text-muted-foreground transition-transform duration-300 in-data-panel-open:rotate-90 in-aria-expanded:rotate-90 group-data-[state=open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden motion-reduce:transition-none" />
         </CollapsibleTrigger>
-        <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] data-ending-style:h-0 data-starting-style:h-0 motion-reduce:transition-none">
+        <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden data-open:animate-sidebar-submenu-down data-closed:animate-sidebar-submenu-up motion-reduce:animate-none">
           <SidebarMenuSub>
             {item.children!.map((child) => {
               const isSubActive = activeUrl === child.url || activeUrl.startsWith(`${child.url}/`)

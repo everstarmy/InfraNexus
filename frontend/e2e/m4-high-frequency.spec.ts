@@ -290,6 +290,28 @@ test("department tree supports roving keyboard search and revision-safe relative
   expect(mocks.relativeMoves[0]).toEqual({ id: uuid(102), target_id: uuid(202), position: "before", expected_revision: 7 })
 })
 
+test("department actions stay visible and usable on touch screens", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  })
+  const page = await context.newPage()
+  try {
+    await installMocks(page)
+    await page.goto("/departments")
+    const row = page.locator(`[data-department-tree-row="${uuid(101)}"]`)
+    const trigger = page.getByRole("button", { name: "研发部 的操作" })
+    await expect(row).toBeVisible()
+    await expect(trigger).toBeVisible()
+    expect(await trigger.evaluate((element) => getComputedStyle(element.parentElement!).opacity)).toBe("1")
+    await trigger.tap()
+    await expect(page.getByRole("menuitem", { name: "移动到…" })).toBeVisible()
+  } finally {
+    await context.close()
+  }
+})
+
 test("command palette searches entities only with exact API permissions and honors shortcut scope", async ({ page }) => {
   const allowed = [
     "dashboard", "users", "departments", "roles", "permissions",

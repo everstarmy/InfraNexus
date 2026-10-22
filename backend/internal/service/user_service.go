@@ -170,6 +170,9 @@ func (s *userService) CreateUser(ctx context.Context, actorID uuid.UUID, req dom
 }
 
 func (s *userService) UpdateUser(ctx context.Context, actorID, id uuid.UUID, req domain.UpdateUserRequest) (*domain.User, error) {
+	if req.ExpectedRevision <= 0 {
+		return nil, coreerrors.ErrParamInvalid.WithMessage("expected_revision 必须为正整数")
+	}
 	user, err := s.GetUser(ctx, id)
 	if err != nil {
 		return nil, err
@@ -191,17 +194,12 @@ func (s *userService) UpdateUser(ctx context.Context, actorID, id uuid.UUID, req
 		values["avatar"] = *req.Avatar
 	}
 	if len(values) > 0 {
-		var updateErr error
-		if req.ExpectedRevision > 0 {
-			if user.EditRevision != req.ExpectedRevision {
-				return nil, coreerrors.ErrResourceConflict.WithMessage("用户资料已被其他管理员修改，请保留草稿并刷新后重试")
-			}
-			updateErr = s.userRepo.UpdateColumnsCAS(ctx, id, req.ExpectedRevision, values)
-			if errors.Is(updateErr, domain.ErrEditRevisionConflict) {
-				return nil, coreerrors.ErrResourceConflict.WithMessage("用户资料已被其他管理员修改，请保留草稿并刷新后重试")
-			}
-		} else {
-			updateErr = s.userRepo.UpdateColumns(ctx, id, values)
+		if user.EditRevision != req.ExpectedRevision {
+			return nil, coreerrors.ErrResourceConflict.WithMessage("用户资料已被其他管理员修改，请保留草稿并刷新后重试")
+		}
+		updateErr := s.userRepo.UpdateColumnsCAS(ctx, id, req.ExpectedRevision, values)
+		if errors.Is(updateErr, domain.ErrEditRevisionConflict) {
+			return nil, coreerrors.ErrResourceConflict.WithMessage("用户资料已被其他管理员修改，请保留草稿并刷新后重试")
 		}
 		if updateErr != nil {
 			return nil, updateErr

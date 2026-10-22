@@ -3,6 +3,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 const configID = "00000000-0000-4000-8000-000000000681";
 const planID = "00000000-0000-4000-8000-000000000682";
 let treeSize = 1_000;
+let treeShape: "flat" | "mixed" = "flat";
 
 function envelope<T>(data: T, status = 200) {
   return {
@@ -56,12 +57,12 @@ function directoryConfig() {
 }
 
 function departmentNodes(count: number) {
-  return Array.from({ length: count }, (_, index) => {
+  const nodes = Array.from({ length: count }, (_, index) => {
     const suffix = String(index + 1).padStart(12, "0");
     const id = `00000000-0000-4000-8000-${suffix}`;
     return {
       id,
-      parent_id: null,
+      parent_id: null as string | null,
       name: `性能采样部门 ${index + 1}`,
       code: `perf-${String(index + 1).padStart(5, "0")}`,
       sort_order: index + 1,
@@ -78,6 +79,16 @@ function departmentNodes(count: number) {
       children: [],
     };
   });
+  if (treeShape === "flat") return nodes;
+  for (let index = 1; index < nodes.length; index += 1) {
+    const parent = nodes[Math.floor((index - 1) / 8)];
+    const node = nodes[index];
+    node.parent_id = parent.id;
+    node.depth = parent.depth + 1;
+    node.tree_path = `${parent.tree_path}/${node.id}`;
+    parent.children.push(node);
+  }
+  return nodes.length ? [nodes[0]] : [];
 }
 
 function userPage(pageNumber: number, pageSize: number) {
@@ -104,6 +115,10 @@ function userPage(pageNumber: number, pageSize: number) {
 async function installPerformanceMocks(page: Page) {
   await page.addInitScript(() => {
     const measurements: number[] = [];
+    Object.defineProperty(window, "__m6StartedAt", {
+      value: performance.now(),
+      configurable: false,
+    });
     Object.defineProperty(window, "__m6LongTasks", {
       value: measurements,
       configurable: false,
@@ -244,41 +259,127 @@ test("records production bundle, large tree and paged LDAP preview baseline", as
   };
 
   const treeMeasurements = [];
-  for (const size of [1_000, 10_000]) {
+  const treeScenarios = [
+    { size: 1_000, shape: "flat" as const },
+    { size: 10_000, shape: "flat" as const },
+    { size: 10_000, shape: "mixed" as const },
+  ];
+  for (const { size, shape } of treeScenarios) {
     treeSize = size;
-    const startedAt = Date.now();
-    if (size === 1_000) await page.goto("/departments");
-    else await page.reload();
-    await expect(page.locator("[data-department-tree-node]")).toHaveCount(
-      size,
-      {
+    treeShape = shape;
+    const startupRuns: Array<{
+      wallClockMs: number;
+      browserMs: number;
+      domElements: number;
+      renderedRows: number;
+      longestTaskMs: number;
+    }> = [];
+    for (let round = 0; round < 3; round += 1) {
+      const startedAt = Date.now();
+      if (size === 1_000 && round === 0) await page.goto("/departments");
+      else if (size === 1_000) await page.reload();
+      else if (round === 0) await page.goto("/departments");
+      else await page.reload();
+      const tree = page.locator("[role=tree]");
+      const treeFilter = page.getByPlaceholder("搜索部门名称或编码");
+      if (shape === "mixed") {
+        await expect(treeFilter).toBeVisible({ timeout: 90_000 });
+        await treeFilter.fill("perf-");
+      }
+      await expect(tree).toHaveAttribute("data-tree-total", String(size), {
         timeout: 90_000,
-      },
-    );
-    const browserMetrics = await page.evaluate(() => ({
-      navigationToRenderMs: performance.now(),
-      domElements: document.querySelectorAll("*").length,
-      longTasksMs: (window as Window & { __m6LongTasks: number[] })
-        .__m6LongTasks,
-    }));
+      });
+      const browserMetrics = await page.evaluate(() => {
+        const tasks = (window as Window & { __m6LongTasks: number[] })
+          .__m6LongTasks;
+        return {
+          browserMs:
+            performance.now() -
+            (window as Window & { __m6StartedAt: number }).__m6StartedAt,
+          domElements: document.querySelectorAll("*").length,
+          renderedRows: Number(
+            document
+              .querySelector("[role=tree]")
+              ?.getAttribute("data-tree-rendered") ?? 0,
+          ),
+          longestTaskMs: Math.max(0, ...tasks),
+        };
+      });
+      startupRuns.push({
+        wallClockMs: Date.now() - startedAt,
+        ...browserMetrics,
+      });
+      expect(
+        browserMetrics.renderedRows,
+        `${size} department virtual row budget`,
+      ).toBeLessThanOrEqual(80);
+      expect(
+        browserMetrics.domElements,
+        `${size} department DOM budget`,
+      ).toBeLessThan(10_000);
+      expect(
+        browserMetrics.longestTaskMs,
+        `${size} department long-task budget`,
+      ).toBeLessThanOrEqual(200);
+    }
     const treeFilter = page.getByPlaceholder("搜索部门名称或编码");
     const treeFilterLatencyMs: number[] = [];
     for (let index = 1; index <= 20; index += 1) {
       const target = size - index;
       const started = await page.evaluate(() => performance.now());
       await treeFilter.fill(`perf-${String(target).padStart(5, "0")}`);
-      await expect(page.locator("[data-department-tree-node]")).toHaveCount(1);
+      await expect(
+        page.locator("[data-department-tree-node][data-current-match]"),
+      ).toHaveCount(1);
       treeFilterLatencyMs.push(
         await page.evaluate((start) => performance.now() - start, started),
       );
     }
     treeMeasurements.push({
       departments: size,
-      wallClockMs: Date.now() - startedAt,
-      browser: browserMetrics,
+      shape,
+      startupP95Ms: percentile(
+        startupRuns.map((run) => run.wallClockMs),
+        0.95,
+      ),
+      runs: startupRuns,
       treeFilterLatencyP50Ms: percentile(treeFilterLatencyMs, 0.5),
       treeFilterLatencyP95Ms: percentile(treeFilterLatencyMs, 0.95),
     });
+    expect(
+      percentile(
+        startupRuns.map((run) => run.wallClockMs),
+        0.95,
+      ),
+      `${size} ${shape} department startup p95`,
+    ).toBeLessThanOrEqual(2_000);
+    expect(
+      percentile(treeFilterLatencyMs, 0.95),
+      `${size} department filter p95`,
+    ).toBeLessThan(100);
+  }
+
+  const viewportScenarios = [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 800 },
+    { width: 1920, height: 1080 },
+  ];
+  const departmentSearch = page.getByPlaceholder("搜索部门名称或编码");
+  await departmentSearch.fill("");
+  for (const viewport of viewportScenarios) {
+    for (const colorScheme of ["light", "dark"] as const) {
+      for (const reducedMotion of ["reduce", "no-preference"] as const) {
+        await page.setViewportSize(viewport);
+        await page.emulateMedia({ colorScheme, reducedMotion });
+        await expect(page.locator("[role=tree]")).toBeVisible();
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= window.innerWidth,
+          ),
+        ).toBeTruthy();
+      }
+    }
   }
 
   await page.goto("/ldap");

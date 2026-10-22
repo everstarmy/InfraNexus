@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -158,22 +160,57 @@ func (r *userRepository) AssignRoles(ctx context.Context, userID uuid.UUID, role
 }
 
 func (r *userRepository) CreateWithRoles(ctx context.Context, user *domain.User, roleIDs []uuid.UUID) error {
-	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(user).Error; err != nil {
-			return err
+	writeOnce := func() error {
+		return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(user).Error; err != nil {
+				return err
+			}
+			if len(roleIDs) == 0 {
+				return nil
+			}
+			var roles []domain.Role
+			if err := tx.Where("id IN ?", roleIDs).Find(&roles).Error; err != nil {
+				return err
+			}
+			if len(roles) != len(roleIDs) {
+				return gorm.ErrRecordNotFound
+			}
+			return tx.Model(user).Association("Roles").Append(roles)
+		})
+	}
+	attempts := organizationWriteAttempts
+	if transactionFromContext(ctx) != nil {
+		// The outer unit of work owns retries so department/cache state and the
+		// user transaction are replayed together.
+		attempts = 1
+	}
+	var err error
+	for attempt := range attempts {
+		err = writeOnce()
+		if err == nil || !retryableOrganizationWrite(err) || attempt == attempts-1 {
+			break
 		}
-		if len(roleIDs) == 0 {
-			return nil
+		timer := time.NewTimer(time.Duration(attempt+1) * 15 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return errors.Join(ctx.Err(), err)
+		case <-timer.C:
 		}
-		var roles []domain.Role
-		if err := tx.Where("id IN ?", roleIDs).Find(&roles).Error; err != nil {
-			return err
-		}
-		if len(roles) != len(roleIDs) {
-			return gorm.ErrRecordNotFound
-		}
-		return tx.Model(user).Association("Roles").Append(roles)
-	})
+	}
+	if !errors.Is(err, gorm.ErrDuplicatedKey) {
+		return err
+	}
+	// GORM's cross-dialect TranslateError intentionally hides driver-specific
+	// constraint names. Resolve only the identity key after the failed
+	// transaction has rolled back; email and unrelated unique failures remain
+	// ordinary resource conflicts.
+	if _, lookupErr := r.GetByUsername(ctx, user.Domain, user.Username); lookupErr == nil {
+		return errors.Join(domain.ErrIdentityConflict, err)
+	} else if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+		return errors.Join(err, lookupErr)
+	}
+	return err
 }
 
 func (r *userRepository) UpdateColumns(ctx context.Context, id uuid.UUID, values map[string]any) error {

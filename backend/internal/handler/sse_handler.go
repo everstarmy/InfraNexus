@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,13 +27,17 @@ type SSEHandler struct {
 	auth   domain.AuthService
 	authz  domain.AuthorizationService
 	logger *slog.Logger
+	life   context.Context
 }
 
-func NewSSEHandler(events domain.SSEEventStore, auth domain.AuthService, authz domain.AuthorizationService, logger *slog.Logger) *SSEHandler {
+func NewSSEHandler(events domain.SSEEventStore, auth domain.AuthService, authz domain.AuthorizationService, logger *slog.Logger, lifecycle context.Context) *SSEHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &SSEHandler{events: events, auth: auth, authz: authz, logger: logger}
+	if lifecycle == nil {
+		lifecycle = context.Background()
+	}
+	return &SSEHandler{events: events, auth: auth, authz: authz, logger: logger, life: lifecycle}
 }
 
 // StreamNotifications binds the stream to the authenticated identity and
@@ -51,6 +56,9 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 	if lastID == "" {
 		lastID = c.Query("lastEventId")
 	}
+	if lastID != "" && !validSSECursor(lastID) {
+		return fiber.ErrBadRequest
+	}
 	if lastID == "" {
 		var err error
 		lastID, err = h.events.LatestID(c.Context())
@@ -67,8 +75,15 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 
 	owner := *principal
 	owner.Roles = append([]string(nil), principal.Roles...)
-	return c.SendStreamWriter(func(w *bufio.Writer) {
-		if err := writeSSE(w, "", "connected", []byte(`{"status":"connected"}`)); err != nil {
+	connection := c.RequestCtx().Conn()
+	stopClose := context.AfterFunc(h.life, func() {
+		if connection != nil {
+			_ = connection.Close()
+		}
+	})
+	err := c.SendStreamWriter(func(w *bufio.Writer) {
+		defer stopClose()
+		if err := writeSSE(w, lastID, "connected", []byte(`{"status":"connected"}`)); err != nil {
 			logger.Debug("Write SSE connected event failed", "error_type", fmt.Sprintf("%T", err))
 			return
 		}
@@ -81,7 +96,7 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 		lastAuthCheck := time.Now()
 		for {
 			if time.Since(lastAuthCheck) >= sseAuthCheckPeriod {
-				validated, err := h.validateStreamIdentity(current)
+				validated, err := h.validateStreamIdentity(h.life, current)
 				if err != nil {
 					_ = writeSSE(w, "", "auth.expired", []byte(`{"status":"closed"}`))
 					_ = w.Flush()
@@ -92,10 +107,13 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 				lastAuthCheck = time.Now()
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), sseReadBlock+time.Second)
+			ctx, cancel := context.WithTimeout(h.life, sseReadBlock+time.Second)
 			events, _, err := h.events.Read(ctx, lastID, sseReadBlock, sseBatchLimit)
 			cancel()
 			if err != nil {
+				if h.life.Err() != nil {
+					return
+				}
 				logger.Warn("Read SSE event stream failed", "error_type", fmt.Sprintf("%T", err))
 				return
 			}
@@ -112,7 +130,7 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 			}
 			for _, event := range events {
 				if time.Since(lastAuthCheck) >= sseAuthCheckPeriod {
-					validated, err := h.validateStreamIdentity(current)
+					validated, err := h.validateStreamIdentity(h.life, current)
 					if err != nil {
 						_ = writeSSE(w, "", "auth.expired", []byte(`{"status":"closed"}`))
 						_ = w.Flush()
@@ -134,10 +152,14 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 			}
 		}
 	})
+	if err != nil {
+		stopClose()
+	}
+	return err
 }
 
-func (h *SSEHandler) validateStreamIdentity(principal *domain.Principal) (*domain.Principal, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+func (h *SSEHandler) validateStreamIdentity(parent context.Context, principal *domain.Principal) (*domain.Principal, error) {
+	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
 	defer cancel()
 	validated, err := h.auth.ValidateStreamPrincipal(ctx, principal)
 	if err != nil {
@@ -167,4 +189,14 @@ func writeSSE(w *bufio.Writer, id, event string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+func validSSECursor(id string) bool {
+	parts := strings.Split(id, "-")
+	if len(parts) != 2 {
+		return false
+	}
+	_, firstErr := strconv.ParseUint(parts[0], 10, 64)
+	_, secondErr := strconv.ParseUint(parts[1], 10, 64)
+	return firstErr == nil && secondErr == nil
 }

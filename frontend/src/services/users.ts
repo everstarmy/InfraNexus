@@ -34,10 +34,10 @@ export interface CreateUserPayload {
 }
 
 export interface UpdateUserPayload {
+  expected_revision: number
   nickname?: string
   email?: string
   avatar?: string
-  expected_revision?: number
 }
 
 export const usersService = {

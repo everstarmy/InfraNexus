@@ -92,14 +92,14 @@ func (r *permissionRepository) RoleIDsByPermission(ctx context.Context, id uuid.
 func (r *permissionRepository) EnsureRoutePermission(ctx context.Context, route domain.RouteInfo, parentCode string) (*domain.Permission, bool, error) {
 	var permission domain.Permission
 	created := false
-	err := r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+	err := withAuthorizationWrite(ctx, r.DB(ctx), func(tx *gorm.DB) error {
+		// The transaction may be retried after a commit conflict. Reset values
+		// captured for the caller so a previous attempt cannot leak into this one.
+		permission = domain.Permission{}
+		created = false
+
 		// Serializing catalog writes on the shared state row makes concurrent sync
 		// calls converge before they decide whether a route permission is missing.
-		if err := tx.Model(&domain.AuthorizationState{}).
-			Where("id = ?", domain.AuthorizationStateID).
-			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
-			return err
-		}
 
 		code := domain.APIPermissionCode(route.Method, route.Path)
 		if err := tx.First(&permission, "code = ?", code).Error; err == nil {
@@ -162,7 +162,7 @@ func (r *permissionRepository) EnsureRoutePermission(ctx context.Context, route 
 }
 
 func (r *permissionRepository) DeleteWithLinks(ctx context.Context, id uuid.UUID) error {
-	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+	return withAuthorizationWrite(ctx, r.DB(ctx), func(tx *gorm.DB) error {
 		var roleIDs []uuid.UUID
 		if err := tx.Table("sys_role_permissions").Where("permission_id = ?", id).Order("role_id ASC").Pluck("role_id", &roleIDs).Error; err != nil {
 			return err
@@ -193,7 +193,7 @@ func (r *permissionRepository) DeleteWithLinks(ctx context.Context, id uuid.UUID
 }
 
 func (r *permissionRepository) UpdateWithAuthorization(ctx context.Context, permission *domain.Permission) error {
-	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+	return withAuthorizationWrite(ctx, r.DB(ctx), func(tx *gorm.DB) error {
 		var roleIDs []uuid.UUID
 		if err := tx.Table("sys_role_permissions").Where("permission_id = ?", permission.ID).Order("role_id ASC").Pluck("role_id", &roleIDs).Error; err != nil {
 			return err

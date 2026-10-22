@@ -26,6 +26,7 @@ type AppContainer struct {
 
 	closers    []func()
 	background []func(ctx context.Context)
+	lifecycle  context.Context
 	stop       context.CancelFunc
 	wg         sync.WaitGroup
 }
@@ -51,14 +52,28 @@ func (a *AppContainer) AddBackground(job func(ctx context.Context)) {
 }
 
 func (a *AppContainer) StartBackground() {
-	ctx, cancel := context.WithCancel(context.Background())
-	a.stop = cancel
+	if a.lifecycle == nil {
+		a.lifecycle, a.stop = context.WithCancel(context.Background())
+	}
 	for _, job := range a.background {
 		a.wg.Add(1)
 		go func(run func(context.Context)) {
 			defer a.wg.Done()
-			run(ctx)
+			run(a.lifecycle)
 		}(job)
+	}
+}
+
+func (a *AppContainer) lifecycleContext() context.Context {
+	if a.lifecycle == nil {
+		return context.Background()
+	}
+	return a.lifecycle
+}
+
+func (a *AppContainer) cancelLifecycle() {
+	if a.stop != nil {
+		a.stop()
 	}
 }
 
@@ -98,6 +113,7 @@ func NewAppContainer(cfg *config.Config, log *slog.Logger) (*AppContainer, error
 		return nil, err
 	}
 
+	lifecycle, stop := context.WithCancel(context.Background())
 	return &AppContainer{
 		Config:  cfg,
 		Logger:  log,
@@ -105,12 +121,14 @@ func NewAppContainer(cfg *config.Config, log *slog.Logger) (*AppContainer, error
 		Redis:   rdb,
 		Storage: store,
 		Cipher:  cipher,
+		lifecycle: lifecycle,
+		stop:      stop,
 	}, nil
 }
 
 func (a *AppContainer) Close() {
+	a.cancelLifecycle()
 	if a.stop != nil {
-		a.stop()
 		a.wg.Wait()
 	}
 	for i := len(a.closers) - 1; i >= 0; i-- {

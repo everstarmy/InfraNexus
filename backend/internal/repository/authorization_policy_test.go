@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 
 	gormadapter "github.com/casbin/gorm-adapter/v3"
@@ -10,6 +11,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 
 	"infranexus/internal/domain"
@@ -80,6 +82,108 @@ func TestRolePolicyOutboxFailureRollsBackPermissionAndRevision(t *testing.T) {
 	}
 	if state.Revision != 1 {
 		t.Fatalf("authorization revision = %d, want rollback to 1", state.Revision)
+	}
+}
+
+func TestAuthorizationReconcileCannotRestoreConcurrentRevocation(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/authorization-reconcile.db"), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(4)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	runAuthorizationReconcileCannotRestoreConcurrentRevocation(t, db)
+}
+
+func TestAuthorizationReconcileCannotRestoreConcurrentRevocationPostgres(t *testing.T) {
+	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
+	}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatalf("connect test PostgreSQL database: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(4)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&domain.AuthorizationState{}, &domain.AuthorizationOutbox{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Unscoped().Where("1 = 1").Delete(&domain.AuthorizationOutbox{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	state := domain.AuthorizationState{ID: domain.AuthorizationStateID, Revision: 1}
+	if err := db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "id"}},
+		DoUpdates: clause.Assignments(map[string]any{"revision": 1}),
+	}).Create(&state).Error; err != nil {
+		t.Fatal(err)
+	}
+	runAuthorizationReconcileCannotRestoreConcurrentRevocation(t, db)
+}
+
+func runAuthorizationReconcileCannotRestoreConcurrentRevocation(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if err := db.AutoMigrate(&domain.Role{}, &domain.Permission{}, &domain.AuthorizationState{}, &domain.AuthorizationOutbox{}, &gormadapter.CasbinRule{}); err != nil {
+		t.Fatal(err)
+	}
+	state := domain.AuthorizationState{ID: domain.AuthorizationStateID, Revision: 1}
+	if err := db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "id"}}, DoNothing: true}).Create(&state).Error; err != nil {
+		t.Fatal(err)
+	}
+	role := domain.Role{Code: "serialize-" + uuid.NewString()[:8], Name: "Serialize", Status: domain.StatusEnabled}
+	permission := domain.Permission{Code: "api:GET:/serialize-" + uuid.NewString()[:8], Name: "Serialize", Type: domain.PermTypeAPI, Path: "/api/v1/serialize/" + uuid.NewString()[:8], Method: "GET"}
+	if err := db.Create(&role).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&permission).Error; err != nil {
+		t.Fatal(err)
+	}
+	roles := NewRoleRepository(db)
+	if err := roles.AssignPermissions(t.Context(), role.ID, []uuid.UUID{permission.ID}, role.EditRevision); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	wait.Add(2)
+	errs := make(chan error, 2)
+	go func() {
+		defer wait.Done()
+		<-start
+		_, _, err := roles.SyncAllAuthorizationPolicies(t.Context())
+		errs <- err
+	}()
+	go func() {
+		defer wait.Done()
+		<-start
+		errs <- roles.AssignPermissions(t.Context(), role.ID, nil, role.EditRevision+1)
+	}()
+	close(start)
+	wait.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent policy write failed: %v", err)
+		}
+	}
+	var policyCount, linkCount int64
+	if err := db.Model(&gormadapter.CasbinRule{}).Where("ptype = ? AND v0 = ?", "p", role.Code).Count(&policyCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Table("sys_role_permissions").Where("role_id = ? AND permission_id = ?", role.ID, permission.ID).Count(&linkCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if policyCount != 0 || linkCount != 0 {
+		t.Fatalf("revocation drifted after concurrent rebuild: policy=%d association=%d", policyCount, linkCount)
 	}
 }
 

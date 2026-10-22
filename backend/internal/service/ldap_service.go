@@ -350,15 +350,26 @@ func (s *ldapService) provision(ctx context.Context, cfg *domain.LDAPConfig, du 
 	if du.ExternalID != "" {
 		if u, err := s.Users.GetByExternalID(ctx, cfg.Domain, du.ExternalID); err == nil {
 			locals = append(locals, *u)
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
 		}
 	}
-	if u, err := s.Users.GetByUsername(ctx, cfg.Domain, strings.ToLower(strings.TrimSpace(du.Username))); err == nil && (len(locals) == 0 || locals[0].ID != u.ID) {
-		locals = append(locals, *u)
+	if u, err := s.Users.GetByUsername(ctx, cfg.Domain, strings.ToLower(strings.TrimSpace(du.Username))); err == nil {
+		if du.ExternalID == "" || u.Domain != cfg.Domain || u.ExternalID != du.ExternalID || u.AuthType != cfg.Type {
+			return nil, coreerrors.ErrExternalAccountManaged.WithMessage("目录身份与同名档案不匹配，不能自动绑定")
+		}
+		if len(locals) == 0 || locals[0].ID != u.ID {
+			locals = append(locals, *u)
+		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 	owners := map[string]uuid.UUID{}
 	if du.Email != "" {
 		if u, err := s.Users.GetByEmail(ctx, du.Email); err == nil {
 			owners[strings.ToLower(u.Email)] = u.ID
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
 		}
 	}
 	resolver := newDepartmentResolver(s.Departments)
@@ -375,6 +386,19 @@ func (s *ldapService) provision(ctx context.Context, cfg *domain.LDAPConfig, du 
 	}
 	user, err := s.apply(ctx, cfg, resolver, p)
 	if err != nil {
+		if errors.Is(err, domain.ErrIdentityConflict) && du.ExternalID != "" {
+			winner, lookupErr := s.Users.GetByExternalID(ctx, cfg.Domain, du.ExternalID)
+			if lookupErr != nil {
+				return nil, errors.Join(err, lookupErr)
+			}
+			if winner.Domain != cfg.Domain || winner.ExternalID != du.ExternalID || winner.AuthType != cfg.Type {
+				return nil, coreerrors.ErrExternalAccountManaged.WithMessage("域账号身份与现有档案不匹配，请联系管理员处理")
+			}
+			if winner.Status != domain.StatusEnabled {
+				return nil, coreerrors.ErrAccountDisabled
+			}
+			return winner, nil
+		}
 		return nil, err
 	}
 	if user.Status != domain.StatusEnabled {
@@ -385,10 +409,13 @@ func (s *ldapService) provision(ctx context.Context, cfg *domain.LDAPConfig, du 
 
 func (s *ldapService) apply(ctx context.Context, cfg *domain.LDAPConfig, resolver *departmentResolver, p plannedUser) (*domain.User, error) {
 	var updated *domain.User
+	var committedResolver *departmentResolver
 	apply := func(writeCtx context.Context) error {
+		attemptResolver := resolver.clone()
+		var attemptUpdated *domain.User
 		var deptID *uuid.UUID
 		if p.target != nil && (p.item.Action == domain.SyncActionCreate || containsChange(p.item.Changes, "department")) {
-			id, err := resolver.ensure(writeCtx, p.target)
+			id, err := attemptResolver.ensure(writeCtx, p.target)
 			if err != nil {
 				return err
 			}
@@ -406,17 +433,18 @@ func (s *ldapService) apply(ctx context.Context, cfg *domain.LDAPConfig, resolve
 				Status:       domain.StatusEnabled,
 				DepartmentID: deptID,
 			}
-			if err := s.Users.Create(writeCtx, &user); err != nil {
+			roleIDs := []uuid.UUID(nil)
+			if cfg.DefaultRoleID != nil {
+				roleIDs = []uuid.UUID{*cfg.DefaultRoleID}
+			}
+			if err := s.Users.CreateWithRoles(writeCtx, &user, roleIDs); err != nil {
 				return err
 			}
-			if cfg.DefaultRoleID != nil {
-				if err := s.Users.AssignRoles(writeCtx, user.ID, []uuid.UUID{*cfg.DefaultRoleID}); err != nil {
-					return err
-				}
-			}
 			var err error
-			updated, err = s.Users.GetByID(writeCtx, user.ID)
-			return err
+			attemptUpdated, err = s.Users.GetByID(writeCtx, user.ID)
+			if err != nil {
+				return err
+			}
 		case domain.SyncActionUpdate, domain.SyncActionDisable:
 			values := make(map[string]any, len(p.values)+1)
 			for k, v := range p.values {
@@ -431,12 +459,16 @@ func (s *ldapService) apply(ctx context.Context, cfg *domain.LDAPConfig, resolve
 				}
 			}
 			var err error
-			updated, err = s.Users.GetByID(writeCtx, p.local.ID)
-			return err
+			attemptUpdated, err = s.Users.GetByID(writeCtx, p.local.ID)
+			if err != nil {
+				return err
+			}
 		default:
-			updated = p.local
-			return nil
+			attemptUpdated = p.local
 		}
+		committedResolver = attemptResolver
+		updated = attemptUpdated
+		return nil
 	}
 
 	departmentWrite := (p.item.Action == domain.SyncActionCreate && p.target != nil) || containsChange(p.item.Changes, "department")
@@ -445,6 +477,8 @@ func (s *ldapService) apply(ctx context.Context, cfg *domain.LDAPConfig, resolve
 		if err != nil {
 			return nil, err
 		}
+		resolver.cache = committedResolver.cache
+		resolver.created = committedResolver.created
 		return updated, nil
 	}
 	if err := apply(ctx); err != nil {

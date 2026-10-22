@@ -108,14 +108,14 @@ export function AppCommandPalette({ onLogout, isDark, onToggleTheme }: AppComman
 
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "k" || (!event.metaKey && !event.ctrlKey) || event.isComposing || event.keyCode === 229 || event.repeat || isEditableTarget(event.target)) return
+      if (event.defaultPrevented || event.key.toLowerCase() !== "k" || (!event.metaKey && !event.ctrlKey) || event.isComposing || event.keyCode === 229 || event.repeat || isEditableTarget(event.target)) return
       if (open) {
         event.preventDefault()
         setOpen(false)
         setSearch("")
         return
       }
-      const anotherDialogOpen = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).some((dialog) => dialog.getClientRects().length > 0)
+      const anotherDialogOpen = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')).some((dialog) => dialog.getClientRects().length > 0)
       if (anotherDialogOpen) return
       event.preventDefault()
       setOpen(true)

@@ -70,7 +70,7 @@ func (r *roleRepository) ListWithPermissions(ctx context.Context, codes []string
 }
 
 func (r *roleRepository) UpdateColumns(ctx context.Context, id uuid.UUID, values map[string]any) error {
-	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+	write := func(tx *gorm.DB) error {
 		updates := make(map[string]any, len(values)+1)
 		for key, value := range values {
 			updates[key] = value
@@ -91,11 +91,15 @@ func (r *roleRepository) UpdateColumns(ctx context.Context, id uuid.UUID, values
 			return err
 		}
 		return appendAuthorizationOutbox(tx, policyEvent("role.status.changed"))
-	})
+	}
+	if _, affectsPolicy := values["status"]; affectsPolicy {
+		return withAuthorizationWrite(ctx, r.DB(ctx), write)
+	}
+	return r.DB(ctx).Transaction(write)
 }
 
 func (r *roleRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status int, expectedRevision int64) error {
-	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+	return withAuthorizationWrite(ctx, r.DB(ctx), func(tx *gorm.DB) error {
 		result := tx.Model(&domain.Role{}).
 			Where("id = ? AND edit_revision = ?", id, expectedRevision).
 			Updates(map[string]any{"status": status, "edit_revision": gorm.Expr("edit_revision + 1")})
@@ -128,7 +132,7 @@ func (r *roleRepository) ListAll(ctx context.Context) ([]domain.Role, error) {
 }
 
 func (r *roleRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+	return withAuthorizationWrite(ctx, r.DB(ctx), func(tx *gorm.DB) error {
 		var role domain.Role
 		if err := tx.First(&role, "id = ?", id).Error; err != nil {
 			return err
@@ -157,7 +161,7 @@ func (r *roleRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *roleRepository) AssignPermissions(ctx context.Context, roleID uuid.UUID, permissionIDs []uuid.UUID, expectedRevision int64) error {
-	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+	return withAuthorizationWrite(ctx, r.DB(ctx), func(tx *gorm.DB) error {
 		result := tx.Model(&domain.Role{}).
 			Where("id = ? AND edit_revision = ?", roleID, expectedRevision).
 			UpdateColumn("edit_revision", gorm.Expr("edit_revision + 1"))
@@ -200,7 +204,7 @@ func (r *roleRepository) AssignPermissions(ctx context.Context, roleID uuid.UUID
 }
 
 func (r *roleRepository) SyncRoleAuthorizationPolicy(ctx context.Context, roleID uuid.UUID) error {
-	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+	return withAuthorizationWrite(ctx, r.DB(ctx), func(tx *gorm.DB) error {
 		var role domain.Role
 		if err := tx.Preload("Permissions").First(&role, "id = ?", roleID).Error; err != nil {
 			return err
@@ -214,7 +218,8 @@ func (r *roleRepository) SyncRoleAuthorizationPolicy(ctx context.Context, roleID
 }
 
 func (r *roleRepository) SyncAllAuthorizationPolicies(ctx context.Context) (added, removed int, err error) {
-	err = r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+	err = withAuthorizationWrite(ctx, r.DB(ctx), func(tx *gorm.DB) error {
+		added, removed = 0, 0
 		var roles []domain.Role
 		if err := tx.Preload("Permissions").Find(&roles).Error; err != nil {
 			return err

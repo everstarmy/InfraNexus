@@ -1,8 +1,11 @@
 package repository
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"github.com/google/uuid"
@@ -10,6 +13,47 @@ import (
 
 	"infranexus/internal/domain"
 )
+
+// withAuthorizationWrite serializes every policy-affecting transaction across
+// processes using the authorization singleton row. Retryable database lock
+// errors replay the complete transaction, so callbacks must keep side effects
+// inside the transaction.
+func withAuthorizationWrite(ctx context.Context, db *gorm.DB, fn func(*gorm.DB) error) error {
+	var lastErr error
+	for attempt := range organizationWriteAttempts {
+		err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := lockAuthorizationState(tx); err != nil {
+				return err
+			}
+			return fn(tx)
+		})
+		if err == nil || !retryableOrganizationWrite(err) || attempt == organizationWriteAttempts-1 {
+			return err
+		}
+		lastErr = err
+		timer := time.NewTimer(time.Duration(attempt+1) * 15 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return errors.Join(ctx.Err(), lastErr)
+		case <-timer.C:
+		}
+	}
+	return fmt.Errorf("authorization write retries exhausted: %w", lastErr)
+}
+
+func lockAuthorizationState(tx *gorm.DB) error {
+	result := tx.Model(&domain.AuthorizationState{}).
+		Where("id = ?", domain.AuthorizationStateID).
+		UpdateColumn("updated_at", gorm.Expr("updated_at"))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("authorization revision singleton is missing")
+	}
+	return nil
+}
 
 type policyKey struct {
 	ptype   string

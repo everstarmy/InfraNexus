@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
@@ -375,6 +376,10 @@ func newDepartmentResolver(repo domain.DepartmentRepository) *departmentResolver
 	return &departmentResolver{repo: repo, cache: make(map[string]uuid.UUID)}
 }
 
+func (r *departmentResolver) clone() *departmentResolver {
+	return &departmentResolver{repo: r.repo, cache: maps.Clone(r.cache), created: r.created}
+}
+
 func (r *departmentResolver) base(ctx context.Context, t *deptTarget) (*domain.Department, error) {
 	if t.BaseID == nil {
 		return nil, nil
@@ -388,7 +393,12 @@ func (r *departmentResolver) base(ctx context.Context, t *deptTarget) (*domain.D
 
 func (r *departmentResolver) find(ctx context.Context, parent *uuid.UUID, seg deptSegment) (*uuid.UUID, error) {
 	if id, ok := r.cache[seg.ExternalID]; ok {
-		return &id, nil
+		if _, err := r.repo.GetByID(ctx, id); err == nil {
+			return &id, nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		delete(r.cache, seg.ExternalID)
 	}
 	dept, err := r.repo.GetByExternalID(ctx, domain.SourceLDAP, seg.ExternalID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {

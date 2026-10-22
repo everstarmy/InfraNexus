@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/casbin/casbin/v3"
@@ -30,7 +31,7 @@ type authorizationService struct {
 	logger   *slog.Logger
 
 	refreshMu sync.Mutex
-	loadedRev int64
+	loadedRev atomic.Int64
 }
 
 func NewAuthorizationService(
@@ -41,15 +42,16 @@ func NewAuthorizationService(
 	notifier domain.AuthorizationNotifier,
 	logger *slog.Logger,
 ) domain.AuthorizationService {
-	return &authorizationService{
-		enforcer:  enforcer,
-		roleRepo:  roleRepo,
-		permRepo:  permRepo,
-		state:     state,
-		notifier:  notifier,
-		logger:    logger,
-		loadedRev: -1,
+	service := &authorizationService{
+		enforcer: enforcer,
+		roleRepo: roleRepo,
+		permRepo: permRepo,
+		state:    state,
+		notifier: notifier,
+		logger:   logger,
 	}
+	service.loadedRev.Store(-1)
+	return service
 }
 
 func (s *authorizationService) SyncRolePolicies(ctx context.Context, roleID uuid.UUID) error {
@@ -78,7 +80,7 @@ func (s *authorizationService) RefreshIfStale(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if revision == s.loadedRev {
+	if revision == s.loadedRev.Load() {
 		return nil
 	}
 
@@ -89,7 +91,7 @@ func (s *authorizationService) RefreshIfStale(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if before == s.loadedRev {
+		if before == s.loadedRev.Load() {
 			return nil
 		}
 		if err := s.enforcer.LoadPolicy(); err != nil {
@@ -100,7 +102,7 @@ func (s *authorizationService) RefreshIfStale(ctx context.Context) error {
 			return err
 		}
 		if before == after {
-			s.loadedRev = after
+			s.loadedRev.Store(after)
 			return nil
 		}
 	}
@@ -151,7 +153,7 @@ func (s *authorizationService) Run(ctx context.Context) {
 			}
 			if err := s.RefreshIfStale(ctx); err != nil {
 				s.logWorkerError("refresh", err)
-			} else if s.loadedRev < revision {
+			} else if s.loadedRev.Load() < revision {
 				// Revision checks are authoritative; a later poll retries transient DB visibility.
 				s.logWorkerError("refresh-revision", errors.New("notifier revision is ahead of local snapshot"))
 			}
