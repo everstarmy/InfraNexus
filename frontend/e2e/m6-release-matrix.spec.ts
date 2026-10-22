@@ -2,12 +2,12 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 const modules = [
-  { path: "/dashboard", heading: /M6 验收员/ },
-  { path: "/users", heading: "用户管理" },
-  { path: "/departments", heading: "部门管理" },
-  { path: "/roles", heading: "角色管理" },
-  { path: "/permissions", heading: "权限清单" },
-  { path: "/ldap", heading: "目录同步" },
+  { path: "/dashboard", errorLabel: "工作台数据", heading: /M6 验收员/ },
+  { path: "/users", errorLabel: "用户列表", heading: "用户管理" },
+  { path: "/departments", errorLabel: "部门树", heading: "部门管理" },
+  { path: "/roles", errorLabel: "角色列表", heading: "角色管理" },
+  { path: "/permissions", errorLabel: "权限树", heading: "权限清单" },
+  { path: "/ldap", errorLabel: "目录配置", heading: "目录同步" },
 ] as const;
 
 const viewports = [
@@ -60,14 +60,39 @@ async function installFailureMocks(page: Page) {
   });
 }
 
-test("six admin modules stay usable at release viewport widths during API failures", async ({
-  page,
-}) => {
-  await installFailureMocks(page);
-  const pageErrors: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+async function assertSettledFailure(page: Page, label: string) {
+  const alert = page
+    .getByRole("alert")
+    .filter({ hasText: `${label}暂时无法加载` });
+  await expect(alert).toBeVisible();
+  await expect(
+    alert.getByRole("button", { name: "重试", exact: true }),
+  ).toBeEnabled();
+}
 
-  for (const viewport of viewports) {
+async function assertAxe(page: Page, label: string) {
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(
+    results.violations
+      .filter(({ impact }) => impact === "critical" || impact === "serious")
+      .map(({ id, impact, nodes }) => ({
+        id,
+        impact,
+        targets: nodes.map(({ target }) => target),
+      })),
+    `${label} serious WCAG A/AA violations`,
+  ).toEqual([]);
+}
+
+for (const viewport of viewports) {
+  test(`six admin modules stay usable at ${viewport.name} during API failures`, async ({
+    page,
+  }, testInfo) => {
+    await installFailureMocks(page);
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.setViewportSize({
       width: viewport.width,
       height: viewport.height,
@@ -76,75 +101,68 @@ test("six admin modules stay usable at release viewport widths during API failur
       await page.goto(module.path);
       await expect(
         page.getByRole("heading", { name: module.heading }),
-        `${module.path} heading should remain available at ${viewport.name}`,
+        `${module.path} heading at ${viewport.name}`,
       ).toBeVisible();
-      const width = await page.evaluate(
-        () => document.documentElement.scrollWidth - window.innerWidth,
-      );
+      await assertSettledFailure(page, module.errorLabel);
       expect(
-        width,
-        `${module.path} overflowed by ${width}px at ${viewport.name}`,
+        await page.evaluate(
+          () => document.documentElement.scrollWidth - window.innerWidth,
+        ),
+        `${module.path} horizontal overflow at ${viewport.name}`,
       ).toBeLessThanOrEqual(0);
-      if (viewport.width === 1440) {
-        const results = await new AxeBuilder({ page })
-          .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-          .analyze();
-        const summary = results.violations.map(({ id, impact, nodes }) => ({
-          id,
-          impact: impact ?? "unknown",
-          nodes: nodes.map(({ target, failureSummary }) => ({
-            target,
-            failureSummary,
-          })),
-        }));
-        console.log(
-          `axe ${module.path}: ${JSON.stringify(summary) || "no violations"}`,
-        );
-        const severe = results.violations.filter(
-          ({ impact }) => impact === "critical" || impact === "serious",
-        );
-        expect(
-          severe.map(({ id, impact, nodes }) => ({
-            id,
-            impact,
-            targets: nodes.map(({ target }) => target),
-          })),
-          `${module.path} has serious WCAG A/AA violations`,
-        ).toEqual([]);
-      }
+      if (viewport.width === 1440) await assertAxe(page, module.path);
     }
-  }
+    await page.keyboard.press("Tab");
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement !== document.body))
+      .toBe(true);
+    expect(pageErrors).toEqual([]);
+    if (viewport.width === 1440 || viewport.width === 320)
+      await testInfo.attach(`failure-layout-${viewport.width}`, {
+        path: await page
+          .screenshot({
+            path: testInfo.outputPath(`failure-layout-${viewport.width}.png`),
+          })
+          .then(() =>
+            testInfo.outputPath(`failure-layout-${viewport.width}.png`),
+          ),
+        contentType: "image/png",
+      });
+  });
+}
 
-  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+test("six admin modules pass dark theme and reduced motion accessibility checks", async ({
+  page,
+}, testInfo) => {
+  await installFailureMocks(page);
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+  await page.goto("/dashboard");
   await page.getByRole("button", { name: "切换至深色模式" }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   for (const module of modules) {
     await page.goto(module.path);
     await expect(
       page.getByRole("heading", { name: module.heading }),
     ).toBeVisible();
+    await assertSettledFailure(page, module.errorLabel);
     await page
       .locator("html")
       .evaluate((element) => element.classList.add("dark"));
-    const results = await new AxeBuilder({ page })
-      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-      .analyze();
-    const severe = results.violations.filter(
-      ({ impact }) => impact === "critical" || impact === "serious",
-    );
-    expect(
-      severe.map(({ id, impact, nodes }) => ({
-        id,
-        impact,
-        targets: nodes.map(({ target }) => target),
-      })),
-      `${module.path} has serious dark-theme WCAG A/AA violations`,
-    ).toEqual([]);
+    await assertAxe(page, `${module.path} dark theme`);
   }
   await page.keyboard.press("Tab");
   await expect
     .poll(() => page.evaluate(() => document.activeElement !== document.body))
     .toBe(true);
   expect(pageErrors).toEqual([]);
+  await testInfo.attach("dark-failure-layout", {
+    path: await page
+      .screenshot({ path: testInfo.outputPath("dark-failure-layout.png") })
+      .then(() => testInfo.outputPath("dark-failure-layout.png")),
+    contentType: "image/png",
+  });
 });

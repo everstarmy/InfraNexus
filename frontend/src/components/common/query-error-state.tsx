@@ -26,7 +26,7 @@ export function QueryErrorState({ error, onRetry, label = "数据", retrying = f
   const forbidden = isForbiddenQueryError(error)
   const Icon = forbidden ? LockKeyhole : WifiOff
   return (
-    <Alert variant="destructive" role="alert">
+    <Alert role="alert" className="border-destructive/40 [&>svg]:text-destructive">
       <Icon />
       <AlertTitle>{forbidden ? "没有查看权限" : `${label}暂时无法加载`}</AlertTitle>
       <AlertDescription className="flex flex-wrap items-center justify-between gap-3">

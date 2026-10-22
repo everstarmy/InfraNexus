@@ -55,7 +55,7 @@ function makeDepartment(id: number, name: string, code: string, parentId: string
 
 async function installMocks(
   page: Page,
-  options: { permissions?: string[]; conflictFirstNicknameUpdate?: boolean } = {},
+  options: { permissions?: string[]; conflictFirstNicknameUpdate?: boolean; departmentCount?: number } = {},
 ) {
   const users = Array.from({ length: 12 }, (_, index) => makeUser(index + 1))
   let departments = [
@@ -69,6 +69,7 @@ async function installMocks(
       makeDepartment(202, "销售中心", "sales", uuid(201)),
     ]),
   ]
+  if (options.departmentCount) departments = Array.from({ length: options.departmentCount }, (_, i) => makeDepartment(1000 + i, `虚拟部门 ${i}`, `virtual-${i}`, null))
   let treeRevision = 7
   let failFirstNicknameUpdate = !!options.conflictFirstNicknameUpdate
   const profileUpdates: Array<{ id: string; expected_revision?: number; nickname?: string }> = []
@@ -341,3 +342,123 @@ test("command palette searches entities only with exact API permissions and hono
   await expect(denied.getByText("当前账号没有用户或部门搜索权限。" )).toBeVisible()
   await expect.poll(() => deniedMocks.commandUserSearches.length).toBe(0)
 })
+
+test("department drag keeps its source mounted across virtual windows and scrolls at edges", async ({
+  page,
+}) => {
+  const mocks = await installMocks(page, { departmentCount: 400 });
+  await page.goto("/departments");
+  const sourceId = uuid(1000),
+    targetId = uuid(1150);
+  const source = page.locator(`[data-department-tree-row="${sourceId}"]`);
+  await expect(source).toBeVisible();
+  const first = page.locator(`[data-tree-focus="${sourceId}"]`);
+  const last = page.locator(`[data-tree-focus="${uuid(1399)}"]`);
+  await first.focus();
+  await first.press("End");
+  await expect(last).toBeFocused();
+  await last.press("Home");
+  await expect(first).toBeFocused();
+  await page.evaluate((id) => {
+    const row = document.querySelector<HTMLElement>(
+      `[data-department-tree-row="${id}"]`,
+    )!;
+    let scroll = row.parentElement!;
+    while (
+      scroll &&
+      !["auto", "scroll"].includes(getComputedStyle(scroll).overflowY)
+    )
+      scroll = scroll.parentElement!;
+    if (!scroll) throw new Error("tree has no scroll container");
+    const transfer = new DataTransfer();
+    (window as any).__treeDrag = {
+      row,
+      scroll,
+      transfer,
+      initial: scroll.scrollTop,
+    };
+    row.dispatchEvent(
+      new DragEvent("dragstart", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer,
+      }),
+    );
+  }, sourceId);
+  // Wait for the drag lifecycle to mount its edge-scroll listener.
+  await expect(
+    page.getByRole("status").filter({ hasText: "正在拖动" }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    const { scroll, transfer } = (window as any).__treeDrag;
+    const bounds = scroll.getBoundingClientRect();
+    scroll.dispatchEvent(
+      new DragEvent("dragover", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer,
+        clientX: bounds.left + 20,
+        clientY: bounds.bottom - 5,
+      }),
+    );
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const { scroll, initial } = (window as any).__treeDrag;
+        return scroll.scrollTop > initial;
+      }),
+    )
+    .toBe(true);
+  await page.evaluate(() => {
+    const { scroll, transfer } = (window as any).__treeDrag;
+    document.dispatchEvent(
+      new DragEvent("dragover", {
+        bubbles: true,
+        dataTransfer: transfer,
+        clientX: -1,
+        clientY: -1,
+      }),
+    );
+    scroll.scrollTop = 150 * 34;
+  });
+  const target = page.locator(`[data-department-tree-row="${targetId}"]`);
+  await expect(target).toBeAttached();
+  expect(
+    await page.evaluate(() => (window as any).__treeDrag.row.isConnected),
+  ).toBe(true);
+  await page.evaluate((id) => {
+    const target = document.querySelector<HTMLElement>(
+      `[data-department-tree-row="${id}"]`,
+    )!;
+    const { transfer } = (window as any).__treeDrag;
+    const bounds = target.getBoundingClientRect();
+    target.dispatchEvent(
+      new DragEvent("dragover", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer,
+        clientY: bounds.top + 4,
+      }),
+    );
+    target.dispatchEvent(
+      new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer,
+        clientY: bounds.top + 4,
+      }),
+    );
+  }, targetId);
+  await expect(
+    page.getByRole("alertdialog", { name: "确认移动部门「虚拟部门 0」？" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "确认移动" }).click();
+  await expect.poll(() => mocks.relativeMoves.length).toBe(1);
+  expect(mocks.relativeMoves[0]).toEqual({
+    id: sourceId,
+    target_id: targetId,
+    position: "before",
+    expected_revision: 7,
+  });
+});

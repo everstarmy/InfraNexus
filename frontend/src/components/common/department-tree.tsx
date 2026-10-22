@@ -138,6 +138,181 @@ function findTreeScrollElement(element: HTMLElement | null) {
   return null;
 }
 
+type TreeRowHandlers = {
+  dragStart: (
+    event: React.DragEvent<HTMLDivElement>,
+    node: DepartmentNode,
+  ) => void;
+  dragOver: (
+    event: React.DragEvent<HTMLDivElement>,
+    node: DepartmentNode,
+  ) => void;
+  drop: (event: React.DragEvent<HTMLDivElement>, node: DepartmentNode) => void;
+  leave: (event: React.DragEvent<HTMLDivElement>, node: DepartmentNode) => void;
+  end: () => void;
+  toggle: (id: string) => void;
+  select: (node: DepartmentNode) => void;
+  focus: (id: string) => void;
+  keyDown: (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    node: DepartmentNode,
+  ) => void;
+};
+interface DepartmentTreeRowProps {
+  row: FlatDepartmentNode;
+  isOpen: boolean;
+  selected: boolean;
+  disabled: boolean;
+  currentDrop: DropPosition | null;
+  selectedMatch: boolean;
+  active: boolean;
+  dragging: boolean;
+  keyword: string;
+  canMove: boolean;
+  showCounts: boolean;
+  hasAllItem: boolean;
+  hasUnassignedItem: boolean;
+  renderActions?: DepartmentTreeProps["renderActions"];
+  handlers: React.RefObject<TreeRowHandlers | null>;
+}
+const DepartmentTreeRow = React.memo(function DepartmentTreeRow({
+  row,
+  isOpen,
+  selected,
+  disabled,
+  currentDrop,
+  selectedMatch,
+  active,
+  dragging,
+  keyword,
+  canMove,
+  showCounts,
+  hasAllItem,
+  hasUnassignedItem,
+  renderActions,
+  handlers,
+}: DepartmentTreeRowProps) {
+  const { node, depth, position, siblingCount } = row;
+  const hasChildren = node.children.length > 0;
+  const Icon =
+    node.source === "ldap" ? Network : depth === 0 ? Building2 : FolderTree;
+  return (
+    <li
+      key={node.id}
+      role="treeitem"
+      aria-level={depth + 1}
+      aria-posinset={position + (depth === 0 && hasAllItem ? 1 : 0)}
+      aria-setsize={
+        siblingCount +
+        (depth === 0 ? Number(!!hasAllItem) + Number(!!hasUnassignedItem) : 0)
+      }
+      aria-expanded={hasChildren ? isOpen : undefined}
+      aria-selected={selected}
+      style={{ height: TREE_ROW_HEIGHT }}
+    >
+      <div
+        className={cn(
+          "group/tree-row relative flex h-8 items-center gap-0.5 rounded-lg pr-1 transition-colors motion-reduce:transition-none",
+          selected ? "bg-primary/10 text-primary" : "hover:bg-muted/70",
+          currentDrop === "before" && "border-t-2 border-primary",
+          currentDrop === "after" && "border-b-2 border-primary",
+          currentDrop === "inside" && "bg-primary/15 ring-1 ring-primary/50",
+        )}
+        style={{ paddingLeft: depth * 14 }}
+        data-department-tree-row={node.id}
+        draggable={canMove && !disabled}
+        onDragStart={(event) => handlers.current?.dragStart(event, node)}
+        onDragEnd={() => handlers.current?.end()}
+        onDragOver={(event) => handlers.current?.dragOver(event, node)}
+        onDragLeave={(event) => handlers.current?.leave(event, node)}
+        onDrop={(event) => handlers.current?.drop(event, node)}
+      >
+        {selected && (
+          <span
+            aria-hidden
+            className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-primary"
+          />
+        )}
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className={cn(
+            "text-muted-foreground hover:bg-transparent",
+            !hasChildren && "invisible",
+          )}
+          onClick={() => {
+            handlers.current?.toggle(node.id);
+          }}
+          aria-label={isOpen ? `收起 ${node.name}` : `展开 ${node.name}`}
+          tabIndex={-1}
+          disabled={!hasChildren}
+        >
+          <ChevronRight
+            className={cn(
+              "transition-transform duration-200 motion-reduce:transition-none",
+              isOpen && "rotate-90",
+            )}
+          />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          onClick={() => {
+            handlers.current?.select(node);
+          }}
+          onFocus={() => handlers.current?.focus(node.id)}
+          onKeyDown={(event) => handlers.current?.keyDown(event, node)}
+          data-tree-focus={node.id}
+          data-department-tree-node
+          data-current-match={selectedMatch || undefined}
+          tabIndex={active ? 0 : -1}
+          className={cn(
+            "h-8 min-w-0 flex-1 justify-start gap-2 px-1.5 font-normal hover:bg-transparent",
+            selected && "font-medium text-primary hover:text-primary",
+            node.status !== 1 && "text-muted-foreground",
+            dragging && "opacity-50",
+            selectedMatch && "ring-1 ring-primary/60",
+          )}
+        >
+          <Icon
+            className={cn(
+              "size-4 shrink-0",
+              selected ? "text-primary" : "text-muted-foreground",
+            )}
+          />
+          <span className="truncate">{highlightMatch(node.name, keyword)}</span>
+          {keyword && !node.name.toLocaleLowerCase().includes(keyword) && (
+            <span className="truncate font-mono text-[10px] text-muted-foreground">
+              {highlightMatch(node.code, keyword)}
+            </span>
+          )}
+          {node.status !== 1 && (
+            <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
+              停用
+            </span>
+          )}
+        </Button>
+        {renderActions && (
+          <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/tree-row:opacity-100 group-focus-within/tree-row:opacity-100 [@media(hover:none)]:opacity-100 [@media(hover:none)]:[&_button]:min-h-10 [@media(hover:none)]:[&_button]:min-w-10">
+            {renderActions(node)}
+          </div>
+        )}
+        {showCounts && (
+          <span
+            className={cn(
+              "shrink-0 px-1 font-mono text-[11px] tabular-nums",
+              selected ? "text-primary" : "text-muted-foreground",
+            )}
+          >
+            {node.total_member_count}
+          </span>
+        )}
+      </div>
+    </li>
+  );
+});
+
 export function DepartmentTree({
   nodes,
   selectedKey,
@@ -475,148 +650,97 @@ export function DepartmentTree({
         .join(" / ")
     : "";
 
-  const renderNode = (row: FlatDepartmentNode): React.ReactNode => {
-    const { node, depth, position, siblingCount } = row;
-    const hasChildren = node.children.length > 0;
-    const isOpen = keyword ? true : expanded.has(node.id);
-    const selected = selectedKey === node.id;
-    const disabled = disabledKeys?.has(node.id) ?? false;
-    const Icon =
-      node.source === "ldap" ? Network : depth === 0 ? Building2 : FolderTree;
-    const currentDrop = dropTarget?.id === node.id ? dropTarget.position : null;
-    const selectedMatch = match?.id === node.id;
-    return (
-      <li
-        key={node.id}
-        role="treeitem"
-        aria-level={depth + 1}
-        aria-posinset={position + (depth === 0 && allItem ? 1 : 0)}
-        aria-setsize={
-          siblingCount +
-          (depth === 0 ? Number(!!allItem) + Number(!!unassignedItem) : 0)
-        }
-        aria-expanded={hasChildren ? isOpen : undefined}
-        aria-selected={selected}
-        style={{ height: TREE_ROW_HEIGHT }}
-      >
-        <div
-          className={cn(
-            "group/tree-row relative flex h-8 items-center gap-0.5 rounded-lg pr-1 transition-colors motion-reduce:transition-none",
-            selected ? "bg-primary/10 text-primary" : "hover:bg-muted/70",
-            currentDrop === "before" && "border-t-2 border-primary",
-            currentDrop === "after" && "border-b-2 border-primary",
-            currentDrop === "inside" && "bg-primary/15 ring-1 ring-primary/50",
-          )}
-          style={{ paddingLeft: depth * 14 }}
-          data-department-tree-row={node.id}
-          draggable={canMove && !disabled}
-          onDragStart={(event) => onNodeDragStart(event, node)}
-          onDragEnd={() => {
-            draggedIdRef.current = null;
-            setDraggedId(null);
-            setDropTarget(null);
-          }}
-          onDragOver={(event) => onNodeDragOver(event, node)}
-          onDragLeave={(event) => {
-            if (
-              !event.currentTarget.contains(
-                event.relatedTarget as Node | null,
-              ) &&
-              dropTarget?.id === node.id
-            )
-              setDropTarget(null);
-          }}
-          onDrop={(event) => onNodeDrop(event, node)}
-        >
-          {selected && (
-            <span
-              aria-hidden
-              className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-primary"
-            />
-          )}
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className={cn(
-              "text-muted-foreground hover:bg-transparent",
-              !hasChildren && "invisible",
-            )}
-            onClick={() => {
-              setActiveKey(node.id);
-              toggle(node.id);
-            }}
-            aria-label={isOpen ? `收起 ${node.name}` : `展开 ${node.name}`}
-            tabIndex={-1}
-            disabled={!hasChildren}
-          >
-            <ChevronRight
-              className={cn(
-                "transition-transform duration-200 motion-reduce:transition-none",
-                isOpen && "rotate-90",
-              )}
-            />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={disabled}
-            onClick={() => {
-              setActiveKey(node.id);
-              onSelect(node.id, node);
-            }}
-            onFocus={() => setActiveKey(node.id)}
-            onKeyDown={(event) => handleTreeKeyDown(event, node)}
-            data-tree-focus={node.id}
-            data-department-tree-node
-            data-current-match={selectedMatch || undefined}
-            tabIndex={activeKey === node.id ? 0 : -1}
-            className={cn(
-              "h-8 min-w-0 flex-1 justify-start gap-2 px-1.5 font-normal hover:bg-transparent",
-              selected && "font-medium text-primary hover:text-primary",
-              node.status !== 1 && "text-muted-foreground",
-              draggedId === node.id && "opacity-50",
-              selectedMatch && "ring-1 ring-primary/60",
-            )}
-          >
-            <Icon
-              className={cn(
-                "size-4 shrink-0",
-                selected ? "text-primary" : "text-muted-foreground",
-              )}
-            />
-            <span className="truncate">
-              {highlightMatch(node.name, keyword)}
-            </span>
-            {keyword && !node.name.toLocaleLowerCase().includes(keyword) && (
-              <span className="truncate font-mono text-[10px] text-muted-foreground">
-                {highlightMatch(node.code, keyword)}
-              </span>
-            )}
-            {node.status !== 1 && (
-              <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
-                停用
-              </span>
-            )}
-          </Button>
-          {renderActions && (
-            <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/tree-row:opacity-100 group-focus-within/tree-row:opacity-100 [@media(hover:none)]:opacity-100 [@media(hover:none)]:[&_button]:min-h-10 [@media(hover:none)]:[&_button]:min-w-10">
-              {renderActions(node)}
-            </div>
-          )}
-          {showCounts && (
-            <span
-              className={cn(
-                "shrink-0 px-1 font-mono text-[11px] tabular-nums",
-                selected ? "text-primary" : "text-muted-foreground",
-              )}
-            >
-              {node.total_member_count}
-            </span>
-          )}
-        </div>
-      </li>
-    );
-  };
+  const rowHandlers = React.useRef<TreeRowHandlers | null>(null);
+  React.useLayoutEffect(() => {
+    rowHandlers.current = {
+      dragStart: onNodeDragStart,
+      dragOver: onNodeDragOver,
+      drop: onNodeDrop,
+      end: () => {
+        draggedIdRef.current = null;
+        setDraggedId(null);
+        setDropTarget(null);
+      },
+      leave: (event, node) => {
+        if (
+          !event.currentTarget.contains(event.relatedTarget as Node | null) &&
+          dropTarget?.id === node.id
+        )
+          setDropTarget(null);
+      },
+      toggle: (id) => {
+        setActiveKey(id);
+        toggle(id);
+      },
+      select: (node) => {
+        setActiveKey(node.id);
+        onSelect(node.id, node);
+      },
+      focus: setActiveKey,
+      keyDown: handleTreeKeyDown,
+    };
+  });
+  const renderNode = (row: FlatDepartmentNode) => (
+    <DepartmentTreeRow
+      key={row.node.id}
+      row={row}
+      isOpen={!!keyword || expanded.has(row.node.id)}
+      selected={selectedKey === row.node.id}
+      disabled={disabledKeys?.has(row.node.id) ?? false}
+      currentDrop={dropTarget?.id === row.node.id ? dropTarget.position : null}
+      selectedMatch={match?.id === row.node.id}
+      active={activeKey === row.node.id}
+      dragging={draggedId === row.node.id}
+      keyword={keyword}
+      canMove={canMove}
+      showCounts={showCounts}
+      hasAllItem={!!allItem}
+      hasUnassignedItem={!!unassignedItem}
+      renderActions={renderActions}
+      handlers={rowHandlers}
+    />
+  );
+
+  const renderedIndexes = Array.from(
+    { length: Math.max(0, virtualRange.end - virtualRange.start) },
+    (_, offset) => virtualRange.start + offset,
+  );
+  const draggedIndex = draggedId ? specialKeys.indexOf(draggedId) : -1;
+  if (draggedIndex >= 0 && !renderedIndexes.includes(draggedIndex)) {
+    renderedIndexes.push(draggedIndex);
+    renderedIndexes.sort((a, b) => a - b);
+  }
+  React.useEffect(() => {
+    const element = scrollElementRef.current;
+    if (!draggedId || !element) return;
+    let speed = 0;
+    let frame = 0;
+    const track = (event: DragEvent) => {
+      const bounds = element.getBoundingClientRect();
+      speed =
+        event.clientX < bounds.left ||
+        event.clientX > bounds.right ||
+        event.clientY < bounds.top ||
+        event.clientY > bounds.bottom
+          ? 0
+          : event.clientY < bounds.top + 40
+            ? -10
+            : event.clientY > bounds.bottom - 40
+              ? 10
+              : 0;
+      if (speed) event.preventDefault();
+    };
+    const scroll = () => {
+      if (speed) element.scrollTop += speed;
+      frame = requestAnimationFrame(scroll);
+    };
+    document.addEventListener("dragover", track);
+    frame = requestAnimationFrame(scroll);
+    return () => {
+      document.removeEventListener("dragover", track);
+      cancelAnimationFrame(frame);
+    };
+  }, [draggedId]);
 
   const virtualItem = (
     key: string,
@@ -628,9 +752,7 @@ export function DepartmentTree({
       role="treeitem"
       aria-level={1}
       aria-posinset={
-        key === ALL_KEY
-          ? 1
-          : rootNodeCount + Number(!!allItem) + 1
+        key === ALL_KEY ? 1 : rootNodeCount + Number(!!allItem) + 1
       }
       aria-setsize={
         rootNodeCount + Number(!!allItem) + Number(!!unassignedItem)
@@ -728,48 +850,52 @@ export function DepartmentTree({
         role="tree"
         aria-label="组织架构"
         data-tree-total={flatNodes.length}
-        data-tree-rendered={Math.max(0, virtualRange.end - virtualRange.start)}
+        data-tree-rendered={renderedIndexes.length}
         className="min-h-0 text-sm"
       >
-        {virtualRange.start > 0 && (
-          <li
-            role="none"
-            aria-hidden="true"
-            style={{ height: virtualRange.start * TREE_ROW_HEIGHT }}
-          />
-        )}
-        {Array.from(
-          { length: Math.max(0, virtualRange.end - virtualRange.start) },
-          (_, offset) => {
-            const index = virtualRange.start + offset;
-            if (allItem && index === 0)
-              return (
-                <React.Fragment key={ALL_KEY}>
-                  {virtualItem(
-                    ALL_KEY,
-                    allItem.label,
-                    allItem.count,
-                    UsersRound,
-                  )}
-                </React.Fragment>
-              );
-            const nodeIndex = index - Number(!!allItem);
-            if (nodeIndex >= 0 && nodeIndex < flatNodes.length)
-              return renderNode(flatNodes[nodeIndex]);
-            if (unassignedItem && index === treeItemCount - 1)
-              return (
-                <React.Fragment key={UNASSIGNED_KEY}>
-                  {virtualItem(
-                    UNASSIGNED_KEY,
-                    unassignedItem.label,
-                    unassignedItem.count,
-                    UserX,
-                  )}
-                </React.Fragment>
-              );
-            return null;
-          },
-        )}
+        {renderedIndexes.map((index, offset) => (
+          <React.Fragment key={specialKeys[index]}>
+            {index > (renderedIndexes[offset - 1] ?? -1) + 1 && (
+              <li
+                role="none"
+                aria-hidden="true"
+                style={{
+                  height:
+                    (index - (renderedIndexes[offset - 1] ?? -1) - 1) *
+                    TREE_ROW_HEIGHT,
+                }}
+              />
+            )}
+            {(() => {
+              if (allItem && index === 0)
+                return (
+                  <React.Fragment key={ALL_KEY}>
+                    {virtualItem(
+                      ALL_KEY,
+                      allItem.label,
+                      allItem.count,
+                      UsersRound,
+                    )}
+                  </React.Fragment>
+                );
+              const nodeIndex = index - Number(!!allItem);
+              if (nodeIndex >= 0 && nodeIndex < flatNodes.length)
+                return renderNode(flatNodes[nodeIndex]);
+              if (unassignedItem && index === treeItemCount - 1)
+                return (
+                  <React.Fragment key={UNASSIGNED_KEY}>
+                    {virtualItem(
+                      UNASSIGNED_KEY,
+                      unassignedItem.label,
+                      unassignedItem.count,
+                      UserX,
+                    )}
+                  </React.Fragment>
+                );
+              return null;
+            })()}
+          </React.Fragment>
+        ))}
         {keyword && matchNodes.length === 0 && (
           <li
             role="none"
@@ -778,12 +904,14 @@ export function DepartmentTree({
             没有匹配「{query}」的部门
           </li>
         )}
-        {virtualRange.end < treeItemCount && (
+        {(renderedIndexes.at(-1) ?? -1) + 1 < treeItemCount && (
           <li
             role="none"
             aria-hidden="true"
             style={{
-              height: (treeItemCount - virtualRange.end) * TREE_ROW_HEIGHT,
+              height:
+                (treeItemCount - (renderedIndexes.at(-1) ?? -1) - 1) *
+                TREE_ROW_HEIGHT,
             }}
           />
         )}

@@ -228,10 +228,16 @@ export function NotificationsProvider({
       }
     };
 
-    const acceptEvent = (event: Event) => {
+    const acceptEvent = (event: Event, resetCursor = false) => {
       const id = (event as MessageEvent).lastEventId;
       if (!id) return true;
-      if (seenIDs.has(id)) return false;
+      if (!/^\d+-\d+$/.test(id) || seenIDs.has(id)) return false;
+      if (!resetCursor && lastEventId) {
+        const [time, sequence] = id.split("-").map(BigInt);
+        const [lastTime, lastSequence] = lastEventId.split("-").map(BigInt);
+        if (time < lastTime || (time === lastTime && sequence <= lastSequence))
+          return false;
+      }
       lastEventId = id;
       seenIDs.add(id);
       seenIDOrder.push(id);
@@ -260,13 +266,14 @@ export function NotificationsProvider({
       });
       source = activeSource;
       activeSource.addEventListener("connected", (event) => {
-        if (!isCurrentIdentity()) return;
+        if (!isCurrentIdentity() || source !== activeSource) return;
         const cursor = (event as MessageEvent).lastEventId;
-        if (cursor) lastEventId = cursor;
+        if (/^\d+-\d+$/.test(cursor)) lastEventId = cursor;
         if (stableTimer) clearTimeout(stableTimer);
         stableTimer = setTimeout(() => {
           if (
             isCurrentIdentity() &&
+            source === activeSource &&
             activeSource.readyState === EventSource.OPEN
           )
             retryAttempt = 0;
@@ -282,8 +289,8 @@ export function NotificationsProvider({
         setStatus("online");
       });
       activeSource.addEventListener("snapshot.required", (event) => {
-        if (!isCurrentIdentity()) return;
-        if (!parse(event as MessageEvent) || !acceptEvent(event)) return;
+        if (!isCurrentIdentity() || source !== activeSource) return;
+        if (!parse(event as MessageEvent) || !acceptEvent(event, true)) return;
         invalidateWorkspace();
         push({
           title: "实时数据已重新校准",
@@ -292,7 +299,7 @@ export function NotificationsProvider({
         });
       });
       activeSource.addEventListener("auth.expired", () => {
-        if (!isCurrentIdentity()) return;
+        if (!isCurrentIdentity() || source !== activeSource) return;
         activeSource.close();
         source = null;
         if (retryTimer) clearTimeout(retryTimer);
@@ -302,7 +309,7 @@ export function NotificationsProvider({
         setStatus("offline");
       });
       activeSource.addEventListener("ldap.sync.started", (event) => {
-        if (!isCurrentIdentity()) return;
+        if (!isCurrentIdentity() || source !== activeSource) return;
         const data = parse(event as MessageEvent);
         if (!data || !acceptEvent(event)) return;
         push({
@@ -313,7 +320,7 @@ export function NotificationsProvider({
         });
       });
       activeSource.addEventListener("ldap.sync.progress", (event) => {
-        if (!isCurrentIdentity()) return;
+        if (!isCurrentIdentity() || source !== activeSource) return;
         const data = parse(event as MessageEvent);
         if (!data?.task_id || !acceptEvent(event)) return;
         const now = Date.now();
@@ -353,7 +360,7 @@ export function NotificationsProvider({
         void queryClient.invalidateQueries({ queryKey: ["ldap"] });
       });
       activeSource.addEventListener("ldap.sync.finished", (event) => {
-        if (!isCurrentIdentity()) return;
+        if (!isCurrentIdentity() || source !== activeSource) return;
         const data = parse(event as MessageEvent);
         if (!data || !acceptEvent(event)) return;
         const summary = `新增 ${data.created ?? 0} · 更新 ${data.updated ?? 0} · 停用 ${data.disabled ?? 0} · 失败 ${data.failed ?? 0}`;
@@ -411,10 +418,11 @@ export function NotificationsProvider({
         invalidateWorkspace();
       });
       activeSource.onopen = () => {
-        if (isCurrentIdentity()) setStatus("connecting");
+        if (isCurrentIdentity() && source === activeSource)
+          setStatus("connecting");
       };
       activeSource.onerror = () => {
-        if (!isCurrentIdentity()) return;
+        if (!isCurrentIdentity() || source !== activeSource) return;
         if (stableTimer) clearTimeout(stableTimer);
         stableTimer = undefined;
         connectionDropped = true;

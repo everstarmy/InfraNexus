@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -100,5 +102,99 @@ func TestAuthorizationNotifierCoalescesFullBufferAndClosesOnCancel(t *testing.T)
 		case <-time.After(time.Second):
 			t.Fatal("full authorization subscription did not close after cancellation")
 		}
+	}
+}
+
+// This command deliberately terminates only PubSub connections on the isolated
+// Redis configured by the integration runner; application Redis is never used.
+func TestAuthorizationNotifierReconnectsAndReleasesConnections(t *testing.T) {
+	if os.Getenv("INFRANEXUS_TEST_REDIS_ADDR") == "" {
+		t.Skip("requires isolated real Redis for CLIENT KILL")
+	}
+	admin, subscriber := redisTestClients(t)
+	if err := subscriber.Ping(t.Context()).Err(); err != nil {
+		t.Fatal(err)
+	}
+	connectionCount := func() int {
+		t.Helper()
+		clients, err := admin.ClientList(t.Context()).Result()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(strings.Split(strings.TrimSpace(clients), "\n"))
+	}
+	baselineConnections := connectionCount()
+	notifier := NewRedisAuthorizationNotifier(subscriber)
+	waitSubscribers := func(want int64) {
+		t.Helper()
+		deadline := time.NewTimer(3 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			counts, err := admin.PubSubNumSub(t.Context(), authorizationChangedChannel).Result()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if counts[authorizationChangedChannel] == want {
+				return
+			}
+			select {
+			case <-ticker.C:
+			case <-deadline.C:
+				t.Fatalf("PubSub subscriptions = %d, want %d", counts[authorizationChangedChannel], want)
+			}
+		}
+	}
+	waitSubscribers(0)
+	for iteration := range 10 {
+		ctx, cancel := context.WithCancel(t.Context())
+		revisions, err := notifier.Subscribe(ctx)
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		t.Cleanup(cancel)
+		waitSubscribers(1)
+		if iteration == 0 {
+			killed, err := admin.ClientKillByFilter(t.Context(), "TYPE", "pubsub").Result()
+			if err != nil || killed != 1 {
+				t.Fatalf("kill PubSub: count=%d err=%v", killed, err)
+			}
+			waitSubscribers(1)
+			if err := notifier.Publish(ctx, 99); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case revision, open := <-revisions:
+				if !open || revision != 99 {
+					t.Fatalf("reconnected revision=%d open=%v", revision, open)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("reconnected subscriber did not receive revision")
+			}
+		}
+		cancel()
+		select {
+		case _, open := <-revisions:
+			if open {
+				t.Fatal("subscription not closed")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("subscription cancellation timed out")
+		}
+		waitSubscribers(0)
+		deadline := time.NewTimer(time.Second)
+		ticker := time.NewTicker(10 * time.Millisecond)
+		for connectionCount() != baselineConnections {
+			select {
+			case <-ticker.C:
+			case <-deadline.C:
+				ticker.Stop()
+				t.Fatalf("cancel left Redis connections: got=%d baseline=%d", connectionCount(), baselineConnections)
+			}
+		}
+		ticker.Stop()
+		deadline.Stop()
 	}
 }

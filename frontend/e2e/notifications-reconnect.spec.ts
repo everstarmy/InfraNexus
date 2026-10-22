@@ -32,7 +32,9 @@ async function installMocks(page: Page) {
           this.dispatchEvent(
             new MessageEvent("connected", {
               data: JSON.stringify({ status: "connected" }),
-              lastEventId: "1782400000000-0",
+              lastEventId:
+                new URL(this.url).searchParams.get("lastEventId") ??
+                "1782400000000-0",
             }),
           );
         });
@@ -357,4 +359,110 @@ test("switching accounts closes the old stream and ignores its late events", asy
     ),
   );
   await expect(page.getByText("目录同步已开始")).toBeVisible();
+});
+
+test("SSE retries stop at the cap, allow manual recovery, and reset only after stability", async ({
+  page,
+}) => {
+  await installMocks(page);
+  await page.addInitScript(() => {
+    Math.random = () => 0.5;
+  });
+  await page.clock.install();
+  await page.goto("/users");
+  const count = () =>
+    page.evaluate(() => (window as any).__mockEventSources.length);
+  await expect.poll(count).toBe(1);
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now() + 1000)));
+  const delays = [500, 1000, 2000, 4000, 8000, 16000, 30000, 30000];
+  for (const [index, delay] of delays.entries()) {
+    await page.evaluate((i) => (window as any).__failEventSource(i), index);
+    await page.clock.fastForward(delay - 1);
+    expect(await count()).toBe(index + 1);
+    await page.clock.fastForward(1);
+    await expect.poll(count).toBe(index + 2);
+  }
+  await page.evaluate(() => (window as any).__failEventSource(8));
+  await page.clock.fastForward(120000);
+  expect(await count()).toBe(9);
+  await page.getByRole("button", { name: /通知中心/ }).click();
+  await page.getByRole("button", { name: "重新连接实时通知" }).click();
+  await expect.poll(count).toBe(10);
+  await page.evaluate(() => (window as any).__failEventSource(9));
+  await page.clock.fastForward(500);
+  await expect.poll(count).toBe(11);
+  // A stable connection resets the next delay to 500 rather than 1000ms.
+  await page.clock.fastForward(30000);
+  await page.evaluate(() => (window as any).__failEventSource(10));
+  await page.clock.fastForward(499);
+  expect(await count()).toBe(11);
+  await page.clock.fastForward(1);
+  await expect.poll(count).toBe(12);
+});
+
+test("finished events deduplicate effects and retention snapshots reject late older events", async ({
+  page,
+}) => {
+  const mocks = await installMocks(page);
+  await page.clock.install();
+  await page.goto("/users");
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__mockEventSources.length))
+    .toBe(1);
+  await page.getByRole("button", { name: /通知中心/ }).click();
+  await page.getByRole("button", { name: "开启桌面通知" }).click();
+  const emit = (name: string, id: string, data: object) =>
+    page.evaluate(
+      ({ name, id, data }) =>
+        (window as any).__emitEventSource(0, name, JSON.stringify(data), id),
+      { name, id, data },
+    );
+  await emit("ldap.sync.finished", "1782400000000-2", {
+    task_id: "done",
+    status: "success",
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__mockNotifications.delivered.length),
+    )
+    .toBe(1);
+  await expect.poll(mocks.userReads).toBeGreaterThan(1);
+  const reads = mocks.userReads();
+  await emit("ldap.sync.finished", "1782400000000-2", {
+    task_id: "done",
+    status: "success",
+  });
+  expect(
+    await page.evaluate(
+      () => (window as any).__mockNotifications.delivered.length,
+    ),
+  ).toBe(1);
+  expect(mocks.userReads()).toBe(reads);
+  await emit("snapshot.required", "1782400000000-10", {
+    reason: "retention_gap",
+  });
+  await expect.poll(mocks.userReads).toBeGreaterThan(reads);
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__mockNotifications.delivered.length),
+    )
+    .toBe(2);
+  await emit("ldap.sync.finished", "1782400000000-5", {
+    task_id: "late",
+    status: "success",
+  });
+  expect(
+    await page.evaluate(
+      () => (window as any).__mockNotifications.delivered.length,
+    ),
+  ).toBe(2);
+  await page.evaluate(() => (window as any).__failEventSource(0));
+  await page.clock.fastForward(2000);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__mockEventSources.length))
+    .toBe(2);
+  const url = await page.evaluate(
+    () => (window as any).__mockEventSources[1].url,
+  );
+  expect(new URL(url).searchParams.get("lastEventId")).toBe("1782400000000-10");
 });

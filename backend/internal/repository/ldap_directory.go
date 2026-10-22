@@ -214,7 +214,11 @@ func (g *ldapGateway) Authenticate(ctx context.Context, cfg *domain.LDAPConfig, 
 }
 
 func (g *ldapGateway) SearchUsers(ctx context.Context, cfg *domain.LDAPConfig, bindPassword string, changedSince *time.Time) ([]domain.DirectoryUser, error) {
-	searchCtx, cancelSearch := context.WithTimeout(ctx, directorySearchBudget)
+	return g.searchUsers(ctx, cfg, bindPassword, changedSince, directorySearchBudget)
+}
+
+func (g *ldapGateway) searchUsers(ctx context.Context, cfg *domain.LDAPConfig, bindPassword string, changedSince *time.Time, budget time.Duration) ([]domain.DirectoryUser, error) {
+	searchCtx, cancelSearch := context.WithTimeout(ctx, budget)
 	defer cancelSearch()
 	conn, closeConn, err := g.connect(searchCtx, cfg)
 	if err != nil {

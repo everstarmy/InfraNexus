@@ -2,6 +2,43 @@
 
 > 深度复审更新（2026-10-22）：本文件是 M6 当时的验证记录，保留原始结果供追溯。后续定向审计已复现授权数据竞争、LDAP 原子性/缓存/JIT、订阅释放与 SSE 客户端边界缺陷，当前评级调整为 **Needs Fixes**。本文件的历史通过不能替代新增场景验收；当前改造与发布门禁见 [深度复审整改方案](DEEP_REVIEW_REMEDIATION_PLAN.md)，进度见 [TODOLIST](TODOLIST.md)。
 
+## 2026-10-23 剩余本地整改与回归
+
+本轮基于 `78083ff` 补齐本地缺口。R01–R08、R10、R11 达到本地验收；R09/R12/R13/R14 的目标网关、Staging 真链路、部署数据只读审计及人工读屏门禁继续保留，发布评级仍为 **Needs Fixes**。
+
+环境：Go 1.27.2、Node 24.11.1、npm 11.6.2、系统 Chrome 155.0.8059.85；隔离 PostgreSQL 17.11 和 Redis 8.6.3，端口 55432/56379。Browser 插件未提供，Playwright 配套 Chromium 不存在，使用 `PW_CHROME_CHANNEL=chrome` 和现有系统 Chrome；沙箱内 Chrome 启动失败，浏览器回归经提升权限执行。未连接部署数据库或企业 LDAP/AD。
+
+| 范围 | 实测证据与结果 |
+| --- | --- |
+| R02 授权刷新 | `TestAuthorizationWorkerAndRequestShareStableRefresh` 用读取/加载屏障交错 worker 与请求；`TestAuthorizationRejectsContinuouslyChangingSnapshotsAndRecovers` 验证连续变更失败关闭及稳定恢复。race 三轮通过。 |
+| R05 JIT 负向路径 | `TestLDAPJITPropagatesDatabaseFailuresWithoutProvisioning` 覆盖 external/username/email/create 故障；邮箱冲突保持所有者不变、独立建档并忽略占用邮箱；停用身份不被重新启用。race 三轮通过。 |
+| R06 Redis 生命周期 | 真实 Redis `CLIENT KILL TYPE pubsub` 后恢复收信；重复 10 次订阅/取消，每轮 `PUBSUB NUMSUB` 回到 0，且 `CLIENT LIST` 总连接数回到预热后的基线（不把退订当作连接释放）；空闲/满缓冲和跨实例用例三轮 race 通过。命令只针对一次性审计 Redis。 |
+| R07 LDAP 网络与分页 | TLS/StartTLS/Search 阻塞取消后对端观察到连接关闭；已取消 ctx 不拨号；不可信证书默认拒绝。1001 用户跨三页完整返回；连续快速分页受总预算终止且不返回部分结果。预算测试通过私有共用实现注入 100ms，公开 SearchUsers 仍固定 10 分钟。`TestLDAPIncompleteSearchCannotPlanMissingUserDisables` 证明部分搜索+错误不读取本地档案、不生成缺失停用计划。race 三轮通过。 |
+| R08 通知边界 | 旧实现正式回归失败：快照后滞后 finished 事件额外产生桌面通知（预期 2，实得 3）。修复普通事件 cursor 回退、非法 ID、旧连接迟到回调。finished 去重、裁剪快照、滞后事件，以及 Clock 暂停后的指数退避/次数上限/手动恢复/稳定复位通过。通知与跨窗口拖拽关键用例连续三轮 15/15 通过。 |
+| R09 本地回收 | `TestSSECancellationReleasesBackpressuredSocketWriter` 在真实 TCP 连接的 net.Conn 写入边界注入阻塞，客户端停止读取，应用取消释放 writer 并正常 shutdown；`TestSSEEventStoreFailureClosesSocket` 验证存储读取失败终止流。三轮 race 通过。该故障注入不替代目标 TCP 黑洞/代理超时及资源计量演练。 |
+| R10 用户编辑 | 双页面各自编辑邮箱/昵称，一方先成功；后台 snapshot refetch 不覆盖另一方草稿或 revision，409 明确确认后仅提交用户修改字段。保存失败保留浏览器后退拦截与 beforeunload 注册，成功后清理。新增两项 E2E 连续三轮通过；beforeunload 使用可取消原生事件验证注册，未模拟操作系统关闭窗口。 |
+| R13 错误态对比度 | 强化错误态等待后，Axe 复现 QueryErrorState 描述与重试按钮的 serious color-contrast 违规；在业务组件改用正文色，保留错误边框/图标，未修改 UI 原子组件；实际错误态五个视口/主题用例通过，明暗主题无 serious/critical Axe 违规。 |
+| R11 部门树 | 提取 memo 行并通过稳定 ref 分派事件；拖拽源移出虚拟窗口仍保持同一 DOM，边缘自动滚动、跨窗口投放、跨窗口 Home/End 焦点和 revision 校验回归连续三轮通过。生产构建性能矩阵 1k/10k 平级及 10k 混合树各三轮：启动 p95 964/987/1077ms，过滤 p95 21.8/17.5/26.3ms；树 DOM 1235–1270，虚拟行 31，最长任务 77ms。四视口、明暗及 reduced-motion 矩阵通过。浏览器版本与前轮不同，数据不作为严格同环境 A/B。 |
+| 全量 Go | 最终冻结源码后，设置隔离 PostgreSQL/Redis 环境变量执行 `go test -race -count=1 -p=1 ./...` 通过；`go vet ./...` 通过。首次运行期间追加测试导入导致的编译失败已作废，未计为通过。 |
+| 前端单测/构建 | Vitest 5 文件/17 项通过；`npm run build` 通过；入口 JS 523.76kB（166.87kB gzip），仍超过 500kB 建议值。 |
+| 完整 E2E | 最终完整 E2E 33/33 通过（约 2.2 分钟），无跳过。原单用例视口/主题矩阵整体超过 30 秒，已拆为四个视口和一个深色主题用例，保留原有 pageerror、Axe、布局和焦点断言。截图复核后再加强为等待每页明确错误提示及可用重试按钮，避免仅测到骨架屏。保留一条角色权限对话框路径的 ResizeObserver 控制台告警；全套页面异常断言通过，该告警尚未定位消除。 |
+
+复跑命令：
+
+```sh
+cd backend
+# 环境变量必须指向可丢弃的独立审计服务，不能使用部署 Redis。
+INFRANEXUS_TEST_POSTGRES_DSN='<isolated DSN>' INFRANEXUS_TEST_REDIS_ADDR='<isolated address>' go test -race -count=1 -p=1 ./...
+go vet ./...
+cd ../frontend
+npm test
+npm run build
+PW_CHROME_CHANNEL=chrome npm run test:e2e
+PW_CHROME_CHANNEL=chrome npm run test:perf
+```
+
+仍需环境验收：目标代理/TCP 黑洞与慢写上限计量、真实 LDAP/AD 登录到任务/SSE 全链路、部署策略与 LDAP 异常只读盘点、VoiceOver/NVDA 人工读屏。历史通过和本轮本地通过均不替代这些门禁。
+
 ## 2026-10-22 深度复审整改执行记录
 
 本节记录当前整改变更的本地与隔离环境验证。代码基线为 `55de743`，所有命令均在包含本轮工作树差异的源码上执行。当前评级仍为 **Needs Fixes**：代码级门禁已大部通过，真实测试 LDAP、目标网关故障演练、部署数据只读核查及人工 VoiceOver/NVDA 检查尚未执行。
