@@ -77,11 +77,26 @@ func (s *redisEventStore) Read(ctx context.Context, lastID string, block time.Du
 			return s.snapshotRequired(ctx, "retention_gap")
 		}
 	}
-	streams, err := s.client.XRead(ctx, &redis.XReadArgs{
+	// A pooled XREAD does not interrupt its socket read on context cancellation.
+	// Give each blocking read its own small pool so cancellation can close the
+	// socket without closing the shared authentication/event publisher client.
+	reader := s.client
+	if block >= 0 {
+		options := *s.client.Options()
+		options.PoolSize, options.MinIdleConns, options.MaxIdleConns, options.MaxActiveConns = 1, 0, 1, 1
+		reader = redis.NewClient(&options)
+		defer reader.Close()
+		stopClose := context.AfterFunc(ctx, func() { _ = reader.Close() })
+		defer stopClose()
+	}
+	streams, err := reader.XRead(ctx, &redis.XReadArgs{
 		Streams: []string{realtimeEventStream, lastID},
 		Count:   int64(limit + 1),
 		Block:   block,
 	}).Result()
+	if ctx.Err() != nil {
+		return nil, false, ctx.Err()
+	}
 	if errors.Is(err, redis.Nil) {
 		return []domain.RealtimeEvent{}, false, nil
 	}

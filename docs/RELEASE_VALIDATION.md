@@ -2,6 +2,40 @@
 
 > 深度复审更新（2026-10-22）：本文件是 M6 当时的验证记录，保留原始结果供追溯。后续定向审计已复现授权数据竞争、LDAP 原子性/缓存/JIT、订阅释放与 SSE 客户端边界缺陷，当前评级调整为 **Needs Fixes**。本文件的历史通过不能替代新增场景验收；当前改造与发布门禁见 [深度复审整改方案](DEEP_REVIEW_REMEDIATION_PLAN.md)，进度见 [TODOLIST](TODOLIST.md)。
 
+## 2026-10-23 真实 AD 与隔离应用链路补验
+
+基于 `bcb7476`，使用用户明确授权的 AD 测试目录。AD 端仅绑定、认证和查询；用户、角色、任务和缺失账号停用均发生在临时 SQLite 数据库，Redis 为专用一次性服务，未修改 AD 条目、现有应用配置或部署数据。凭据仅通过运行时环境提供，不写入仓库和报告。
+
+新增显式启用的正式测试 `backend/internal/bootstrap/ldap_live_test.go`：
+
+| 范围 | 实测结果 |
+| --- | --- |
+| 目录网关 | `TestLiveADGatewayReadOnly`：服务账号绑定、正确密码认证、AD 属性/GUID 映射和分页搜索 API 通过；5 个用户，3 启用/2 停用，身份无重复，约 68ms。目录只有 5 人，本轮未触发真实跨页。 |
+| HTTP 身份与授权 | `TestLiveADIsolatedApplicationLifecycle`：3 次同时有效登录全部成功，应用只产生 1 个完整 AD 档案与默认角色；角色撤权后 3 个已签发令牌均收到 403。未做错误密码探测。 |
+| 预览与任务 | 全量预览不写用户；创建 2 个启用用户并停用 1 个仅存在于临时库的合成缺失账号，停用递增 AuthVersion；相同幂等键返回相同任务；再次全量预览 create/update/disable 均为 0，增量预览无新增或缺失停用。 |
+| SSE | 真正的 HTTP 流收到 started/finished；关闭后使用原 cursor 重连，返回同一 finish 事件 ID；Redis 存储参与实际读写。 |
+| 凭据保护 | API 无 bind_password/口令；临时库绑定口令为 v1 密文；应用日志不含绑定口令、管理员或 AD access token。 |
+| 新发现与修复 | 首次核心断言通过但 shutdown 超过 3 秒。独立真实 Redis 回归复现 context 取消后 XREAD 仍阻塞。阻塞 Read 改用专用单连接池，取消时关闭该池，返回原 context 错误，保留共享认证/发布客户端。`TestRedisEventStoreCancellationReleasesBlockedRead` 三轮、每轮 5 次取消后均在 1 秒内返回，CLIENT LIST 连接数恢复基线。每次阻塞读取会重新建连，其 TLS/高连接数开销仍需目标规模验证。 |
+| SSE 基准 | 同一隔离 Redis，`BenchmarkM6RedisSSEPublishAndDeliveryRead` 100 次：均值约 2.02ms/op、p50 1.69ms、p95 3.41ms，82.7KB/op、347 allocs/op；包含专用池重新建连，非目标网关/多订阅者压测。 |
+| 最终结果 | 两项真实 AD 测试使用 `-race -count=1` 均通过，合计约 3.4 秒，应用在 3 秒 shutdown 预算内退出。设置隔离 Redis 地址后，`go test -race -count=1 -p=1 ./...` 全量通过（bootstrap 143.117 秒），`go vet ./...` 通过。本次全量覆盖 SQLite/真实 Redis，未设置 PostgreSQL DSN，PG 专项跳过；真实 AD 两项另以上述显式环境变量独立执行并通过。首次 fixture 未配置 TrustedOrigins 导致的启动失败，以及修复前停机失败，均不计为通过。 |
+
+复跑方式（必须使用获授权的目录、可丢弃的独立 Redis；环境变量缺失时测试会跳过，跳过不能算验收）：
+
+```sh
+cd backend
+export INFRANEXUS_LIVE_AD_URL='<authorized ldap/ldaps endpoint>'
+export INFRANEXUS_LIVE_AD_BIND_USER='<bind UPN>'
+export INFRANEXUS_LIVE_AD_DOMAIN='<AD domain>'
+export INFRANEXUS_LIVE_AD_BASE_DN='<restricted test Base DN>'
+export INFRANEXUS_LIVE_AD_REDIS_ADDR='127.0.0.1:<disposable Redis port>'
+# 通过受控的秘密注入渠道设置 INFRANEXUS_LIVE_AD_PASSWORD，禁止硬编码或放进命令历史。
+# Bind UPN 与登录账号不同时，另设 INFRANEXUS_LIVE_AD_LOGIN_USER。
+go test -race -count=1 -timeout=180s -v ./internal/bootstrap -run '^TestLiveAD'
+INFRANEXUS_TEST_REDIS_ADDR='<same disposable Redis address>' go test -race -count=3 ./internal/repository -run '^TestRedisEventStore'
+```
+
+R12 的真实后端冒烟验收已完成，R09/R13/R14 保留未完成，当前仍为 **Needs Fixes**。本次是明文 LDAP 389 到隔离应用的实际链路，未验证目标 Staging/网关、浏览器连接真实后端、真实 AD TLS/StartTLS/大目录跨页、部署数据异常盘点或人工读屏；不得据此勾选这些门禁。下方早先记录中的“未连接真实 LDAP”仅描述各节当时的验证范围。
+
 ## 2026-10-23 剩余本地整改与回归
 
 本轮基于 `78083ff` 补齐本地缺口。R01–R08、R10、R11 达到本地验收；R09/R12/R13/R14 的目标网关、Staging 真链路、部署数据只读审计及人工读屏门禁继续保留，发布评级仍为 **Needs Fixes**。

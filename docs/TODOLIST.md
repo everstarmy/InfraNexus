@@ -4,7 +4,7 @@
 
 ## 2026-10-22 当前看板：M0–M6 深度复审整改
 
-实施契约、任务依赖、兼容策略与发布门禁见 [深度复审整改方案](DEEP_REVIEW_REMEDIATION_PLAN.md)。当前评级 **Needs Fixes**：2026-10-23 已补齐 R02/R05/R06/R07/R08/R10/R11 的本地代码与专项验收；R01–R08、R10、R11 本地验收完成。R09/R12/R13/R14 仍有目标环境或人工门禁。逐项证据见下表和 [本轮发布验证记录](RELEASE_VALIDATION.md)。
+实施契约、任务依赖、兼容策略与发布门禁见 [深度复审整改方案](DEEP_REVIEW_REMEDIATION_PLAN.md)。当前评级 **Needs Fixes**：2026-10-23 已补齐 R02/R05/R06/R07/R08/R10/R11 的本地代码与专项验收；R01–R08、R10、R11 本地验收完成。已补真实 AD 与隔离应用 HTTP/SSE 链路验收，并修复真实 Redis 阻塞读取取消后延迟停机的问题；R12 的真实后端冒烟已补齐；R09/R13/R14 仍有目标环境或人工门禁。逐项证据见下表和 [本轮发布验证记录](RELEASE_VALIDATION.md)。
 
 完成规则：每项需补变更/提交、正式回归名称、实际命令与结果、环境和未覆盖项。`[x]` 只表示达到本轮验收；环境缺失导致 Skip、只通过 mock 或仅完成代码，不可自动勾选。责任角色见方案，不预设人员或并行代理。
 
@@ -50,17 +50,18 @@
 - [ ] **R09 / M6 / Medium：SSE 慢写与停机上界**（依赖 R08）
   - [x] 使用 Fiber/fasthttp per-route 2 分钟连接寿命、默认 WriteTimeout 和应用 shutdown 取消；真实 TCP socket 测试确认停机关闭连接。
   - [x] SSE 流循环使用应用生命周期 context，异步 writer 不持有 fiber.Ctx；有界 Redis Read 周期和连接轮换保留 cursor。
-  - [ ] 真实 socket 停机、客户端停止读取并在 net.Conn 注入写阻塞、事件存储失败退出已通过；目标 TCP 黑洞、真实代理超时及连接/协程/Redis Read 回收计量仍待环境演练。
+  - [x] 真实 AD + Redis 应用冒烟复现 XREAD 不随 context 取消退出；阻塞读取改用独立单连接池并随取消关闭。正式回归三轮、每轮 5 次取消均在 1 秒内退出，连接数回到基线，共享客户端可用；应用在 3 秒 shutdown 预算内退出。
+  - [ ] 真实 socket 停机、客户端停止读取并在 net.Conn 注入写阻塞、事件存储失败退出已通过；目标 TCP 黑洞、真实代理超时及目标拓扑连接/协程回收计量仍待环境演练。
 - [x] **R10 / M7 / Medium：完整用户编辑 CAS**
   - [x] 表单固定 edit_revision 基线；后台刷新不覆盖草稿或静默提升版本。
   - [x] 409 保留草稿并显示两侧差异，用户明确确认后才用最新 revision 重试；失败摘要聚焦，成功关闭，保存中禁止重复。
   - [x] 仓库内 Web 调用方已同步必填 revision，后端拒绝缺失/零 revision，API 文档说明外部客户端升级要求。
   - [x] 缺失/零/旧 revision、双表单交叉字段修改、后台 refetch、409 保稿/确认、保存失败后浏览器后退拦截与 beforeunload 保护、成功清理均有正式回归；双表单/导航用例连续三轮通过。
-- [ ] **R12 / M9 / Medium：可信交互回归基础**（先于依赖它的业务验收）
+- [x] **R12 / M9 / Medium：可信交互回归基础**（先于依赖它的业务验收）
   - [x] 用户状态更新使用独立响应闸门和 finally 清理，断言 pending、防重、行隔离及撤销时递增 revision。
   - [x] 通知退避与身份过期用 Playwright Clock；响应式矩阵保留 pageerror、Axe 和布局断言。
   - [x] 并发/回滚/取消后端探针和通知、用户 CAS 前端探针均纳入仓库正式测试。
-  - [ ] 关键通知/状态/CAS E2E 连续三轮通过；完整 E2E 33/33 无跳过。真实后端登录到 LDAP/SSE 冒烟仍待 Staging。
+  - [x] 关键通知/状态/CAS E2E 连续三轮通过；完整 E2E 33/33 无跳过。真实 AD + 临时 SQLite/Redis + 真实 HTTP/SSE 冒烟验证并发 JIT、撤权、同步幂等与重连补发。
 
 ### C：P2 性能与体验
 
@@ -79,11 +80,12 @@
 - [ ] **R14：回归、兼容与发布证据**（依赖适用 R01–R13）
   - [x] 隔离 PostgreSQL、SQLite、真实 Redis 的并发、回滚、取消和跨实例矩阵通过；环境变量已设置，目标用例未被 Skip。
   - [x] 全量 Go race/vet、Vitest、build、E2E、性能门禁通过；环境、命令、结果和限制已写入 RELEASE_VALIDATION。
-  - [ ] 真实测试 LDAP + 目标网关验证登录、授权撤销、任务/SSE 恢复、黑洞与停机；mock 和本地 TCP Bind 测试不替代此门禁。
+  - [x] 用户授权的真实 AD 只读绑定/认证/搜索通过；隔离应用验证 3 并发 JIT→1 档案、即时撤权、预览不写、重复任务幂等、全量后增量预览及 Redis SSE 补发，race 通过。
+  - [ ] 目标网关上的真实链路、黑洞与停机演练；LDAPS/StartTLS 和大目录跨页尚未在真实 AD 验收。
   - [ ] 只读核查部署数据中的历史策略差异、LDAP 缺角色/部门异常与计数，形成定向修复清单，不自动补权。
   - [x] API 文档同步 revision 与 LDAP timeout 契约；本轮未改 schema，无需新增迁移。
   - [x] 本轮 RELEASE_VALIDATION 已更新，包含 2026-10-23 补齐证据与限制。
-  - [ ] 真实环境、R09/R12/R13 等适用门禁补齐后再改为 Ready for Release。
+  - [ ] 真实环境、R09/R13 等适用门禁补齐后再改为 Ready for Release。
 
 本轮完成证据登记（首轮基于 `55de743`，2026-10-23 补齐基于 `78083ff`；每项状态只表示下述范围与证据）：
 
@@ -91,18 +93,18 @@
 | --- | --- | --- | --- | --- |
 | R01 | `authorization_policy.go`、角色/权限仓储 | SQLite + PG17 并发撤权/重建、Outbox 回滚；revision 与 48 并发 writer 基准。 | 串行锁竞争基准是本机合成负载，需在 Staging 校验预算。 | 本地验收完成 |
 | R02 | `authz_refresh_test.go`、`authz_service.go` | 并发首次刷新、worker/request 屏障交错、连续版本变化失败关闭及稳定恢复；race 三轮。 | 稳定快照校验保留。 | 本地验收完成 |
-| R03 | `ldap_service.go`、`user_repository.go` | CreateWithRoles；角色缺失回滚、用户/角色/部门原子成功、组织 revision 断言。 | 需真实目录链路补冒烟。 | 本地验收完成 |
+| R03 | `ldap_service.go`、`user_repository.go` | CreateWithRoles；角色缺失回滚、用户/角色/部门原子成功、组织 revision 断言。 | 真实 AD + 隔离 SQLite 冒烟已补；目标拓扑另验。 | 本地验收完成 |
 | R04 | `ldap_service.go`、`ldap_sync.go` | resolver 每次尝试克隆，提交成功后合并；缓存部门删除失效和统计正式回归。 | PG 真实 LDAP 任务链路待 Staging。 | 本地验收完成 |
 | R05 | `ldap_jit_negative_test.go`、身份仓储/Service | 同身份并发、邮箱所有者保护、停用身份、预查询/创建故障传播；race 三轮。 | 被占用邮箱按现有契约忽略，不自动绑定所有者。 | 本地验收完成 |
 | R06 | 授权 Redis 仓储与测试 | Redis 8 CLIENT KILL 恢复、10 次启停、NUMSUB 归零且总连接数回到基线、空闲/满缓冲取消；race 三轮。 | 仅使用隔离 Redis，未操作部署 Redis。 | 本地验收完成 |
 | R07 | `ldap_cancel_test.go`、`ldap_paging_test.go`、`ldap_incomplete_search_test.go` | TCP 网络阶段取消、证书默认校验、1001 用户分页、快速分页总预算及不完整搜索保护；race 三轮。 | 预算测试复用生产实现并注入短预算；真实企业 LDAP/AD 仍属 R14。 | 本地验收完成 |
 | R08 | 通知 Store、SSE 和重连 E2E | finished 去重、裁剪快照/滞后事件、最大退避与手动恢复、稳定窗口复位；专项 E2E 三轮。 | 普通事件 cursor 单调前进，快照可显式重置；仅当前身份内存保存。 | 本地验收完成 |
-| R09 | SSE 生命周期、`sse_backpressure_test.go` | socket 停机、注入 net.Conn 写阻塞后取消回收、事件存储失败关闭；race 三轮。 | 注入阻塞不替代真实 TCP 黑洞、目标代理和资源计量演练。 | 环境待验 |
+| R09 | SSE 生命周期、`sse_backpressure_test.go` | socket 停机、注入 net.Conn 写阻塞后取消回收、事件存储失败关闭；race 三轮。 | 真实 Redis XREAD 取消/连接回收已补；仍需目标 TCP 黑洞、代理和规模计量。 | 环境待验 |
 | R10 | 用户 CAS 与两份用户编辑 E2E | 双页面交叉字段更新、refetch 不覆盖草稿、冲突确认、失败后退拦截、beforeunload 注册及成功清理；三轮。 | 外部调用方仍须按 API 文档提供 revision。 | 本地验收完成 |
 | R11 | 部门树 memo/虚拟化与性能 E2E | 源 DOM 固定、边缘滚动、跨虚拟窗口投放；1k/10k 平级/混合树各三轮及视口/主题矩阵通过。 | R12 的本地测试基础已验收；Staging 真链路另列 R14。 | 本地验收完成 |
-| R12 | E2E 通知/状态/CAS 与后端正式测试 | 关键回归连续三轮通过；完整 Go race/vet、Vitest 和 33/33 E2E 通过，无跳过。 | 真实后端端到端冒烟需要 Staging。 | 部分完成 |
+| R12 | E2E 通知/状态/CAS 与后端正式测试 | 关键回归连续三轮通过；完整 Go race/vet、Vitest 和 33/33 E2E 通过，无跳过。 | 实际 HTTP 客户端连接真实后端与 AD；浏览器 E2E 仍使用 mock，目标拓扑列入 R14。 | 验收完成 |
 | R13 | 部门树、用户表单、侧栏、通知播报 | 触屏、键盘、焦点/reduced-motion 自动检查通过；真实错误态等待后修复文字对比度，Axe 六模块明暗主题无 serious/critical 违规。 | VoiceOver/NVDA 人工读屏待验。 | 部分完成 |
-| R14 | 本文与 `RELEASE_VALIDATION.md` | 全量本地隔离矩阵、33/33 E2E 与性能预算完成；API 兼容契约记录；当前评级保留 Needs Fixes。 | 真实 LDAP/目标网关/部署数据审计和人工读屏是未完成发布门禁。 | 环境阻断 |
+| R14 | 本文与 `RELEASE_VALIDATION.md` | 全量本地隔离矩阵、33/33 E2E 与性能预算完成；API 兼容契约记录；当前评级保留 Needs Fixes。 | 真实 AD 基础链路已补；目标网关/部署数据审计、目录 TLS/规模和人工读屏仍待验。 | 环境阻断 |
 
 ---
 
