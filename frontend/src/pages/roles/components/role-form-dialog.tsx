@@ -8,6 +8,8 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { useConfirm } from "@/components/common/confirm-dialog"
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
 import { getErrorMessage } from "@/lib/api-error"
 import { notify } from "@/lib/notify"
 import { rolesService, type RoleDTO } from "@/services/roles"
@@ -16,6 +18,7 @@ const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
 
 export function RoleFormDialog({ open, role, onOpenChange }: { open: boolean; role?: RoleDTO | null; onOpenChange: (open: boolean) => void }) {
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
   const editing = !!role
   const [code, setCode] = useState("")
   const [name, setName] = useState("")
@@ -32,6 +35,9 @@ export function RoleFormDialog({ open, role, onOpenChange }: { open: boolean; ro
 
   const codeInvalid = !editing && code.length > 0 && !CODE_PATTERN.test(code)
   const canSubmit = name.trim().length >= 2 && (editing || (code.trim().length >= 2 && !codeInvalid))
+  const initial = [role?.code ?? "", role?.name ?? "", role?.description ?? ""]
+  const isDirty = open && JSON.stringify([code, name, description]) !== JSON.stringify(initial)
+  useUnsavedChanges(isDirty, "角色表单尚未保存。离开后这些更改将丢失。")
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -47,8 +53,22 @@ export function RoleFormDialog({ open, role, onOpenChange }: { open: boolean; ro
     onError: (err) => setError(getErrorMessage(err, editing ? "更新角色失败" : "创建角色失败")),
   })
 
+  const requestClose = async () => {
+    if (mutation.isPending) return
+    if (isDirty) {
+      const discard = await confirm({
+        tone: "default",
+        title: "放弃角色更改？",
+        description: "当前表单尚未保存，离开后这些更改将丢失。",
+        confirmText: "放弃更改",
+      })
+      if (!discard) return
+    }
+    onOpenChange(false)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(next) => !mutation.isPending && onOpenChange(next)}>
+    <Dialog open={open} onOpenChange={(next) => next ? onOpenChange(true) : void requestClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -73,8 +93,8 @@ export function RoleFormDialog({ open, role, onOpenChange }: { open: boolean; ro
           <FieldGroup className="gap-4">
             <Field data-invalid={codeInvalid || undefined}>
               <FieldLabel htmlFor="role-code">角色编码</FieldLabel>
-              <Input id="role-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="如 auditor" className="font-mono" disabled={editing} />
-              {codeInvalid ? <FieldError>以字母开头，仅含字母、数字及 _ . : -</FieldError> : <FieldDescription>建议使用小写英文，如 operator、auditor</FieldDescription>}
+              <Input id="role-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="如 auditor" className="font-mono" disabled={editing} aria-invalid={codeInvalid || undefined} aria-describedby={codeInvalid ? "role-code-error" : "role-code-help"} />
+              {codeInvalid ? <FieldError id="role-code-error">以字母开头，仅含字母、数字及 _ . : -</FieldError> : <FieldDescription id="role-code-help">建议使用小写英文，如 operator、auditor</FieldDescription>}
             </Field>
             <Field>
               <FieldLabel htmlFor="role-name">角色名称</FieldLabel>
@@ -86,7 +106,7 @@ export function RoleFormDialog({ open, role, onOpenChange }: { open: boolean; ro
             </Field>
           </FieldGroup>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={mutation.isPending}>
+            <Button type="button" variant="outline" onClick={() => void requestClose()} disabled={mutation.isPending}>
               取消
             </Button>
             <Button type="submit" disabled={!canSubmit || mutation.isPending}>

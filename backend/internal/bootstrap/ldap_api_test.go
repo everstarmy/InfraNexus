@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 
 	"infranexus/internal/core/response"
 	"infranexus/internal/domain"
@@ -176,7 +177,7 @@ func TestDomainLoginProvisionsUsersJustInTime(t *testing.T) {
 			t.Fatalf("domain failure message: %q", res.Message)
 		}
 	}
-	expectCode(t, call(t, app, "PATCH", "/api/v1/users/"+user.ID.String()+"/status", bearer, map[string]any{"status": 2}), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "PATCH", "/api/v1/users/"+user.ID.String()+"/status", bearer, map[string]any{"status": 2, "expected_revision": user.EditRevision}), 200, response.CodeSuccess)
 	expectCode(t, call(t, app, "POST", "/api/v1/auth/token", "", login), 403, response.CodeAccountDisabled)
 }
 
@@ -196,6 +197,17 @@ func waitForSync(t *testing.T, app *fiber.App, bearer string, configID uuid.UUID
 	return domain.LDAPSyncLog{}
 }
 
+func previewSync(t *testing.T, app *fiber.App, bearer string, configID uuid.UUID, mode string) domain.SyncPlan {
+	t.Helper()
+	r := call(t, app, "POST", "/api/v1/ldap/preview", bearer, map[string]any{"config_id": configID, "mode": mode})
+	expectCode(t, r, 200, response.CodeSuccess)
+	return decode[domain.SyncPlan](t, r.Data)
+}
+
+func syncRequest(plan domain.SyncPlan, idempotencyKey string) map[string]any {
+	return map[string]any{"config_id": plan.ConfigID, "mode": plan.Mode, "plan_id": plan.PlanID, "idempotency_key": idempotencyKey}
+}
+
 func TestDirectorySyncPreviewRunAndIncremental(t *testing.T) {
 	container, app, cleanup := setupTestApp(t)
 	defer cleanup()
@@ -208,18 +220,35 @@ func TestDirectorySyncPreviewRunAndIncremental(t *testing.T) {
 	}))
 	ghost := domain.User{Username: "ghost", Domain: "corp.local", AuthType: domain.AuthTypeAD, ExternalID: "guid-ghost", Status: 1}
 	container.DB.Create(&ghost)
-	plan := decode[domain.SyncPlan](t, call(t, app, "POST", "/api/v1/ldap/preview", bearer, map[string]any{"config_id": cfg.ID, "mode": "full"}).Data)
+	plan := previewSync(t, app, bearer, cfg.ID, domain.SyncModeFull)
 	if plan.Summary.Create != 2 || plan.Summary.Skip != 1 || plan.Summary.Disable != 1 || len(plan.DepartmentsToCreate) != 2 {
 		t.Fatalf("preview: %+v", plan.Summary)
+	}
+	if len(plan.Items) != 0 || plan.PlanID == uuid.Nil || plan.ExpiresAt.IsZero() {
+		t.Fatalf("preview must return a persistent plan without sensitive rows: %+v", plan)
+	}
+	items := call(t, app, "GET", "/api/v1/ldap/sync-plans/"+plan.PlanID.String()+"/items?page=1&page_size=10", bearer, nil)
+	expectCode(t, items, 200, response.CodeSuccess)
+	page := decode[response.PageData[domain.SyncPlanItem]](t, items.Data)
+	if page.Total != int64(plan.Summary.Total) || len(page.Items) == 0 || page.Items[0].DN == "" {
+		t.Fatalf("protected plan detail page: %+v", page)
 	}
 	var beforeRun int64
 	container.DB.Model(&domain.User{}).Where("domain = ?", "corp.local").Count(&beforeRun)
 	if beforeRun != 1 {
 		t.Fatal("preview must not write")
 	}
-	started := decode[domain.LDAPSyncLog](t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, map[string]any{"config_id": cfg.ID, "mode": "full"}).Data)
+	request := syncRequest(plan, "sync-request-00000001")
+	started := decode[domain.LDAPSyncLog](t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, request).Data)
 	if started.Status != domain.SyncStatusRunning || started.Trigger != domain.SyncTriggerManual {
 		t.Fatalf("sync start: %+v", started)
+	}
+	duplicate := decode[domain.LDAPSyncLog](t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, request).Data)
+	if duplicate.ID != started.ID {
+		t.Fatalf("same idempotency key created another task: started=%s duplicate=%s", started.ID, duplicate.ID)
+	}
+	if started.RequestID == "" || started.OperatorID == nil {
+		t.Fatalf("async sync correlation missing request/operator: request_id=%q operator_id=%v", started.RequestID, started.OperatorID)
 	}
 	done := waitForSync(t, app, bearer, cfg.ID, started.ID)
 	report := done.Report.Data()
@@ -235,8 +264,15 @@ func TestDirectorySyncPreviewRunAndIncremental(t *testing.T) {
 	if ghost.Status != domain.StatusDisabled {
 		t.Fatal("account missing from directory was not disabled")
 	}
+	if ghost.AuthVersion != 2 {
+		t.Fatalf("LDAP disable did not revoke credentials through auth_version: %d", ghost.AuthVersion)
+	}
+	if done.RequestID != started.RequestID || done.OperatorID == nil || *done.OperatorID != *started.OperatorID {
+		t.Fatalf("async sync lost request/operator correlation: started=%+v done=%+v", started, done)
+	}
 	srv.SetEntries(dirUser("CN=Zhao Liu,OU=Sales,DC=corp,DC=local", "zhaoliu", "赵六", "zhaoliu@corp.local", "销售部", "guid-zhaoliu", "512", "20991231000000.0Z"))
-	incremental := decode[domain.LDAPSyncLog](t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, map[string]any{"config_id": cfg.ID, "mode": "incremental"}).Data)
+	incrementalPlan := previewSync(t, app, bearer, cfg.ID, domain.SyncModeIncremental)
+	incremental := decode[domain.LDAPSyncLog](t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, syncRequest(incrementalPlan, "sync-request-00000002")).Data)
 	finished := waitForSync(t, app, bearer, cfg.ID, incremental.ID)
 	if r := finished.Report.Data(); finished.Status != domain.SyncStatusSuccess || r.Created != 1 || r.Disabled != 0 || r.DepartmentsCreated != 0 {
 		t.Fatalf("incremental: %s %+v", finished.Status, r)
@@ -252,6 +288,114 @@ func TestDirectorySyncPreviewRunAndIncremental(t *testing.T) {
 	}
 }
 
+func TestLDAPPreviewChangesAndExpiryRequireRepreview(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	srv := startDirectory(t)
+	cfg := createDirectory(t, app, bearer, directoryRequest(srv, nil))
+
+	plan := previewSync(t, app, bearer, cfg.ID, domain.SyncModeFull)
+	updatedConfig := directoryRequest(srv, map[string]any{"name": "已调整配置"})
+	expectCode(t, call(t, app, "PUT", "/api/v1/ldap/configs/"+cfg.ID.String(), bearer, updatedConfig), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, syncRequest(plan, "stale-config-plan-0001")), 409, response.CodeResourceConflict)
+
+	plan = previewSync(t, app, bearer, cfg.ID, domain.SyncModeFull)
+	srv.SetEntries(dirUser("CN=Changed,OU=RD,DC=corp,DC=local", "changed", "目录已变化", "changed@corp.local", "研发部", "guid-changed", "512", "20261022000000.0Z"))
+	expectCode(t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, syncRequest(plan, "stale-directory-plan-01")), 409, response.CodeResourceConflict)
+
+	local := domain.User{Username: "changed", Domain: "corp.local", AuthType: domain.AuthTypeAD, ExternalID: "guid-changed", Email: "changed@corp.local", Nickname: "旧姓名", Status: domain.StatusEnabled}
+	if err := container.DB.Create(&local).Error; err != nil {
+		t.Fatal(err)
+	}
+	plan = previewSync(t, app, bearer, cfg.ID, domain.SyncModeFull)
+	if err := repository.NewUserRepository(container.DB).UpdateColumns(t.Context(), local.ID, map[string]any{"nickname": "并发修改"}); err != nil {
+		t.Fatal(err)
+	}
+	expectCode(t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, syncRequest(plan, "stale-local-plan-0001")), 409, response.CodeResourceConflict)
+
+	plan = previewSync(t, app, bearer, cfg.ID, domain.SyncModeFull)
+	if err := container.DB.Model(&domain.LDAPSyncPlanSnapshot{}).Where("id = ?", plan.PlanID).Update("expires_at", time.Now().Add(-time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
+	expectCode(t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, syncRequest(plan, "expired-plan-key-0001")), 409, response.CodeResourceConflict)
+}
+
+func TestLDAPTaskDetailsArePermissionGatedAndStaleLeaseIsRecovered(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	admin := adminToken(t, app)
+	srv := startDirectory(t)
+	srv.SetEntries(
+		dirUser("CN=Same One,OU=RD,DC=corp,DC=local", "same", "Same One", "same1@corp.local", "研发部", "guid-same-1", "512", "20261022000000.0Z"),
+		dirUser("CN=Same Two,OU=RD,DC=corp,DC=local", "same", "Same Two", "same2@corp.local", "研发部", "guid-same-2", "512", "20261022000000.0Z"),
+	)
+	cfg := createDirectory(t, app, admin, directoryRequest(srv, nil))
+	plan := previewSync(t, app, admin, cfg.ID, domain.SyncModeFull)
+	if plan.Summary.Conflict != 1 {
+		t.Fatalf("expected preview conflict row: %+v", plan.Summary)
+	}
+	start := decode[domain.LDAPSyncLog](t, call(t, app, "POST", "/api/v1/ldap/sync", admin, syncRequest(plan, "detail-gate-task-0001")).Data)
+	done := waitForSync(t, app, admin, cfg.ID, start.ID)
+	if done.Status != domain.SyncStatusPartial || done.Report.Data().Failed != 1 {
+		t.Fatalf("expected persisted partial result: %+v", done)
+	}
+	logs := call(t, app, "GET", "/api/v1/ldap/sync-logs?config_id="+cfg.ID.String(), admin, nil)
+	expectCode(t, logs, 200, response.CodeSuccess)
+	listed := decode[response.PageData[domain.LDAPSyncLog]](t, logs.Data)
+	if len(listed.Items) == 0 || len(listed.Items[0].Report.Data().Errors) != 0 {
+		t.Fatalf("summary endpoint exposed sensitive per-entry errors: %+v", listed.Items)
+	}
+	detail := decode[domain.LDAPSyncLog](t, call(t, app, "GET", "/api/v1/ldap/sync-logs/"+start.ID.String(), admin, nil).Data)
+	if len(detail.Report.Data().Errors) != 1 || detail.Report.Data().Errors[0].DN == "" {
+		t.Fatalf("authorized task detail missing diagnosis: %+v", detail.Report.Data())
+	}
+
+	viewerRole := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", admin, map[string]any{"code": "ldap-task-viewer", "name": "LDAP 任务列表查看员"}).Data)
+	viewerPermissions := permissionIDs(t, container,
+		domain.APIPermissionCode("GET", "/api/v1/ldap/sync-logs"),
+		domain.APIPermissionCode("GET", "/api/v1/ldap/sync-plans/:id/items"),
+	)
+	expectCode(t, assignRolePermissions(t, app, admin, viewerRole.ID, viewerPermissions), 200, response.CodeSuccess)
+	viewer := createLocalUser(t, app, admin, "ldap-viewer", map[string]any{"role_ids": []uuid.UUID{viewerRole.ID}})
+	viewerToken := tokenFor(t, app, viewer.Username, "Str0ng!pass")
+	expectCode(t, call(t, app, "GET", "/api/v1/ldap/sync-logs/"+start.ID.String(), viewerToken, nil), 403, response.CodePermissionDenied)
+	expectCode(t, call(t, app, "GET", "/api/v1/ldap/sync-plans/"+plan.PlanID.String()+"/items", viewerToken, nil), 403, response.CodePermissionDenied)
+
+	repo := repository.NewLDAPRepository(container.DB)
+	currentConfig, err := repo.GetConfig(t.Context(), cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	staleTask := &domain.LDAPSyncLog{
+		BaseEntity: domain.BaseEntity{ID: uuid.New()}, ConfigID: cfg.ID, Domain: cfg.Domain,
+		Trigger: domain.SyncTriggerManual, Mode: domain.SyncModeFull, Status: domain.SyncStatusRunning,
+		StartedAt: now, PlanID: uuid.New(), Phase: domain.SyncPhaseApplying,
+		Report: datatypes.NewJSONType(domain.SyncReport{Errors: []domain.SyncItemError{}}),
+	}
+	created, err := repo.CreateSyncTask(t.Context(), cfg.ID, currentConfig.UpdatedAt, now, now.Add(30*time.Second), staleTask)
+	if err != nil || !created {
+		t.Fatalf("create recoverable task: created=%v err=%v", created, err)
+	}
+	if err := container.DB.Model(&domain.LDAPConfig{}).Where("id = ?", cfg.ID).Update("sync_lease_expires_at", now.Add(-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if owned, err := repo.RenewSyncLease(t.Context(), cfg.ID, staleTask.ID, now, now.Add(30*time.Second)); err != nil || owned {
+		t.Fatalf("expired lease owner must not renew: owned=%v err=%v", owned, err)
+	}
+	if owned, err := repo.SaveLogIfOwner(t.Context(), staleTask, now); err != nil || owned {
+		t.Fatalf("expired lease owner must not write task progress: owned=%v err=%v", owned, err)
+	}
+	if err := repo.RecoverExpiredSyncs(t.Context(), now); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := repo.GetLog(t.Context(), staleTask.ID)
+	if err != nil || recovered.Status != domain.SyncStatusFailed || !strings.Contains(recovered.Message, "实例中断") {
+		t.Fatalf("stale task was not recovered: %+v err=%v", recovered, err)
+	}
+}
+
 func TestSyncLockAndSchedulerOnlyStartDueWork(t *testing.T) {
 	container, app, cleanup := setupTestApp(t)
 	defer cleanup()
@@ -260,18 +404,25 @@ func TestSyncLockAndSchedulerOnlyStartDueWork(t *testing.T) {
 	cfg := createDirectory(t, app, bearer, directoryRequest(srv, map[string]any{"sync_enabled": true, "sync_interval_minutes": 30}))
 	repo := repository.NewLDAPRepository(container.DB)
 	now := time.Now()
-	first, err := repo.TryAcquireSync(t.Context(), cfg.ID, now, now.Add(-time.Hour))
+	taskID := uuid.New()
+	first, err := repo.TryAcquireSync(t.Context(), cfg.ID, taskID, cfg.UpdatedAt, now, now.Add(30*time.Second))
 	if err != nil || !first {
 		t.Fatalf("first acquire: %v %v", first, err)
 	}
-	if second, _ := repo.TryAcquireSync(t.Context(), cfg.ID, now, now.Add(-time.Hour)); second {
+	if second, _ := repo.TryAcquireSync(t.Context(), cfg.ID, uuid.New(), cfg.UpdatedAt, now, now.Add(30*time.Second)); second {
 		t.Fatal("concurrent sync lock acquired twice")
 	}
-	expectCode(t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, map[string]any{"config_id": cfg.ID}), 409, response.CodeSyncInProgress)
-	if stale, _ := repo.TryAcquireSync(t.Context(), cfg.ID, now.Add(3*time.Hour), now.Add(time.Hour)); !stale {
+	lockedPlan := previewSync(t, app, bearer, cfg.ID, domain.SyncModeFull)
+	expectCode(t, call(t, app, "POST", "/api/v1/ldap/sync", bearer, syncRequest(lockedPlan, "sync-request-00000003")), 409, response.CodeSyncInProgress)
+	latest, err := repo.GetConfig(t.Context(), cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale, _ := repo.TryAcquireSync(t.Context(), cfg.ID, uuid.New(), latest.UpdatedAt, now.Add(3*time.Hour), now.Add(3*time.Hour+30*time.Second)); !stale {
 		t.Fatal("stale lock must be reclaimable")
 	}
-	if err := repo.ReleaseSync(t.Context(), cfg.ID, domain.SyncStatusSuccess, now, &now); err != nil {
+	latest, _ = repo.GetConfig(t.Context(), cfg.ID)
+	if _, err := repo.ReleaseSync(t.Context(), cfg.ID, *latest.SyncTaskID, domain.SyncStatusSuccess, now, &now); err != nil {
 		t.Fatal(err)
 	}
 	svc := service.NewLDAPService(service.LDAPServiceDeps{

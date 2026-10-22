@@ -88,11 +88,15 @@ func (h *LDAPHandler) Test(c fiber.Ctx) error {
 }
 
 func (h *LDAPHandler) Preview(c fiber.Ctx) error {
-	var req domain.LDAPSyncRequest
+	var req domain.LDAPPreviewRequest
 	if err := bindBody(c, &req); err != nil {
 		return err
 	}
-	plan, err := h.ldapSvc.Preview(c.Context(), req.ConfigID, req.Mode)
+	actor, err := currentPrincipal(c)
+	if err != nil {
+		return err
+	}
+	plan, err := h.ldapSvc.Preview(c.Context(), req.ConfigID, req.Mode, &actor.UserID)
 	if err != nil {
 		return err
 	}
@@ -108,7 +112,36 @@ func (h *LDAPHandler) Sync(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	log, err := h.ldapSvc.StartSync(c.Context(), req.ConfigID, req.Mode, domain.SyncTriggerManual, &actor.UserID)
+	log, err := h.ldapSvc.StartSync(c.Context(), req, domain.SyncTriggerManual, &actor.UserID)
+	if err != nil {
+		return err
+	}
+	return response.Success(c, log)
+}
+
+func (h *LDAPHandler) SyncPlanItems(c fiber.Ctx) error {
+	id, err := parseIDParam(c)
+	if err != nil {
+		return err
+	}
+	actor, err := currentPrincipal(c)
+	if err != nil {
+		return err
+	}
+	page, pageSize := pageParams(c, 50)
+	items, total, err := h.ldapSvc.ListSyncPlanItems(c.Context(), id, &actor.UserID, page, pageSize)
+	if err != nil {
+		return err
+	}
+	return response.Page(c, items, total, page, pageSize)
+}
+
+func (h *LDAPHandler) SyncLog(c fiber.Ctx) error {
+	id, err := parseIDParam(c)
+	if err != nil {
+		return err
+	}
+	log, err := h.ldapSvc.GetSyncLog(c.Context(), id)
 	if err != nil {
 		return err
 	}

@@ -17,17 +17,18 @@ const (
 
 type Department struct {
 	BaseEntity
-	ParentID   *uuid.UUID `gorm:"type:uuid;index" json:"parent_id"`
-	TreePath   string     `gorm:"size:1024;not null;index" json:"tree_path"`
-	Name       string     `gorm:"size:64;not null" json:"name"`
-	Code       string     `gorm:"size:64;not null;uniqueIndex:uidx_departments_code,where:deleted_at IS NULL" json:"code"`
-	SortOrder  int        `gorm:"not null;default:0" json:"sort_order"`
-	LeaderID   *uuid.UUID `gorm:"type:uuid" json:"leader_id"`
-	Phone      string     `gorm:"size:32" json:"phone"`
-	Email      string     `gorm:"size:128" json:"email"`
-	Status     int        `gorm:"not null;default:1" json:"status"`
-	Source     string     `gorm:"size:16;not null;default:local" json:"source"`
-	ExternalID string     `gorm:"size:512;index" json:"external_id"`
+	EditRevision int64      `gorm:"not null;default:1" json:"edit_revision"`
+	ParentID     *uuid.UUID `gorm:"type:uuid;index" json:"parent_id"`
+	TreePath     string     `gorm:"size:1024;not null;index" json:"tree_path"`
+	Name         string     `gorm:"size:64;not null" json:"name"`
+	Code         string     `gorm:"size:64;not null;uniqueIndex:uidx_departments_code,where:deleted_at IS NULL" json:"code"`
+	SortOrder    int        `gorm:"not null;default:0" json:"sort_order"`
+	LeaderID     *uuid.UUID `gorm:"type:uuid" json:"leader_id"`
+	Phone        string     `gorm:"size:32" json:"phone"`
+	Email        string     `gorm:"size:128" json:"email"`
+	Status       int        `gorm:"not null;default:1" json:"status"`
+	Source       string     `gorm:"size:16;not null;default:local" json:"source"`
+	ExternalID   string     `gorm:"size:512;index" json:"external_id"`
 }
 
 func DepartmentPath(parentPath string, id uuid.UUID) string {
@@ -61,28 +62,33 @@ type DepartmentTreeDTO struct {
 }
 
 type CreateDepartmentRequest struct {
-	ParentID  *uuid.UUID `json:"parent_id"`
-	Name      string     `json:"name" validate:"required,min=1,max=64"`
-	Code      string     `json:"code" validate:"required,min=2,max=64,slug"`
-	SortOrder int        `json:"sort_order" validate:"min=0,max=100000"`
-	LeaderID  *uuid.UUID `json:"leader_id"`
-	Phone     string     `json:"phone" validate:"max=32"`
-	Email     string     `json:"email" validate:"omitempty,email,max=128"`
-	Status    int        `json:"status" validate:"omitempty,oneof=1 2"`
+	ParentID         *uuid.UUID `json:"parent_id"`
+	ExpectedRevision int64      `json:"expected_revision" validate:"required,gt=0"`
+	Name             string     `json:"name" validate:"required,min=1,max=64"`
+	Code             string     `json:"code" validate:"required,min=2,max=64,slug"`
+	SortOrder        int        `json:"sort_order" validate:"min=0,max=100000"`
+	LeaderID         *uuid.UUID `json:"leader_id"`
+	Phone            string     `json:"phone" validate:"max=32"`
+	Email            string     `json:"email" validate:"omitempty,email,max=128"`
+	Status           int        `json:"status" validate:"omitempty,oneof=1 2"`
 }
 
 type UpdateDepartmentRequest struct {
-	Name      string     `json:"name" validate:"required,min=1,max=64"`
-	Code      string     `json:"code" validate:"required,min=2,max=64,slug"`
-	SortOrder int        `json:"sort_order" validate:"min=0,max=100000"`
-	LeaderID  *uuid.UUID `json:"leader_id"`
-	Phone     string     `json:"phone" validate:"max=32"`
-	Email     string     `json:"email" validate:"omitempty,email,max=128"`
-	Status    int        `json:"status" validate:"required,oneof=1 2"`
+	ExpectedRevision int64      `json:"expected_revision" validate:"required,gt=0"`
+	Name             string     `json:"name" validate:"required,min=1,max=64"`
+	Code             string     `json:"code" validate:"required,min=2,max=64,slug"`
+	SortOrder        int        `json:"sort_order" validate:"min=0,max=100000"`
+	LeaderID         *uuid.UUID `json:"leader_id"`
+	Phone            string     `json:"phone" validate:"max=32"`
+	Email            string     `json:"email" validate:"omitempty,email,max=128"`
+	Status           int        `json:"status" validate:"required,oneof=1 2"`
 }
 
 type MoveDepartmentRequest struct {
-	ParentID *uuid.UUID `json:"parent_id"`
+	ParentID         *uuid.UUID `json:"parent_id"`
+	TargetID         *uuid.UUID `json:"target_id"`
+	Position         string     `json:"position" validate:"omitempty,oneof=before after"`
+	ExpectedRevision int64      `json:"expected_revision" validate:"required,gt=0"`
 }
 
 type DepartmentOrder struct {
@@ -91,7 +97,13 @@ type DepartmentOrder struct {
 }
 
 type ReorderDepartmentsRequest struct {
-	Items []DepartmentOrder `json:"items" validate:"required,min=1,max=500,dive"`
+	ExpectedRevision int64             `json:"expected_revision" validate:"required,gt=0"`
+	Items            []DepartmentOrder `json:"items" validate:"required,min=1,max=500,dive"`
+}
+
+type DepartmentTreeSnapshot struct {
+	Revision int64                `json:"revision"`
+	Items    []*DepartmentTreeDTO `json:"items"`
 }
 
 type DepartmentRepository interface {
@@ -106,12 +118,20 @@ type DepartmentRepository interface {
 	Reorder(ctx context.Context, items []DepartmentOrder) error
 }
 
+// OrganizationUnitOfWork serializes all writes that can change department
+// structure or membership and validates the caller's tree revision.
+type OrganizationUnitOfWork interface {
+	Revision(ctx context.Context) (int64, error)
+	Write(ctx context.Context, expectedRevision *int64, fn func(context.Context) error) (int64, error)
+}
+
 type DepartmentService interface {
-	Tree(ctx context.Context) ([]*DepartmentTreeDTO, error)
+	Tree(ctx context.Context) (*DepartmentTreeSnapshot, error)
 	Get(ctx context.Context, id uuid.UUID) (*Department, error)
 	Create(ctx context.Context, req CreateDepartmentRequest) (*Department, error)
 	Update(ctx context.Context, id uuid.UUID, req UpdateDepartmentRequest) (*Department, error)
-	Move(ctx context.Context, id uuid.UUID, parentID *uuid.UUID) (*Department, error)
-	Reorder(ctx context.Context, items []DepartmentOrder) error
-	Delete(ctx context.Context, id uuid.UUID) error
+	Move(ctx context.Context, id uuid.UUID, parentID *uuid.UUID, expectedRevision int64) (*Department, error)
+	MoveRelative(ctx context.Context, id, targetID uuid.UUID, position string, expectedRevision int64) (*Department, error)
+	Reorder(ctx context.Context, items []DepartmentOrder, expectedRevision int64) error
+	Delete(ctx context.Context, id uuid.UUID, expectedRevision int64) error
 }

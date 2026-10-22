@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -27,6 +28,18 @@ type AppContainer struct {
 	background []func(ctx context.Context)
 	stop       context.CancelFunc
 	wg         sync.WaitGroup
+}
+
+const defaultJWTSecret = "infranexus-super-secret-jwt-key-32chars!"
+
+func validateSecurityConfig(cfg *config.Config) error {
+	if cfg.App.Env != "production" {
+		return nil
+	}
+	if len(cfg.JWT.Secret) < 32 || cfg.JWT.Secret == defaultJWTSecret {
+		return fmt.Errorf("jwt.secret must be a unique secret with at least 32 characters in production")
+	}
+	return nil
 }
 
 func (a *AppContainer) OnClose(fn func()) {
@@ -62,6 +75,9 @@ func NewCipher(cfg *config.Config, log *slog.Logger) (*secret.Cipher, error) {
 }
 
 func NewAppContainer(cfg *config.Config, log *slog.Logger) (*AppContainer, error) {
+	if err := validateSecurityConfig(cfg); err != nil {
+		return nil, err
+	}
 	cipher, err := NewCipher(cfg, log)
 	if err != nil {
 		return nil, err
@@ -101,14 +117,26 @@ func (a *AppContainer) Close() {
 		a.closers[i]()
 	}
 	if a.DB != nil {
-		if sqlDB, err := a.DB.DB(); err == nil {
-			_ = sqlDB.Close()
+		if sqlDB, err := a.DB.DB(); err != nil {
+			a.logCloseError("database handle", err)
+		} else if err := sqlDB.Close(); err != nil {
+			a.logCloseError("database", err)
 		}
 	}
 	if a.Redis != nil {
-		_ = a.Redis.Close()
+		if err := a.Redis.Close(); err != nil {
+			a.logCloseError("redis", err)
+		}
 	}
 	if a.Storage != nil {
-		_ = a.Storage.Close()
+		if err := a.Storage.Close(); err != nil {
+			a.logCloseError("storage", err)
+		}
+	}
+}
+
+func (a *AppContainer) logCloseError(resource string, err error) {
+	if a.Logger != nil {
+		a.Logger.Error("Close application resource failed", "resource", resource, "error_type", fmt.Sprintf("%T", err))
 	}
 }

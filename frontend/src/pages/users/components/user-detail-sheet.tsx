@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AuthSourceBadge, BuiltinBadge, StatusDot } from "@/components/common/badges"
 import { Can } from "@/components/common/can"
 import { departmentPathLabel } from "@/components/common/department-select"
+import { QueryErrorState, isForbiddenQueryError } from "@/components/common/query-error-state"
 import { UserAvatar } from "@/components/common/user-avatar"
 import { formatDateTime, formatRelative } from "@/lib/format"
 import type { DepartmentNode } from "@/services/departments"
@@ -50,10 +51,11 @@ export function UserDetailSheet({
 }) {
   const query = useQuery({
     queryKey: ["users", "detail", userId],
-    queryFn: async () => (await usersService.get(userId!)).data,
+    queryFn: async ({ signal }) => (await usersService.get(userId!, signal)).data,
     enabled: !!userId,
   })
-  const user = query.data
+  const forbidden = isForbiddenQueryError(query.error)
+  const user = forbidden ? undefined : query.data
   const isSelf = !!user && user.id === meId
 
   return (
@@ -61,13 +63,20 @@ export function UserDetailSheet({
       <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
         <SheetHeader className="border-b bg-gradient-to-b from-primary/[0.06] to-transparent p-6">
           {!user ? (
-            <div className="flex items-center gap-4">
-              <Skeleton className="size-14 rounded-full" />
-              <div className="space-y-2">
-                <Skeleton className="h-5 w-32" />
-                <Skeleton className="h-4 w-44" />
+            <>
+              <SheetTitle>用户详情</SheetTitle>
+              <SheetDescription>
+                {query.isError ? "无法读取当前用户信息。" : "正在读取用户档案…"}
+              </SheetDescription>
+              {!query.isError && <div className="flex items-center gap-4" role="status" aria-label="正在加载用户详情">
+                <Skeleton className="size-14 rounded-full" />
+                <div className="space-y-2">
+                  <Skeleton className="h-5 w-32" />
+                  <Skeleton className="h-4 w-44" />
+                </div>
               </div>
-            </div>
+              }
+            </>
           ) : (
             <div className="flex items-center gap-4">
               <UserAvatar name={user.nickname || user.username} seed={user.username} size="lg" className="size-14" />
@@ -122,13 +131,14 @@ export function UserDetailSheet({
         )}
 
         <div className="flex-1 overflow-y-auto px-6 py-2">
-          {!user ? (
+          {query.isError && <QueryErrorState error={query.error} label="用户详情" onRetry={() => void query.refetch()} retrying={query.isFetching} />}
+          {!user && !query.isError ? (
             <div className="space-y-4 py-4">
               {Array.from({ length: 6 }).map((_, i) => (
                 <Skeleton key={i} className="h-10 w-full" />
               ))}
             </div>
-          ) : (
+          ) : user ? (
             <>
               <InfoRow icon={Mail} label="电子邮箱">
                 {user.email || <span className="text-muted-foreground">未填写</span>}
@@ -163,7 +173,7 @@ export function UserDetailSheet({
                 {formatDateTime(user.created_at)} / {formatDateTime(user.updated_at)}
               </InfoRow>
             </>
-          )}
+          ) : null}
         </div>
 
         {user && !isSelf && !user.built_in && (

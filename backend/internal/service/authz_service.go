@@ -2,114 +2,200 @@ package service
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"slices"
 	"sort"
-	"strings"
+	"sync"
+	"time"
 
 	"github.com/casbin/casbin/v3"
 	"github.com/google/uuid"
 
-	coreerrors "infranexus/internal/core/errors"
 	"infranexus/internal/domain"
+)
+
+const (
+	authorizationPollInterval = 500 * time.Millisecond
+	authorizationMinRetry     = 100 * time.Millisecond
+	authorizationMaxRetry     = 30 * time.Second
 )
 
 type authorizationService struct {
 	enforcer *casbin.SyncedEnforcer
 	roleRepo domain.RoleRepository
 	permRepo domain.PermissionRepository
+	state    domain.AuthorizationOutboxRepository
+	notifier domain.AuthorizationNotifier
+	logger   *slog.Logger
+
+	refreshMu sync.Mutex
+	loadedRev int64
 }
 
-func NewAuthorizationService(enforcer *casbin.SyncedEnforcer, roleRepo domain.RoleRepository, permRepo domain.PermissionRepository) domain.AuthorizationService {
-	return &authorizationService{enforcer: enforcer, roleRepo: roleRepo, permRepo: permRepo}
-}
-
-func rolePolicies(role domain.Role) [][]string {
-	rules := make([][]string, 0)
-	seen := make(map[string]bool)
-	for _, p := range role.Permissions {
-		if p.Type != domain.PermTypeAPI || p.Path == "" || p.Method == "" {
-			continue
-		}
-		key := p.Path + " " + p.Method
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		rules = append(rules, []string{role.Code, p.Path, p.Method})
+func NewAuthorizationService(
+	enforcer *casbin.SyncedEnforcer,
+	roleRepo domain.RoleRepository,
+	permRepo domain.PermissionRepository,
+	state domain.AuthorizationOutboxRepository,
+	notifier domain.AuthorizationNotifier,
+	logger *slog.Logger,
+) domain.AuthorizationService {
+	return &authorizationService{
+		enforcer:  enforcer,
+		roleRepo:  roleRepo,
+		permRepo:  permRepo,
+		state:     state,
+		notifier:  notifier,
+		logger:    logger,
+		loadedRev: -1,
 	}
-	return rules
-}
-
-func policyKey(rule []string) string {
-	return strings.Join(rule, "\x00")
-}
-
-func (s *authorizationService) applyDiff(current, desired [][]string) (int, int, error) {
-	want := make(map[string][]string, len(desired))
-	for _, rule := range desired {
-		want[policyKey(rule)] = rule
-	}
-	have := make(map[string]bool, len(current))
-	toRemove := make([][]string, 0)
-	for _, rule := range current {
-		key := policyKey(rule)
-		have[key] = true
-		if _, ok := want[key]; !ok {
-			toRemove = append(toRemove, rule)
-		}
-	}
-	toAdd := make([][]string, 0)
-	for key, rule := range want {
-		if !have[key] {
-			toAdd = append(toAdd, rule)
-		}
-	}
-	sort.Slice(toAdd, func(i, j int) bool { return policyKey(toAdd[i]) < policyKey(toAdd[j]) })
-	if len(toRemove) > 0 {
-		if _, err := s.enforcer.RemovePolicies(toRemove); err != nil {
-			return 0, 0, err
-		}
-	}
-	if len(toAdd) > 0 {
-		if _, err := s.enforcer.AddPolicies(toAdd); err != nil {
-			return 0, 0, err
-		}
-	}
-	return len(toAdd), len(toRemove), nil
 }
 
 func (s *authorizationService) SyncRolePolicies(ctx context.Context, roleID uuid.UUID) error {
-	role, err := s.roleRepo.GetByID(ctx, roleID)
-	if err != nil {
-		return notFoundAs(err, coreerrors.ErrRoleNotFound)
-	}
-	current, err := s.enforcer.GetFilteredPolicy(0, role.Code)
-	if err != nil {
+	if err := s.roleRepo.SyncRoleAuthorizationPolicy(ctx, roleID); err != nil {
 		return err
 	}
-	_, _, err = s.applyDiff(current, rolePolicies(*role))
-	return err
+	return s.RefreshIfStale(ctx)
 }
 
 func (s *authorizationService) SyncAllPolicies(ctx context.Context) (int, int, error) {
-	roles, err := s.roleRepo.ListWithPermissions(ctx, nil)
+	added, removed, err := s.roleRepo.SyncAllAuthorizationPolicies(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
-	desired := make([][]string, 0)
-	for _, role := range roles {
-		desired = append(desired, rolePolicies(role)...)
+	if err := s.RefreshIfStale(ctx); err != nil {
+		return added, removed, err
 	}
-	current, err := s.enforcer.GetPolicy()
-	if err != nil {
-		return 0, 0, err
-	}
-	return s.applyDiff(current, desired)
+	return added, removed, nil
 }
 
-func (s *authorizationService) RemoveRolePolicies(roleCode string) error {
-	_, err := s.enforcer.RemoveFilteredPolicy(0, roleCode)
-	return err
+func (s *authorizationService) RefreshIfStale(ctx context.Context) error {
+	if s.state == nil {
+		return errors.New("authorization revision repository is unavailable")
+	}
+	revision, err := s.state.Revision(ctx)
+	if err != nil {
+		return err
+	}
+	if revision == s.loadedRev {
+		return nil
+	}
+
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	for range 3 {
+		before, err := s.state.Revision(ctx)
+		if err != nil {
+			return err
+		}
+		if before == s.loadedRev {
+			return nil
+		}
+		if err := s.enforcer.LoadPolicy(); err != nil {
+			return err
+		}
+		after, err := s.state.Revision(ctx)
+		if err != nil {
+			return err
+		}
+		if before == after {
+			s.loadedRev = after
+			return nil
+		}
+	}
+	return errors.New("authorization policy changed repeatedly while reloading")
+}
+
+func (s *authorizationService) Enforce(ctx context.Context, subject, object, action string) (bool, error) {
+	if err := s.RefreshIfStale(ctx); err != nil {
+		return false, err
+	}
+	return s.enforcer.Enforce(subject, object, action)
+}
+
+func (s *authorizationService) Run(ctx context.Context) {
+	if s.notifier == nil || s.state == nil {
+		<-ctx.Done()
+		return
+	}
+	ticker := time.NewTicker(authorizationPollInterval)
+	defer ticker.Stop()
+
+	var revisions <-chan int64
+	var retrySubscribeAt time.Time
+	for {
+		if revisions == nil && (retrySubscribeAt.IsZero() || !time.Now().Before(retrySubscribeAt)) {
+			channel, err := s.notifier.Subscribe(ctx)
+			if err != nil {
+				s.logWorkerError("subscribe", err)
+				retrySubscribeAt = time.Now().Add(2 * time.Second)
+			} else {
+				revisions = channel
+				retrySubscribeAt = time.Time{}
+				// Subscribe before taking the snapshot so changes are either
+				// included in this load or delivered by the stream after it.
+				if err := s.RefreshIfStale(ctx); err != nil {
+					s.logWorkerError("refresh-after-subscribe", err)
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case revision, open := <-revisions:
+			if !open {
+				revisions = nil
+				retrySubscribeAt = time.Now().Add(time.Second)
+				continue
+			}
+			if err := s.RefreshIfStale(ctx); err != nil {
+				s.logWorkerError("refresh", err)
+			} else if s.loadedRev < revision {
+				// Revision checks are authoritative; a later poll retries transient DB visibility.
+				s.logWorkerError("refresh-revision", errors.New("notifier revision is ahead of local snapshot"))
+			}
+		case <-ticker.C:
+			if err := s.publishPending(ctx); err != nil {
+				s.logWorkerError("outbox", err)
+			}
+		}
+	}
+}
+
+func (s *authorizationService) publishPending(ctx context.Context) error {
+	rows, err := s.state.Pending(ctx, time.Now(), 100)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := s.notifier.Publish(ctx, row.Revision); err != nil {
+			delay := authorizationRetryDelay(row.AttemptCount)
+			markErr := s.state.MarkFailed(ctx, row.ID, err.Error(), time.Now().Add(delay))
+			if markErr != nil {
+				return errors.Join(err, markErr)
+			}
+			continue
+		}
+		if err := s.state.MarkPublished(ctx, row.ID, time.Now()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func authorizationRetryDelay(attempt int) time.Duration {
+	delay := authorizationMinRetry
+	for range min(max(attempt, 0), 8) {
+		delay *= 2
+	}
+	return min(delay, authorizationMaxRetry)
+}
+
+func (s *authorizationService) logWorkerError(operation string, err error) {
+	if s.logger != nil {
+		s.logger.Warn("authorization convergence worker operation failed", "operation", operation, "error", err)
+	}
 }
 
 func (s *authorizationService) EffectivePermissions(ctx context.Context, roleCodes []string) ([]string, bool, error) {
@@ -154,4 +240,20 @@ func (s *authorizationService) EffectivePermissions(ctx context.Context, roleCod
 	}
 	sort.Strings(codes)
 	return codes, false, nil
+}
+
+func (s *authorizationService) HasAPIAccess(ctx context.Context, roleCodes []string, method, path string) (bool, error) {
+	if slices.Contains(roleCodes, domain.AdminRoleCode) {
+		return true, nil
+	}
+	for _, roleCode := range roleCodes {
+		allowed, err := s.Enforce(ctx, roleCode, path, method)
+		if err != nil {
+			return false, err
+		}
+		if allowed {
+			return true, nil
+		}
+	}
+	return false, nil
 }

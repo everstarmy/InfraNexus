@@ -24,11 +24,15 @@ func InitRedis(cfg *config.Config, log *slog.Logger) (*redis.Client, error) {
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		if cfg.App.Env == "production" {
-			_ = rdb.Close()
+			if closeErr := rdb.Close(); closeErr != nil {
+				log.Warn("Close unavailable Redis client failed", "error_type", fmt.Sprintf("%T", closeErr))
+			}
 			return nil, fmt.Errorf("redis unavailable in production: %w", err)
 		}
 		log.Warn("Redis ping connection failed (offline mode fallback)", "addr", fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port), "error", err)
-		_ = rdb.Close()
+		if closeErr := rdb.Close(); closeErr != nil {
+			log.Warn("Close unavailable Redis client failed", "error_type", fmt.Sprintf("%T", closeErr))
+		}
 		return nil, nil
 	}
 

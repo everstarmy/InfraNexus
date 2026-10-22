@@ -1,7 +1,7 @@
 package bootstrap
 
 import (
-	"slices"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -22,21 +22,41 @@ type routeDeps struct {
 	users       *handler.UserHandler
 	roles       *handler.RoleHandler
 	permissions *handler.PermissionHandler
+	sse         *handler.SSEHandler
 	departments *handler.DepartmentHandler
 	options     *handler.OptionsHandler
 	ldap        *handler.LDAPHandler
 	dashboard   *handler.DashboardHandler
 }
 
-var authOnlyPrefixes = []string{
-	"/api/v1/health",
-	"/api/v1/auth/",
-	"/api/v1/options/",
-	"/api/v1/sse/",
-	"/api/v1/users/me/",
+var publicRoutes = map[string]struct{}{
+	"GET /api/v1/health":        {},
+	"POST /api/v1/auth/login":   {},
+	"POST /api/v1/auth/token":   {},
+	"POST /api/v1/auth/refresh": {},
+	"GET /api/v1/auth/domains":  {},
 }
 
-func discoverAPIRoutes(app *fiber.App) []domain.RouteInfo {
+var authenticatedRoutes = map[string]struct{}{
+	"POST /api/v1/auth/logout":         {},
+	"GET /api/v1/auth/me":              {},
+	"PUT /api/v1/users/me/preferences": {},
+	"GET /api/v1/options/roles":        {},
+	"GET /api/v1/options/departments":  {},
+	"GET /api/v1/sse/notifications":    {},
+}
+
+var rbacRouteRoots = []string{
+	"/api/v1/dashboard",
+	"/api/v1/users",
+	"/api/v1/departments",
+	"/api/v1/roles",
+	"/api/v1/permissions",
+	"/api/v1/ldap",
+	"/api/v1/reports",
+}
+
+func discoverAPIRoutes(app *fiber.App) ([]domain.RouteInfo, error) {
 	seen := make(map[string]bool)
 	routes := make([]domain.RouteInfo, 0)
 	for _, r := range app.GetRoutes(true) {
@@ -45,12 +65,19 @@ func discoverAPIRoutes(app *fiber.App) []domain.RouteInfo {
 		default:
 			continue
 		}
-		if !strings.HasPrefix(r.Path, "/api/v1/") || slices.ContainsFunc(authOnlyPrefixes, func(prefix string) bool {
-			return strings.HasPrefix(r.Path, prefix)
-		}) {
+		if !strings.HasPrefix(r.Path, "/api/v1/") {
 			continue
 		}
 		key := r.Method + " " + r.Path
+		if _, ok := publicRoutes[key]; ok {
+			continue
+		}
+		if _, ok := authenticatedRoutes[key]; ok {
+			continue
+		}
+		if !isRBACRoute(r.Path) {
+			return nil, fmt.Errorf("API route has no declared access class: %s", key)
+		}
 		if seen[key] {
 			continue
 		}
@@ -63,7 +90,16 @@ func discoverAPIRoutes(app *fiber.App) []domain.RouteInfo {
 		}
 		return routes[i].Path < routes[j].Path
 	})
-	return routes
+	return routes, nil
+}
+
+func isRBACRoute(path string) bool {
+	for _, root := range rbacRouteRoots {
+		if path == root || strings.HasPrefix(path, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func registerRoutes(app *fiber.App, d routeDeps) {
@@ -91,7 +127,7 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	authRequired.Put("/users/me/preferences", d.users.UpdateMyPreferences)
 	authRequired.Get("/options/roles", d.options.Roles)
 	authRequired.Get("/options/departments", d.options.Departments)
-	authRequired.Get("/sse/notifications", handler.StreamNotifications)
+	authRequired.Get("/sse/notifications", d.casbin.RequiresPermissions([]string{"/api/v1/ldap/sync-logs:GET"}), d.sse.StreamNotifications)
 
 	rbac := authRequired.Group("", d.casbin.RoutePermission())
 
@@ -108,6 +144,7 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	users.Patch("/:id/status", d.users.ToggleStatus)
 	users.Post("/:id/reset-password", d.users.ResetPassword)
 	users.Put("/:id/roles", d.users.AssignRoles)
+	users.Put("/:id/department", d.users.SetDepartment)
 
 	departments := rbac.Group("/departments")
 	departments.Get("/tree", d.departments.Tree)
@@ -124,6 +161,7 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	roles.Get("/permission-tree", d.permissions.Tree)
 	roles.Get("/:id", d.roles.GetByID)
 	roles.Put("/:id", d.roles.Update)
+	roles.Patch("/:id/status", d.roles.ToggleStatus)
 	roles.Delete("/:id", d.roles.Delete)
 	roles.Post("/:id/permissions", d.roles.AssignPermissions)
 
@@ -144,4 +182,6 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	ldap.Post("/preview", d.ldap.Preview)
 	ldap.Post("/sync", d.ldap.Sync)
 	ldap.Get("/sync-logs", d.ldap.SyncLogs)
+	ldap.Get("/sync-logs/:id", d.ldap.SyncLog)
+	ldap.Get("/sync-plans/:id/items", d.ldap.SyncPlanItems)
 }

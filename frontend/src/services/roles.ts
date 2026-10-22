@@ -20,6 +20,7 @@ export interface PermissionDTO {
 
 export interface RoleDTO {
   id: string
+  edit_revision: number
   code: string
   name: string
   description?: string
@@ -36,17 +37,25 @@ export interface RolePayload {
   description?: string
 }
 
+export interface RoleListParams {
+  page: number
+  page_size: number
+  keyword?: string
+}
+
 export const rolesService = {
-  list: (keyword?: string) =>
-    api.get("/roles", { params: { page: 1, page_size: 100, keyword: keyword || undefined } }) as Promise<Envelope<PageData<RoleDTO>>>,
+  list: (params: RoleListParams, signal?: AbortSignal) =>
+    api.get("/roles", { params, signal }) as Promise<Envelope<PageData<RoleDTO>>>,
   create: (payload: RolePayload) =>
     api.post("/roles", payload) as Promise<Envelope<RoleDTO>>,
   update: (id: string, payload: Partial<RolePayload> & { status?: number }) =>
     api.put(`/roles/${id}`, payload) as Promise<Envelope<RoleDTO>>,
+  setStatus: (id: string, status: number, expectedRevision: number) =>
+    api.patch(`/roles/${id}/status`, { status, expected_revision: expectedRevision }) as Promise<Envelope<RoleDTO>>,
   remove: (id: string) =>
     api.delete(`/roles/${id}`) as Promise<Envelope<{ deleted: boolean }>>,
-  get: (id: string) => api.get(`/roles/${id}`) as Promise<Envelope<RoleDTO>>,
-  permissionTree: () => api.get("/roles/permission-tree") as Promise<Envelope<PermissionDTO[]>>,
-  assignPermissions: (roleId: string, permissionIds: string[]) =>
-    api.post(`/roles/${roleId}/permissions`, { permission_ids: permissionIds }) as Promise<Envelope<{ assigned: boolean }>>,
+  get: (id: string, signal?: AbortSignal) => api.get(`/roles/${id}`, { signal }) as Promise<Envelope<RoleDTO>>,
+  permissionTree: (signal?: AbortSignal) => api.get("/roles/permission-tree", { signal }) as Promise<Envelope<PermissionDTO[]>>,
+  assignPermissions: (roleId: string, permissionIds: string[], expectedRevision: number) =>
+    api.post(`/roles/${roleId}/permissions`, { permission_ids: permissionIds, expected_revision: expectedRevision }) as Promise<Envelope<{ assigned: boolean }>>,
 }

@@ -10,6 +10,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { DepartmentSelect, departmentPathLabel } from "@/components/common/department-select"
 import { UserPicker } from "@/components/common/user-picker"
+import { useConfirm } from "@/components/common/confirm-dialog"
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
 import { getErrorMessage, getFieldErrors } from "@/lib/api-error"
 import { notify } from "@/lib/notify"
 import { departmentsService, type DepartmentNode } from "@/services/departments"
@@ -22,6 +24,7 @@ export function DepartmentFormDialog({
   department,
   parentId,
   departments,
+  treeRevision,
   onSaved,
 }: {
   open: boolean
@@ -29,9 +32,11 @@ export function DepartmentFormDialog({
   department?: DepartmentNode | null
   parentId?: string | null
   departments: DepartmentNode[]
+  treeRevision: number
   onSaved?: (id: string) => void
 }) {
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
   const editing = !!department
   const [parent, setParent] = useState<string | null>(null)
   const [name, setName] = useState("")
@@ -62,10 +67,14 @@ export function DepartmentFormDialog({
 
   const codeInvalid = code.length > 0 && !CODE_PATTERN.test(code)
   const canSubmit = name.trim().length > 0 && code.trim().length >= 2 && !codeInvalid
+  const initial = [department ? department.parent_id : (parentId ?? null), department?.name ?? "", department?.code ?? "", String(department?.sort_order ?? 0), department?.leader_id ?? null, department?.phone ?? "", department?.email ?? "", (department?.status ?? 1) === 1]
+  const isDirty = open && JSON.stringify([parent, name, code, sortOrder, leaderId, phone, email, enabled]) !== JSON.stringify(initial)
+  useUnsavedChanges(isDirty, "部门表单尚未保存。离开后这些更改将丢失。")
 
   const mutation = useMutation({
     mutationFn: async () => {
       const payload = {
+        expected_revision: treeRevision,
         name: name.trim(),
         code: code.trim(),
         sort_order: Number(sortOrder) || 0,
@@ -91,8 +100,22 @@ export function DepartmentFormDialog({
     },
   })
 
+  const requestClose = async () => {
+    if (mutation.isPending) return
+    if (isDirty) {
+      const discard = await confirm({
+        tone: "default",
+        title: "放弃部门更改？",
+        description: "当前表单尚未保存，离开后这些更改将丢失。",
+        confirmText: "放弃更改",
+      })
+      if (!discard) return
+    }
+    onOpenChange(false)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(next) => !mutation.isPending && onOpenChange(next)}>
+    <Dialog open={open} onOpenChange={(next) => next ? onOpenChange(true) : void requestClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -132,12 +155,13 @@ export function DepartmentFormDialog({
             <div className="grid gap-4 sm:grid-cols-2">
               <Field data-invalid={!!fieldErrors.name || undefined}>
                 <FieldLabel htmlFor="dept-name">部门名称</FieldLabel>
-                <Input id="dept-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="如 研发中心" />
+                <Input id="dept-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="如 研发中心" aria-invalid={!!fieldErrors.name || undefined} aria-describedby={fieldErrors.name ? "dept-name-error" : undefined} />
+                {fieldErrors.name && <FieldError id="dept-name-error">请输入有效的部门名称</FieldError>}
               </Field>
               <Field data-invalid={codeInvalid || !!fieldErrors.code || undefined}>
                 <FieldLabel htmlFor="dept-code">部门编码</FieldLabel>
-                <Input id="dept-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="如 rd-center" className="font-mono" aria-invalid={codeInvalid || undefined} />
-                {codeInvalid && <FieldError>以字母开头，仅含字母、数字及 _ . : -</FieldError>}
+                <Input id="dept-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="如 rd-center" className="font-mono" aria-invalid={codeInvalid || !!fieldErrors.code || undefined} aria-describedby={codeInvalid || fieldErrors.code ? "dept-code-error" : undefined} />
+                {(codeInvalid || fieldErrors.code) && <FieldError id="dept-code-error">{codeInvalid ? "以字母开头，仅含字母、数字及 _ . : -" : "该部门编码不可用"}</FieldError>}
               </Field>
             </div>
             <Field>
@@ -160,8 +184,8 @@ export function DepartmentFormDialog({
               </Field>
               <Field data-invalid={!!fieldErrors.email || undefined}>
                 <FieldLabel htmlFor="dept-email">部门邮箱</FieldLabel>
-                <Input id="dept-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="选填" />
-                {fieldErrors.email && <FieldError>邮箱格式不正确</FieldError>}
+                <Input id="dept-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="选填" aria-invalid={!!fieldErrors.email || undefined} aria-describedby={fieldErrors.email ? "dept-email-error" : undefined} />
+                {fieldErrors.email && <FieldError id="dept-email-error">邮箱格式不正确</FieldError>}
               </Field>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -177,7 +201,7 @@ export function DepartmentFormDialog({
             </div>
           </FieldGroup>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={mutation.isPending}>
+            <Button type="button" variant="outline" onClick={() => void requestClose()} disabled={mutation.isPending}>
               取消
             </Button>
             <Button type="submit" disabled={!canSubmit || mutation.isPending}>

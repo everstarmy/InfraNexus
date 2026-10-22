@@ -59,7 +59,7 @@ func tokenFor(t *testing.T, app *fiber.App, username, password string) string {
 
 func adminToken(t *testing.T, app *fiber.App) string {
 	t.Helper()
-	return tokenFor(t, app, "admin", "admin123456")
+	return tokenFor(t, app, "admin", testAdminPassword)
 }
 
 func expectCode(t *testing.T, r apiResult, status int, code response.BusinessCode) {

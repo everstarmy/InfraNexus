@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +12,11 @@ import (
 const (
 	StatusEnabled  = 1
 	StatusDisabled = 2
+)
+
+var (
+	ErrEditRevisionConflict = errors.New("edit revision conflict")
+	ErrTreeRevisionConflict = errors.New("organization tree revision conflict")
 )
 
 // BaseEntity 领域模型通用基类，全表主键统一使用 UUID

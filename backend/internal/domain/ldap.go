@@ -20,6 +20,11 @@ const (
 	SyncModeFull        = "full"
 	SyncModeIncremental = "incremental"
 
+	SyncPhasePreparing  = "preparing"
+	SyncPhasePlanning   = "planning"
+	SyncPhaseApplying   = "applying"
+	SyncPhaseFinalizing = "finalizing"
+
 	SyncTriggerManual   = "manual"
 	SyncTriggerSchedule = "schedule"
 
@@ -73,6 +78,8 @@ type LDAPConfig struct {
 	TimeoutSeconds      int                                      `gorm:"not null" json:"timeout_seconds"`
 	SyncStatus          string                                   `gorm:"size:16;not null;default:idle" json:"sync_status"`
 	SyncStartedAt       *time.Time                               `json:"sync_started_at"`
+	SyncTaskID          *uuid.UUID                               `gorm:"type:uuid;index" json:"sync_task_id,omitempty"`
+	SyncLeaseExpiresAt  *time.Time                               `json:"sync_lease_expires_at,omitempty"`
 	LastSyncAt          *time.Time                               `json:"last_sync_at"`
 	LastSuccessAt       *time.Time                               `json:"last_success_at"`
 	HasBindPassword     bool                                     `gorm:"-" json:"has_bind_password"`
@@ -94,21 +101,28 @@ type SyncReport struct {
 	Failed             int             `json:"failed"`
 	DepartmentsCreated int             `json:"departments_created"`
 	Errors             []SyncItemError `json:"errors"`
+	ErrorsTruncated    bool            `json:"errors_truncated"`
 }
 
 type LDAPSyncLog struct {
 	BaseEntity
-	ConfigID   uuid.UUID                      `gorm:"type:uuid;not null;index" json:"config_id"`
-	Domain     string                         `gorm:"size:128;not null" json:"domain"`
-	Trigger    string                         `gorm:"size:16;not null" json:"trigger"`
-	Mode       string                         `gorm:"size:16;not null" json:"mode"`
-	Status     string                         `gorm:"size:16;not null;index" json:"status"`
-	StartedAt  time.Time                      `json:"started_at"`
-	FinishedAt *time.Time                     `json:"finished_at"`
-	DurationMs int64                          `json:"duration_ms"`
-	Report     datatypes.JSONType[SyncReport] `gorm:"type:jsonb" json:"report"`
-	Message    string                         `gorm:"size:1024" json:"message"`
-	OperatorID *uuid.UUID                     `gorm:"type:uuid" json:"operator_id"`
+	ConfigID       uuid.UUID                      `gorm:"type:uuid;not null;index;uniqueIndex:uidx_ldap_sync_idempotency,priority:1,where:idempotency_key <> ''" json:"config_id"`
+	Domain         string                         `gorm:"size:128;not null" json:"domain"`
+	Trigger        string                         `gorm:"size:16;not null" json:"trigger"`
+	Mode           string                         `gorm:"size:16;not null" json:"mode"`
+	Status         string                         `gorm:"size:16;not null;index" json:"status"`
+	StartedAt      time.Time                      `json:"started_at"`
+	FinishedAt     *time.Time                     `json:"finished_at"`
+	DurationMs     int64                          `json:"duration_ms"`
+	Report         datatypes.JSONType[SyncReport] `gorm:"type:jsonb" json:"report"`
+	Message        string                         `gorm:"size:1024" json:"message"`
+	OperatorID     *uuid.UUID                     `gorm:"type:uuid;uniqueIndex:uidx_ldap_sync_idempotency,priority:2,where:idempotency_key <> ''" json:"operator_id"`
+	RequestID      string                         `gorm:"size:128;index" json:"request_id,omitempty"`
+	PlanID         uuid.UUID                      `gorm:"type:uuid;not null;default:00000000-0000-0000-0000-000000000000;index" json:"plan_id"`
+	IdempotencyKey string                         `gorm:"size:128;uniqueIndex:uidx_ldap_sync_idempotency,priority:3,where:idempotency_key <> ''" json:"-"`
+	Phase          string                         `gorm:"size:16;not null;default:preparing" json:"phase"`
+	Processed      int                            `gorm:"not null;default:0" json:"processed"`
+	Total          *int                           `json:"total"`
 }
 
 const (
@@ -165,6 +179,13 @@ type LDAPTestResult struct {
 }
 
 type LDAPSyncRequest struct {
+	ConfigID       uuid.UUID `json:"config_id" validate:"required"`
+	Mode           string    `json:"mode" validate:"omitempty,oneof=full incremental"`
+	PlanID         uuid.UUID `json:"plan_id" validate:"required"`
+	IdempotencyKey string    `json:"idempotency_key" validate:"required,min=16,max=128"`
+}
+
+type LDAPPreviewRequest struct {
 	ConfigID uuid.UUID `json:"config_id" validate:"required"`
 	Mode     string    `json:"mode" validate:"omitempty,oneof=full incremental"`
 }
@@ -180,15 +201,22 @@ type DirectoryUser struct {
 }
 
 type SyncPlanItem struct {
-	Action     string     `json:"action"`
-	Username   string     `json:"username"`
-	Nickname   string     `json:"nickname"`
-	Email      string     `json:"email"`
-	DN         string     `json:"dn"`
-	Department string     `json:"department"`
-	UserID     *uuid.UUID `json:"user_id,omitempty"`
-	Changes    []string   `json:"changes,omitempty"`
-	Reason     string     `json:"reason,omitempty"`
+	Action     string          `json:"action"`
+	Username   string          `json:"username"`
+	Nickname   string          `json:"nickname"`
+	Email      string          `json:"email"`
+	DN         string          `json:"dn"`
+	Department string          `json:"department"`
+	UserID     *uuid.UUID      `json:"user_id,omitempty"`
+	Changes    []string        `json:"changes,omitempty"`
+	Diff       []SyncFieldDiff `json:"diff,omitempty"`
+	Reason     string          `json:"reason,omitempty"`
+}
+
+type SyncFieldDiff struct {
+	Field  string `json:"field"`
+	Before string `json:"before"`
+	After  string `json:"after"`
 }
 
 type SyncSummary struct {
@@ -203,14 +231,32 @@ type SyncSummary struct {
 }
 
 type SyncPlan struct {
+	PlanID              uuid.UUID      `json:"plan_id"`
 	ConfigID            uuid.UUID      `json:"config_id"`
 	Domain              string         `json:"domain"`
 	Mode                string         `json:"mode"`
 	GeneratedAt         time.Time      `json:"generated_at"`
+	ExpiresAt           time.Time      `json:"expires_at"`
+	ConfigRevision      time.Time      `json:"config_revision"`
 	Summary             SyncSummary    `json:"summary"`
 	Items               []SyncPlanItem `json:"items"`
 	DepartmentsToCreate []string       `json:"departments_to_create"`
 	Truncated           bool           `json:"truncated"`
+}
+
+// LDAPSyncPlanSnapshot stores the reviewed, short-lived plan. Its Items field
+// contains directory identifiers and must only be read through the LDAP detail API.
+type LDAPSyncPlanSnapshot struct {
+	BaseEntity
+	ConfigID            uuid.UUID                          `gorm:"type:uuid;not null;index" json:"config_id"`
+	OperatorID          *uuid.UUID                         `gorm:"type:uuid;index" json:"operator_id,omitempty"`
+	Mode                string                             `gorm:"size:16;not null" json:"mode"`
+	ConfigRevision      time.Time                          `gorm:"not null" json:"config_revision"`
+	Fingerprint         string                             `gorm:"size:64;not null" json:"-"`
+	ExpiresAt           time.Time                          `gorm:"not null;index" json:"expires_at"`
+	Summary             datatypes.JSONType[SyncSummary]    `gorm:"type:jsonb;not null" json:"summary"`
+	Items               datatypes.JSONType[[]SyncPlanItem] `gorm:"type:jsonb;not null" json:"-"`
+	DepartmentsToCreate datatypes.JSONType[[]string]       `gorm:"type:jsonb;not null" json:"departments_to_create"`
 }
 
 type DirectoryGateway interface {
@@ -226,11 +272,20 @@ type LDAPRepository interface {
 	CreateConfig(ctx context.Context, cfg *LDAPConfig) error
 	SaveConfig(ctx context.Context, cfg *LDAPConfig) error
 	DeleteConfig(ctx context.Context, id uuid.UUID) error
-	TryAcquireSync(ctx context.Context, id uuid.UUID, now, staleBefore time.Time) (bool, error)
-	ReleaseSync(ctx context.Context, id uuid.UUID, status string, finishedAt time.Time, successAt *time.Time) error
+	TryAcquireSync(ctx context.Context, id, taskID uuid.UUID, configRevision, now, leaseExpiresAt time.Time) (bool, error)
+	CreateSyncTask(ctx context.Context, configID uuid.UUID, configRevision, now, leaseExpiresAt time.Time, log *LDAPSyncLog) (bool, error)
+	RenewSyncLease(ctx context.Context, id, taskID uuid.UUID, now, leaseExpiresAt time.Time) (bool, error)
+	ReleaseSync(ctx context.Context, id, taskID uuid.UUID, status string, finishedAt time.Time, successAt *time.Time) (bool, error)
 	CreateLog(ctx context.Context, log *LDAPSyncLog) error
-	SaveLog(ctx context.Context, log *LDAPSyncLog) error
+	SaveLogIfOwner(ctx context.Context, log *LDAPSyncLog, now time.Time) (bool, error)
+	GetLog(ctx context.Context, id uuid.UUID) (*LDAPSyncLog, error)
+	GetLogByIdempotency(ctx context.Context, configID, operatorID uuid.UUID, key string) (*LDAPSyncLog, error)
 	ListLogs(ctx context.Context, configID *uuid.UUID, page, pageSize int) ([]LDAPSyncLog, int64, error)
+	CreatePlan(ctx context.Context, plan *LDAPSyncPlanSnapshot) error
+	GetPlan(ctx context.Context, id uuid.UUID) (*LDAPSyncPlanSnapshot, error)
+	ListPlanItems(ctx context.Context, id uuid.UUID, page, pageSize int) ([]SyncPlanItem, int64, error)
+	DeleteExpiredPlans(ctx context.Context, now time.Time) (int64, error)
+	RecoverExpiredSyncs(ctx context.Context, now time.Time) error
 }
 
 type AuthDomain struct {
@@ -245,7 +300,20 @@ type DirectoryAuthenticator interface {
 }
 
 type EventPublisher interface {
-	Publish(event string, data any)
+	Publish(ctx context.Context, event string, data any) error
+}
+
+type RealtimeEvent struct {
+	ID   string
+	Name string
+	Data []byte
+	Time time.Time
+}
+
+type SSEEventStore interface {
+	EventPublisher
+	LatestID(ctx context.Context) (string, error)
+	Read(ctx context.Context, lastID string, block time.Duration, limit int) (events []RealtimeEvent, snapshotRequired bool, err error)
 }
 
 type LDAPService interface {
@@ -256,8 +324,10 @@ type LDAPService interface {
 	UpdateConfig(ctx context.Context, id uuid.UUID, req LDAPConfigRequest) (*LDAPConfig, error)
 	DeleteConfig(ctx context.Context, id uuid.UUID) error
 	TestConnection(ctx context.Context, req LDAPTestRequest) (*LDAPTestResult, error)
-	Preview(ctx context.Context, configID uuid.UUID, mode string) (*SyncPlan, error)
-	StartSync(ctx context.Context, configID uuid.UUID, mode, trigger string, operatorID *uuid.UUID) (*LDAPSyncLog, error)
+	Preview(ctx context.Context, configID uuid.UUID, mode string, operatorID *uuid.UUID) (*SyncPlan, error)
+	ListSyncPlanItems(ctx context.Context, planID uuid.UUID, operatorID *uuid.UUID, page, pageSize int) ([]SyncPlanItem, int64, error)
+	StartSync(ctx context.Context, req LDAPSyncRequest, trigger string, operatorID *uuid.UUID) (*LDAPSyncLog, error)
+	GetSyncLog(ctx context.Context, id uuid.UUID) (*LDAPSyncLog, error)
 	RunDueSyncs(ctx context.Context, now time.Time) int
 	ListSyncLogs(ctx context.Context, configID *uuid.UUID, page, pageSize int) ([]LDAPSyncLog, int64, error)
 	Close()

@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
+	"slices"
+	"strings"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	coreerrors "infranexus/internal/core/errors"
 	"infranexus/internal/domain"
@@ -11,12 +15,14 @@ import (
 
 type roleService struct {
 	roleRepo domain.RoleRepository
+	permRepo domain.PermissionRepository
 	authz    domain.AuthorizationService
 }
 
-func NewRoleService(roleRepo domain.RoleRepository, authz domain.AuthorizationService) domain.RoleService {
+func NewRoleService(roleRepo domain.RoleRepository, permRepo domain.PermissionRepository, authz domain.AuthorizationService) domain.RoleService {
 	return &roleService{
 		roleRepo: roleRepo,
+		permRepo: permRepo,
 		authz:    authz,
 	}
 }
@@ -38,8 +44,12 @@ func (s *roleService) GetRole(ctx context.Context, id uuid.UUID) (*domain.Role, 
 }
 
 func (s *roleService) CreateRole(ctx context.Context, req domain.CreateRoleRequest) (*domain.Role, error) {
-	if existing, _ := s.roleRepo.GetByCode(ctx, req.Code); existing != nil {
+	existing, err := s.roleRepo.GetByCode(ctx, req.Code)
+	if err == nil && existing != nil {
 		return nil, coreerrors.ErrResourceConflict.WithMessage("角色代码已存在")
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 	role := domain.Role{
 		Code:        req.Code,
@@ -79,6 +89,26 @@ func (s *roleService) UpdateRole(ctx context.Context, id uuid.UUID, req domain.U
 	return s.GetRole(ctx, id)
 }
 
+func (s *roleService) ToggleStatus(ctx context.Context, id uuid.UUID, status int, expectedRevision int64) (*domain.Role, error) {
+	role, err := s.GetRole(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if role.BuiltIn && status != domain.StatusEnabled {
+		return nil, coreerrors.ErrBuiltinProtected.WithMessage("内置角色不可停用")
+	}
+	if role.EditRevision != expectedRevision {
+		return nil, coreerrors.ErrResourceConflict.WithMessage("角色状态已被其他管理员修改，请刷新后重试")
+	}
+	if err := s.roleRepo.UpdateStatus(ctx, id, status, expectedRevision); err != nil {
+		if errors.Is(err, domain.ErrEditRevisionConflict) {
+			return nil, coreerrors.ErrResourceConflict.WithMessage("角色状态已被其他管理员修改，请刷新后重试")
+		}
+		return nil, err
+	}
+	return s.GetRole(ctx, id)
+}
+
 func (s *roleService) DeleteRole(ctx context.Context, id uuid.UUID) error {
 	role, err := s.GetRole(ctx, id)
 	if err != nil {
@@ -90,15 +120,61 @@ func (s *roleService) DeleteRole(ctx context.Context, id uuid.UUID) error {
 	if err := s.roleRepo.Delete(ctx, id); err != nil {
 		return err
 	}
-	return s.authz.RemoveRolePolicies(role.Code)
+	return s.authz.RefreshIfStale(ctx)
 }
 
-func (s *roleService) AssignPermissions(ctx context.Context, roleID uuid.UUID, permissionIDs []uuid.UUID) error {
-	if _, err := s.GetRole(ctx, roleID); err != nil {
+func (s *roleService) AssignPermissions(ctx context.Context, actorRoles []string, roleID uuid.UUID, permissionIDs []uuid.UUID, expectedRevision int64) error {
+	permissionIDs = uniqueUUIDs(permissionIDs)
+	role, err := s.GetRole(ctx, roleID)
+	if err != nil {
 		return err
 	}
-	if err := s.roleRepo.AssignPermissions(ctx, roleID, permissionIDs); err != nil {
+	admin := slices.Contains(actorRoles, domain.AdminRoleCode)
+	if role.Code == domain.AdminRoleCode && !admin {
+		return coreerrors.ErrPermissionDenied.WithMessage("仅超级管理员可以修改超级管理员授权")
+	}
+	if !admin {
+		seen := make(map[uuid.UUID]struct{}, len(permissionIDs))
+		for _, permissionID := range permissionIDs {
+			if _, exists := seen[permissionID]; exists {
+				continue
+			}
+			seen[permissionID] = struct{}{}
+			permission, err := s.authzPermission(ctx, permissionID)
+			if err != nil {
+				return err
+			}
+			if permission.Type != domain.PermTypeAPI {
+				continue
+			}
+			if permission.Method == "*" || strings.Contains(permission.Path, "*") {
+				return coreerrors.ErrPermissionDenied.WithMessage("只能授予自身已有的 API 权限范围")
+			}
+			allowed, err := s.authz.HasAPIAccess(ctx, actorRoles, permission.Method, permission.Path)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return coreerrors.ErrPermissionDenied.WithMessage("只能授予自身已有的 API 权限范围")
+			}
+		}
+	}
+	if err := s.roleRepo.AssignPermissions(ctx, roleID, permissionIDs, expectedRevision); err != nil {
+		if errors.Is(err, domain.ErrEditRevisionConflict) {
+			return coreerrors.ErrResourceConflict.WithMessage("角色授权已被其他管理员修改，请刷新后比较差异")
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return coreerrors.ErrPermissionNotFound.WithMessage("部分权限点不存在")
+		}
 		return err
 	}
-	return s.authz.SyncRolePolicies(ctx, roleID)
+	return s.authz.RefreshIfStale(ctx)
+}
+
+func (s *roleService) authzPermission(ctx context.Context, id uuid.UUID) (*domain.Permission, error) {
+	permission, err := s.permRepo.GetByID(ctx, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, coreerrors.ErrPermissionNotFound
+	}
+	return permission, err
 }

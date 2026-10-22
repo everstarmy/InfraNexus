@@ -1,8 +1,8 @@
 import { api } from "./api"
-import type { DepartmentNode } from "./departments"
+import type { DepartmentTreeSnapshot } from "./departments"
 import type { Envelope, RoleRef } from "./types"
 
 export const optionsService = {
-  roles: () => api.get("/options/roles") as Promise<Envelope<RoleRef[]>>,
-  departments: () => api.get("/options/departments") as Promise<Envelope<DepartmentNode[]>>,
+  roles: (signal?: AbortSignal) => api.get("/options/roles", { signal }) as Promise<Envelope<RoleRef[]>>,
+  departments: (signal?: AbortSignal) => api.get("/options/departments", { signal }) as Promise<Envelope<DepartmentTreeSnapshot>>,
 }

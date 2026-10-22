@@ -123,3 +123,22 @@ func TestMemorySessionCustomIdleTimeout(t *testing.T) {
 		t.Fatalf("expected expiry ~%v, got %v", expectedExpiry2, s.ExpiresAt)
 	}
 }
+
+func TestMemoryGetSessionDoesNotExtendIdleExpiry(t *testing.T) {
+	repository := NewAuthRepository(nil)
+	now := time.Now()
+	session := domain.Session{
+		ID: "read-only-session", UserID: uuid.New(), AuthVersion: 1,
+		CreatedAt: now, ExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour),
+	}
+	if err := repository.SaveSession(t.Context(), session, ""); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repository.GetSession(t.Context(), session.ID)
+	if err != nil || loaded == nil {
+		t.Fatalf("GetSession() = (%+v, %v)", loaded, err)
+	}
+	if !loaded.ExpiresAt.Equal(session.ExpiresAt) {
+		t.Fatalf("read-only validation changed expiry from %v to %v", session.ExpiresAt, loaded.ExpiresAt)
+	}
+}

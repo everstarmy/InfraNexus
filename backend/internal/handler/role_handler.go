@@ -76,6 +76,27 @@ func (h *RoleHandler) Update(c fiber.Ctx) error {
 	return response.Success(c, role)
 }
 
+type ToggleRoleStatusRequest struct {
+	Status           int   `json:"status" validate:"required,oneof=1 2"`
+	ExpectedRevision int64 `json:"expected_revision" validate:"required,gt=0"`
+}
+
+func (h *RoleHandler) ToggleStatus(c fiber.Ctx) error {
+	id, err := parseIDParam(c)
+	if err != nil {
+		return err
+	}
+	var req ToggleRoleStatusRequest
+	if err := bindBody(c, &req); err != nil {
+		return err
+	}
+	role, err := h.roleSvc.ToggleStatus(c.Context(), id, req.Status, req.ExpectedRevision)
+	if err != nil {
+		return err
+	}
+	return response.Success(c, role)
+}
+
 func (h *RoleHandler) Delete(c fiber.Ctx) error {
 	id, err := parseIDParam(c)
 	if err != nil {
@@ -90,11 +111,16 @@ func (h *RoleHandler) Delete(c fiber.Ctx) error {
 }
 
 type AssignPermissionsRequest struct {
-	PermissionIDs []uuid.UUID `json:"permission_ids"`
+	PermissionIDs    []uuid.UUID `json:"permission_ids"`
+	ExpectedRevision int64       `json:"expected_revision" validate:"required,gte=1"`
 }
 
 func (h *RoleHandler) AssignPermissions(c fiber.Ctx) error {
 	id, err := parseIDParam(c)
+	if err != nil {
+		return err
+	}
+	actor, err := currentPrincipal(c)
 	if err != nil {
 		return err
 	}
@@ -104,7 +130,7 @@ func (h *RoleHandler) AssignPermissions(c fiber.Ctx) error {
 		return err
 	}
 
-	if err := h.roleSvc.AssignPermissions(c.Context(), id, req.PermissionIDs); err != nil {
+	if err := h.roleSvc.AssignPermissions(c.Context(), actor.Roles, id, req.PermissionIDs, req.ExpectedRevision); err != nil {
 		return err
 	}
 

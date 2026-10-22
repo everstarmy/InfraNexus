@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -30,6 +31,7 @@ m = g(r.sub, p.sub) && keyMatch2(r.obj, p.obj) && (r.act == p.act || p.act == "*
 
 type CasbinConfig struct {
 	Enforcer     *casbin.SyncedEnforcer
+	Authorize    func(context.Context, string, string, string) (bool, error)
 	Lookup       func(c fiber.Ctx) []string
 	SuperRole    string
 	Unauthorized fiber.Handler
@@ -91,14 +93,14 @@ func (m *Casbin) require(targets func(c fiber.Ctx) []permissionTarget) fiber.Han
 		if subjects == nil {
 			return m.config.Unauthorized(c)
 		}
-		if m.config.Enforcer == nil || len(subjects) == 0 {
+		if (m.config.Enforcer == nil && m.config.Authorize == nil) || len(subjects) == 0 {
 			return m.config.Forbidden(c)
 		}
 		if m.config.SuperRole != "" && slices.Contains(subjects, m.config.SuperRole) {
 			return c.Next()
 		}
 		for _, target := range targets(c) {
-			allowed, err := m.anyAllows(subjects, target)
+			allowed, err := m.anyAllows(c.Context(), subjects, target)
 			if err != nil {
 				return err
 			}
@@ -110,9 +112,17 @@ func (m *Casbin) require(targets func(c fiber.Ctx) []permissionTarget) fiber.Han
 	}
 }
 
-func (m *Casbin) anyAllows(subjects []string, target permissionTarget) (bool, error) {
+func (m *Casbin) anyAllows(ctx context.Context, subjects []string, target permissionTarget) (bool, error) {
 	for _, sub := range subjects {
-		ok, err := m.config.Enforcer.Enforce(sub, target.object, target.action)
+		var (
+			ok  bool
+			err error
+		)
+		if m.config.Authorize != nil {
+			ok, err = m.config.Authorize(ctx, sub, target.object, target.action)
+		} else {
+			ok, err = m.config.Enforcer.Enforce(sub, target.object, target.action)
+		}
 		if err != nil {
 			return false, err
 		}

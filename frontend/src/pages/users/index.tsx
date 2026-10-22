@@ -42,8 +42,10 @@ import { useConfirm } from "@/components/common/confirm-dialog"
 import { departmentPathLabel } from "@/components/common/department-select"
 import { ALL_KEY, DepartmentTree, UNASSIGNED_KEY } from "@/components/common/department-tree"
 import { PageHeader } from "@/components/common/page-header"
+import { QueryErrorState, QueryPlaceholderNotice, isForbiddenQueryError } from "@/components/common/query-error-state"
 import { StatCard, StatGrid } from "@/components/common/stat-card"
 import { UserAvatar } from "@/components/common/user-avatar"
+import { InlineUserNickname } from "./components/inline-user-nickname"
 import { useDebouncedValue } from "@/hooks/use-debounced-value"
 import { formatCompact, formatDateTime, formatPercent, formatRelative } from "@/lib/format"
 import { notify } from "@/lib/notify"
@@ -79,7 +81,7 @@ export default function UsersPage() {
   const [deptKey, setDeptKey] = useState<string>(ALL_KEY)
   const [includeChildren, setIncludeChildren] = useState(true)
   const [treeOpen, setTreeOpen] = useState(true)
-  const [keyword, setKeyword] = useState("")
+  const [keyword, setKeyword] = useState(() => searchParams.get("keyword") ?? "")
   const debouncedKeyword = useDebouncedValue(keyword.trim(), 300)
   const [statuses, setStatuses] = useState<string[]>([])
   const [authTypes, setAuthTypes] = useState<string[]>([])
@@ -102,16 +104,21 @@ export default function UsersPage() {
   }, [debouncedKeyword, statuses, authTypes, roleIds, deptKey, includeChildren, sorting])
 
   useEffect(() => {
-    if (searchParams.get("create") !== "1") return
-    if (can("users:create")) setFormUser("new")
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev)
-        next.delete("create")
-        return next
-      },
-      { replace: true },
-    )
+    const next = new URLSearchParams(searchParams)
+    let changed = false
+    if (next.get("create") === "1") {
+      if (can("users:create")) setFormUser("new")
+      next.delete("create")
+      changed = true
+    }
+    const requestedDetail = next.get("detail")
+    if (requestedDetail) {
+      if (can("api:GET:/api/v1/users/:id")) setDetailId(requestedDetail)
+      else notify.error("当前账号没有查看用户详情的权限")
+      next.delete("detail")
+      changed = true
+    }
+    if (changed) setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams, can])
 
   const params = useMemo<UserListParams>(
@@ -128,19 +135,19 @@ export default function UsersPage() {
     }),
     [pagination, debouncedKeyword, statuses, authTypes, roleIds, deptKey, includeChildren, sorting],
   )
-  const paramsRef = useRef(params)
-  paramsRef.current = params
+  const tableScopeKey = JSON.stringify(params)
 
   const usersQuery = useQuery({
     queryKey: queryKeys.users(params),
-    queryFn: async () => (await usersService.list(params)).data,
+    queryFn: async ({ signal }) => (await usersService.list(params, signal)).data,
     placeholderData: keepPreviousData,
   })
-  const statsQuery = useQuery({ queryKey: queryKeys.userStats, queryFn: async () => (await usersService.stats()).data })
-  const deptQuery = useQuery({ queryKey: queryKeys.departmentOptions, queryFn: async () => (await optionsService.departments()).data })
-  const rolesQuery = useQuery({ queryKey: queryKeys.roleOptions, queryFn: async () => (await optionsService.roles()).data })
+  const statsQuery = useQuery({ queryKey: queryKeys.userStats, queryFn: async ({ signal }) => (await usersService.stats(signal)).data })
+  const deptQuery = useQuery({ queryKey: queryKeys.departmentOptions, queryFn: async ({ signal }) => (await optionsService.departments(signal)).data })
+  const rolesQuery = useQuery({ queryKey: queryKeys.roleOptions, queryFn: async ({ signal }) => (await optionsService.roles(signal)).data })
 
-  const departments = useMemo(() => deptQuery.data ?? [], [deptQuery.data])
+  const departments = useMemo(() => deptQuery.data?.items ?? [], [deptQuery.data])
+  const departmentRevision = deptQuery.data?.revision ?? 0
   const roles = useMemo(() => rolesQuery.data ?? [], [rolesQuery.data])
   const stats = statsQuery.data
   const page = usersQuery.data
@@ -153,26 +160,61 @@ export default function UsersPage() {
 
   const setStatus = useCallback(
     async (user: UserDTO, enabled: boolean, silent = false) => {
-      const key = queryKeys.users(paramsRef.current)
-      const previous = queryClient.getQueryData<PageData<UserDTO>>(key)
-      queryClient.setQueryData<PageData<UserDTO>>(key, (old) =>
-        old ? { ...old, items: old.items.map((i) => (i.id === user.id ? { ...i, status: enabled ? 1 : 2 } : i)) } : old,
-      )
+      const targetStatus = enabled ? 1 : 2
+      const optimisticRevision = user.edit_revision + 1
+      const detailKey = ["users", "detail", user.id] as const
+      const detailSnapshot = queryClient.getQueryData<UserDTO>(detailKey)
+      await queryClient.cancelQueries({ queryKey: queryKeys.usersAll })
+      const cachedPages = queryClient.getQueriesData<PageData<UserDTO>>({ queryKey: ["users", "list"] })
+      const snapshots = new Map<string, UserDTO>()
+      for (const [key, page] of cachedPages) {
+        const previous = page?.items.find((item) => item.id === user.id)
+        if (!page || !previous) continue
+        snapshots.set(JSON.stringify(key), previous)
+        queryClient.setQueryData<PageData<UserDTO>>(key, {
+          ...page,
+          items: page.items.map((item) => item.id === user.id ? { ...item, status: targetStatus, edit_revision: optimisticRevision } : item),
+        })
+      }
+      if (detailSnapshot) {
+        queryClient.setQueryData<UserDTO>(detailKey, { ...detailSnapshot, status: targetStatus, edit_revision: optimisticRevision })
+      }
       try {
-        await usersService.setStatus(user.id, enabled ? 1 : 2)
+        const updated = (await usersService.setStatus(user.id, targetStatus, user.edit_revision)).data
+        for (const [key, page] of queryClient.getQueriesData<PageData<UserDTO>>({ queryKey: ["users", "list"] })) {
+          if (!page) continue
+          queryClient.setQueryData<PageData<UserDTO>>(key, {
+            ...page,
+            items: page.items.map((item) => item.id === user.id && item.edit_revision === optimisticRevision ? { ...item, ...updated } : item),
+          })
+        }
+        const currentDetail = queryClient.getQueryData<UserDTO>(detailKey)
+        if (currentDetail?.edit_revision === optimisticRevision) queryClient.setQueryData<UserDTO>(detailKey, { ...currentDetail, ...updated })
         if (!silent) {
           toast.add({
             title: enabled ? "账号已启用" : "账号已停用",
             description: enabled ? `${user.nickname || user.username} 可以重新登录` : `${user.nickname || user.username} 的会话已立即失效`,
             type: "success",
-            actionProps: { children: "撤销", onClick: () => void setStatus(user, !enabled, true) },
+            actionProps: { children: "撤销", onClick: () => void setStatus(updated, !enabled, true) },
           })
         }
       } catch (error) {
-        queryClient.setQueryData(key, previous)
+        for (const [key, page] of queryClient.getQueriesData<PageData<UserDTO>>({ queryKey: ["users", "list"] })) {
+          const previous = snapshots.get(JSON.stringify(key))
+          if (!page || !previous) continue
+          queryClient.setQueryData<PageData<UserDTO>>(key, {
+            ...page,
+            items: page.items.map((item) => item.id === user.id && item.status === targetStatus && item.edit_revision === optimisticRevision ? { ...item, status: previous.status, edit_revision: previous.edit_revision } : item),
+          })
+        }
+        const currentDetail = queryClient.getQueryData<UserDTO>(detailKey)
+        if (detailSnapshot && currentDetail?.status === targetStatus && currentDetail.edit_revision === optimisticRevision) {
+          queryClient.setQueryData<UserDTO>(detailKey, { ...currentDetail, status: detailSnapshot.status, edit_revision: detailSnapshot.edit_revision })
+        }
         notify.apiError(error, "状态更新失败")
       } finally {
         void queryClient.invalidateQueries({ queryKey: ["users"] })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.userStats })
         void queryClient.invalidateQueries({ queryKey: ["dashboard"] })
       }
     },
@@ -214,6 +256,9 @@ export default function UsersPage() {
       {
         id: "username",
         accessorKey: "username",
+        size: 280,
+        minSize: 220,
+        maxSize: 420,
         header: ({ column }) => <DataTableColumnHeader column={column} title="用户" />,
         cell: ({ row }) => {
           const u = row.original
@@ -222,7 +267,7 @@ export default function UsersPage() {
               <UserAvatar name={u.nickname || u.username} seed={u.username} />
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="truncate text-sm font-medium text-foreground">{u.nickname || u.username}</span>
+                  <InlineUserNickname user={u} editable={can("users:update")} stale={usersQuery.isPlaceholderData} />
                   {u.id === me?.id && <Badge variant="secondary" className="h-4.5 px-1.5 text-[10px]">我</Badge>}
                   {u.built_in && <BuiltinBadge />}
                 </div>
@@ -293,7 +338,7 @@ export default function UsersPage() {
         id: "status",
         accessorKey: "status",
         header: ({ column }) => <DataTableColumnHeader column={column} title="状态" />,
-        cell: ({ row }) => <StatusCell user={row.original} meId={me?.id} canToggle={can("users:status")} onToggle={setStatus} />,
+        cell: ({ row }) => <StatusCell user={row.original} meId={me?.id} canToggle={can("users:status")} stale={usersQuery.isPlaceholderData} onToggle={setStatus} />,
       },
       {
         id: "last_login_at",
@@ -313,6 +358,9 @@ export default function UsersPage() {
       },
       {
         id: "actions",
+        size: 54,
+        minSize: 54,
+        maxSize: 54,
         header: () => <span className="sr-only">操作</span>,
         enableSorting: false,
         enableHiding: false,
@@ -322,7 +370,7 @@ export default function UsersPage() {
           return (
             <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
               <DropdownMenu>
-                <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`${u.username} 的更多操作`} />}>
+                <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`${u.username} 的更多操作`} disabled={usersQuery.isPlaceholderData} />}>
                   <MoreHorizontal />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-44">
@@ -370,7 +418,7 @@ export default function UsersPage() {
         },
       },
     ],
-    [me?.id, can, departments, setStatus, handleDelete],
+    [me?.id, can, departments, setStatus, handleDelete, usersQuery.isPlaceholderData],
   )
 
   const facetedFilters: FacetedFilterConfig[] = [
@@ -409,6 +457,8 @@ export default function UsersPage() {
     deptKey === ALL_KEY ? "全部人员" : deptKey === UNASSIGNED_KEY ? "未分配部门" : departmentPathLabel(departments, deptKey) || "所选部门"
   const topDomains = stats?.by_domain.slice(0, 2).map((d) => `${d.domain} ${d.count}`).join(" · ")
   const total = stats?.total ?? 0
+  const statsUnavailable = statsQuery.isError && !stats
+  const usersForbidden = isForbiddenQueryError(usersQuery.error)
 
   return (
     <>
@@ -419,7 +469,7 @@ export default function UsersPage() {
         badge={
           <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
             <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            共 {total} 名成员 · {stats?.active ?? 0} 人正常
+            {statsUnavailable ? "用户统计暂不可用" : `共 ${total} 名成员 · ${stats?.active ?? 0} 人正常`}
           </span>
         }
         actions={
@@ -432,11 +482,20 @@ export default function UsersPage() {
         }
       />
 
+      {usersQuery.isError && usersQuery.data && (
+        <QueryErrorState error={usersQuery.error} label="用户列表" onRetry={() => void usersQuery.refetch()} retrying={usersQuery.isFetching} />
+      )}
+      {statsQuery.isError && (
+        <QueryErrorState error={statsQuery.error} label="用户统计" onRetry={() => void statsQuery.refetch()} retrying={statsQuery.isFetching} />
+      )}
+      {deptQuery.isError && <QueryErrorState error={deptQuery.error} label="部门筛选项" onRetry={() => void deptQuery.refetch()} retrying={deptQuery.isFetching} />}
+      {rolesQuery.isError && <QueryErrorState error={rolesQuery.error} label="角色筛选项" onRetry={() => void rolesQuery.refetch()} retrying={rolesQuery.isFetching} />}
+
       <StatGrid>
-        <StatCard label="用户总数" value={formatCompact(total)} icon={Users} tone="primary" loading={statsQuery.isLoading} hint={stats ? `本地 ${stats.local} · 目录同步 ${stats.directory} · 未分配部门 ${stats.unassigned}` : undefined} />
-        <StatCard label="启用中" value={formatCompact(stats?.active ?? 0)} icon={UserCheck} tone="success" loading={statsQuery.isLoading} ratio={total ? (stats?.active ?? 0) / total : 0} hint={`占全部账号 ${formatPercent(stats?.active ?? 0, total)}`} />
-        <StatCard label="已停用" value={formatCompact(stats?.disabled ?? 0)} icon={UserX} tone="default" loading={statsQuery.isLoading} ratio={total ? (stats?.disabled ?? 0) / total : 0} hint="停用账号无法登录，会话立即失效" />
-        <StatCard label="企业域账号" value={formatCompact(stats?.directory ?? 0)} icon={Building2} tone="info" loading={statsQuery.isLoading} hint={topDomains || "尚未接入企业目录"} />
+        <StatCard label="用户总数" value={statsUnavailable ? "—" : formatCompact(total)} icon={Users} tone="primary" loading={statsQuery.isLoading} hint={stats ? `本地 ${stats.local} · 目录同步 ${stats.directory} · 未分配部门 ${stats.unassigned}` : undefined} />
+        <StatCard label="启用中" value={statsUnavailable ? "—" : formatCompact(stats?.active ?? 0)} icon={UserCheck} tone="success" loading={statsQuery.isLoading} ratio={total ? (stats?.active ?? 0) / total : 0} hint={stats ? `占全部账号 ${formatPercent(stats.active, total)}` : "等待统计数据"} />
+        <StatCard label="已停用" value={statsUnavailable ? "—" : formatCompact(stats?.disabled ?? 0)} icon={UserX} tone="default" loading={statsQuery.isLoading} ratio={total ? (stats?.disabled ?? 0) / total : 0} hint="停用账号无法登录，会话立即失效" />
+        <StatCard label="企业域账号" value={statsUnavailable ? "—" : formatCompact(stats?.directory ?? 0)} icon={Building2} tone="info" loading={statsQuery.isLoading} hint={topDomains || "尚未接入企业目录"} />
       </StatGrid>
 
       <div className="grid grid-cols-12 gap-4">
@@ -459,8 +518,8 @@ export default function UsersPage() {
                 nodes={departments}
                 selectedKey={deptKey}
                 onSelect={(key) => setDeptKey(key)}
-                allItem={{ label: "全部人员", count: stats?.total }}
-                unassignedItem={{ label: "未分配部门", count: stats?.unassigned }}
+                allItem={{ label: "全部人员", count: statsUnavailable ? undefined : stats?.total }}
+                unassignedItem={{ label: "未分配部门", count: statsUnavailable ? undefined : stats?.unassigned }}
               />
             </CardContent>
           </Card>
@@ -484,11 +543,16 @@ export default function UsersPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <DataTable
+            {usersQuery.isPlaceholderData && <QueryPlaceholderNotice label="用户列表" />}
+            {usersQuery.isError && (!usersQuery.data || usersForbidden) ? (
+              <QueryErrorState error={usersQuery.error} label="用户列表" onRetry={() => void usersQuery.refetch()} retrying={usersQuery.isFetching} />
+            ) : <DataTable
               columns={columns}
               data={page?.items ?? []}
               loading={usersQuery.isLoading}
               getRowId={(u) => u.id}
+              selectionScopeKey={tableScopeKey}
+              selectionDisabled={usersQuery.isPlaceholderData}
               serverFiltering
               serverPagination={{ pageIndex: pagination.pageIndex, pageSize: pagination.pageSize, total: page?.total ?? 0, onChange: setPagination }}
               serverSorting={{ sorting, onChange: setSorting }}
@@ -497,11 +561,15 @@ export default function UsersPage() {
               facetedFilters={facetedFilters}
               columnLabels={columnLabels}
               initialColumnVisibility={{ created_at: false }}
+              initialColumnPinning={{ start: ["select", "username"], end: ["actions"] }}
+              tablePreference={me?.id ? { userId: me.id, tableId: "users", schemaVersion: 1 } : undefined}
               onRefresh={refreshAll}
               isRefreshing={usersQuery.isFetching}
-              onRowClick={(u) => setDetailId(u.id)}
+              onRowClick={(u) => !usersQuery.isPlaceholderData && setDetailId(u.id)}
               stickyActionColumn
-              batchActions={(rows, reset) =>
+              enableColumnResizing
+              enableColumnPinning
+              batchActions={!usersQuery.isPlaceholderData ? (rows, reset) =>
                 can("users:move") ? (
                   <Button
                     size="sm"
@@ -516,7 +584,7 @@ export default function UsersPage() {
                     批量调岗
                   </Button>
                 ) : null
-              }
+              : undefined}
               emptyTitle={filtersActive ? "没有符合条件的人员" : "还没有用户"}
               emptyDescription={filtersActive ? "调整筛选条件或切换左侧部门后再试" : "新建第一位成员，或在「目录同步」中从 AD / LDAP 自动导入"}
               emptyAction={
@@ -531,7 +599,7 @@ export default function UsersPage() {
                   </Button>
                 ) : undefined
               }
-            />
+            />}
           </CardContent>
         </Card>
       </div>
@@ -541,6 +609,7 @@ export default function UsersPage() {
         onOpenChange={(open) => !open && setFormUser(null)}
         user={formUser === "new" ? null : formUser}
         departments={departments}
+        treeRevision={departmentRevision}
         roles={roles}
         defaultDepartmentId={deptKey !== ALL_KEY && deptKey !== UNASSIGNED_KEY ? deptKey : null}
       />
@@ -557,6 +626,9 @@ export default function UsersPage() {
       <AssignRolesDialog
         user={rolesUser}
         roles={roles}
+        rolesLoading={rolesQuery.isLoading}
+        rolesError={rolesQuery.error}
+        onRetryRoles={() => void rolesQuery.refetch()}
         isSelf={rolesUser?.id === me?.id}
         onOpenChange={(open) => !open && setRolesUser(null)}
         onSelfChanged={() => void checkAuth()}
@@ -564,6 +636,7 @@ export default function UsersPage() {
       <MoveDepartmentDialog
         users={moveUsers}
         departments={departments}
+        treeRevision={departmentRevision}
         onOpenChange={(open) => !open && setMoveUsers([])}
         onMoved={() => {
           clearSelection.current?.()
@@ -589,11 +662,13 @@ function StatusCell({
   user,
   meId,
   canToggle,
+  stale,
   onToggle,
 }: {
   user: UserDTO
   meId?: string
   canToggle: boolean
+  stale: boolean
   onToggle: (user: UserDTO, enabled: boolean) => Promise<void>
 }) {
   const [pending, setPending] = useState(false)
@@ -603,7 +678,7 @@ function StatusCell({
     <div className="flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
       <Switch
         checked={active}
-        disabled={pending || !!reason}
+        disabled={pending || !!reason || stale}
         aria-label={active ? "停用账号" : "启用账号"}
         onCheckedChange={async (checked) => {
           setPending(true)

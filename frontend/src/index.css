@@ -8,7 +8,7 @@
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: 'Inter Variable', sans-serif;
+  --font-sans: "Inter Variable", sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -61,7 +61,7 @@
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.97 0.001 106.424);
-  --muted-foreground: oklch(0.553 0.013 58.071);
+  --muted-foreground: oklch(0.5 0.013 58.071);
   --accent: oklch(0.97 0.001 106.424);
   --accent-foreground: oklch(0.216 0.006 56.043);
   --destructive: oklch(0.577 0.245 27.325);
@@ -137,17 +137,83 @@
 @theme inline {
   --animate-attention: attention-shake 0.5s ease-in-out 1;
   --animate-soft-ping: soft-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+  --animate-skeleton-shimmer: skeleton-shimmer 1.8s ease-in-out infinite;
+  --animate-progress-indeterminate: progress-indeterminate 1.5s ease-in-out
+    infinite;
 }
 
 @keyframes attention-shake {
-  0%, 100% { transform: translateX(0); }
-  20%, 60% { transform: translateX(-3px) rotate(-4deg); }
-  40%, 80% { transform: translateX(3px) rotate(4deg); }
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-3px) rotate(-4deg);
+  }
+  40%,
+  80% {
+    transform: translateX(3px) rotate(4deg);
+  }
 }
 
 @keyframes soft-ping {
-  0% { transform: scale(1); opacity: 0.55; }
-  80%, 100% { transform: scale(1.65); opacity: 0; }
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  80%,
+  100% {
+    transform: scale(1.65);
+    opacity: 0;
+  }
+}
+
+@keyframes skeleton-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+@layer components {
+  [data-slot="skeleton"].skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+    animation: none;
+  }
+  [data-slot="skeleton"].skeleton-shimmer::after {
+    position: absolute;
+    inset: 0;
+    content: "";
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--foreground) 7%, transparent),
+      transparent
+    );
+    animation: var(--animate-skeleton-shimmer);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 :root {

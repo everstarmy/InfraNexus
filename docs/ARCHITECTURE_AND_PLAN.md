@@ -509,7 +509,10 @@ RBAC 表示经 Casbin 校验 `(role, 路由模板, Method)`，对应权限编码
 | **LDAP** | GET · POST | `/api/v1/ldap/configs` | RBAC | 目录配置列表、新建 |
 | **LDAP** | GET · PUT · DELETE | `/api/v1/ldap/configs/:id` | RBAC | 目录配置详情、编辑、删除 |
 | **LDAP** | POST | `/api/v1/ldap/test` | RBAC | 连接测试（connect → bind → search 分阶段结果） |
-| **LDAP** | POST | `/api/v1/ldap/preview` | RBAC | 同步预览（只读演算） |
-| **LDAP** | POST | `/api/v1/ldap/sync` | RBAC | 异步执行全量/增量同步，SSE 推送开始与完成 |
-| **LDAP** | GET | `/api/v1/ldap/sync-logs` | RBAC | 同步日志与报告 |
-| **SSE** | GET | `/api/v1/sse/notifications` | Session/JWT | 实时系统通知长链接通道 |
+| **LDAP** | POST | `/api/v1/ldap/preview` | RBAC | 检查目录并持久化 10 分钟计划；返回变更摘要与预览 |
+| **LDAP** | POST | `/api/v1/ldap/sync` | RBAC | 以 `plan_id` 和 `idempotency_key` 消费已审阅计划；过期或数据变化返回 409 |
+| **LDAP** | GET | `/api/v1/ldap/sync-logs` · `/sync-logs/:id` | RBAC | 查询持久化任务快照与摘要 |
+| **LDAP** | GET | `/api/v1/ldap/sync-plans/:id/items` | RBAC + 详情权限 | 分页读取 Before/After 明细；与任务摘要权限分离 |
+| **SSE** | GET | `/api/v1/sse/notifications` | Session/JWT + 日志读取权限 | Redis Stream 实时事件；支持 `Last-Event-ID`、断档快照恢复与会话/权限复核 |
+
+LDAP 请求字段、冲突语义、敏感明细权限和 SSE 事件负载见 [API 行为与实时事件契约](API.md)。发布验证矩阵与当前可量化限制见 [M6 发布验证记录](RELEASE_VALIDATION.md)。

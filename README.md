@@ -86,18 +86,29 @@ InfraNexus/
 - **Go**: 1.27+
 - **Node.js**: 20+ (推荐 22+) 与 npm
 
-### 2. 启动后端开发服务
+### 2. 首次初始化管理员
+服务启动不会创建公开默认密码账号。首次安装先显式提供一次性口令：
 ```bash
-# 方式 A：使用根目录 Makefile
-make dev-backend
-
-# 方式 B：手动进入 backend 目录
 cd backend
-go run cmd/server/main.go
+INFRANEXUS_BOOTSTRAP_ADMIN_PASSWORD='请替换为强口令' go run ./cmd/server bootstrap-admin
 ```
-> **提示**：默认采用 SQLite 驱动（自动在 `backend/data/infranexus.db` 创建数据文件），无需预先安装外部数据库即可直接启动！服务监听端口为 `http://127.0.0.1:8080`。
 
-### 3. 启动前端开发服务
+该命令只在 `admin` 账号不存在时创建管理员；再次执行不会重置已有密码。遗失密码时使用已登录的密码重置流程。生产环境还必须设置独立的 `APP_JWT_SECRET` 和 `APP_SECURITY_ENCRYPTION_KEY`。
+
+从旧版本升级且管理员可能仍使用公开的演示口令时，升级后立即显式轮换并撤销旧凭据：
+```bash
+INFRANEXUS_BOOTSTRAP_ADMIN_PASSWORD='新的强口令' go run ./cmd/server rotate-admin-password
+```
+此命令只操作已存在的内置本地 `admin` 账号；它会递增认证版本，使旧 Session 与令牌失效。服务重启不会执行口令轮换。
+
+### 3. 启动后端开发服务
+```bash
+make dev-backend
+# 或在 backend/ 中运行：go run ./cmd/server
+```
+> 默认采用 SQLite 驱动（自动在 `backend/data/infranexus.db` 创建数据文件），无需预先安装外部数据库。服务监听 `http://127.0.0.1:8080`。
+
+### 4. 启动前端开发服务
 ```bash
 # 方式 A：使用根目录 Makefile
 make dev-frontend
@@ -108,29 +119,36 @@ npm run dev
 ```
 > 前端默认访问地址为 `http://127.0.0.1:5173`。
 
-### 4. 默认管理员登录凭据
-- **用户名**：`admin`
-- **初始密码**：`admin123456`
+管理员用户名为 `admin`，初始化口令由部署者自行设置。
 
 ---
 
 ## 🧪 自动化测试验证
 
-运行后端单元测试与完整 E2E 认证生命周期集成测试：
+后端默认使用临时 SQLite 测试数据库。运行完整测试、竞争检测和静态检查：
 ```bash
-# 运行全部测试
-make test
-
-# 或进入 backend 目录指定测试
 cd backend
-go test -v ./internal/bootstrap
+go test -count=1 -p=1 ./...
+go test -race -count=1 -p=1 ./...
+go vet ./...
 ```
 
-构建前端生产 Bundle 并运行前端单元测试：
+PostgreSQL/Redis 集成矩阵需要指向**空白、隔离、可丢弃**的测试服务；测试会创建和修改表、状态及事件，不要连接生产或共享开发实例：
 ```bash
-make build-frontend
-npm --prefix frontend test
+cd backend
+INFRANEXUS_TEST_POSTGRES_DSN='postgres://<user>:<password>@127.0.0.1:5432/<isolated_test_db>?sslmode=disable' \
+INFRANEXUS_TEST_REDIS_ADDR='127.0.0.1:6379' \
+go test -race -count=1 -p=1 ./...
 ```
+
+前端单测、生产构建、浏览器回归与性能采样：
+```bash
+npm --prefix frontend test
+npm --prefix frontend run build
+npm --prefix frontend run test:e2e
+npm --prefix frontend run test:perf
+```
+Playwright 首次运行前，在 `frontend/` 执行 `npx playwright install chromium`。`test:perf` 会重新构建并测量 1,000/10,000 部门节点、500 条 LDAP 预览和过滤响应；它是基线采样，不是虚拟化已达标的承诺。
 
 ---
 
@@ -140,6 +158,9 @@ npm --prefix frontend test
 - [具体系统架构与实现方案 (ARCHITECTURE_AND_PLAN.md)](docs/ARCHITECTURE_AND_PLAN.md)
 - [问题处理与前端交互改造方案（2026-10-22）](docs/REMEDIATION_AND_UX_PLAN.md)
 - [任务跟踪看板 (TODOLIST.md)](docs/TODOLIST.md)
+- [API 行为与实时事件契约 (API.md)](docs/API.md)
+- [M6 发布验证记录 (RELEASE_VALIDATION.md)](docs/RELEASE_VALIDATION.md)
+- [数据库迁移与升级操作](docs/MIGRATION_OPERATIONS.md)
 
 ## 认证部署配置
 `security.trusted_origins` 是可携带凭据的精确 Web 来源列表，同时用于 Cookie 写请求的 Origin/Referer 校验；不得使用 `*`。生产 `session.secure` 强制为 true，建议经 HTTPS 同源部署。`session.max_age` 为空闲有效期，`session.absolute_max_age` 为绝对有效期。登录/Token 获取限流为单进程实现，多实例需另行部署分布式限流。浏览器只使用 Cookie；CLI 使用 `/api/v1/auth/token`、`/api/v1/auth/refresh` 和 Bearer Header。注销只撤销当前会话或令牌族。

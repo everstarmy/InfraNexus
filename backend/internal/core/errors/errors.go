@@ -17,6 +17,13 @@ type DomainError struct {
 	Err        error
 }
 
+type Classification struct {
+	HTTPStatus int
+	BizCode    response.BusinessCode
+	Message    string
+	Cause      error
+}
+
 func (e *DomainError) Error() string {
 	if e.Err != nil {
 		return e.Message + ": " + e.Err.Error()
@@ -53,6 +60,21 @@ func NewDomainError(httpStatus int, bizCode response.BusinessCode, message strin
 	}
 }
 
+// Classify maps an error without writing to the response, so middleware and the
+// global handler can report the same status without invoking response handling twice.
+func Classify(err error) Classification {
+	if domainErr, ok := errors.AsType[*DomainError](err); ok {
+		return Classification{HTTPStatus: domainErr.HTTPStatus, BizCode: domainErr.BizCode, Message: domainErr.Message, Cause: domainErr.Err}
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return Classification{HTTPStatus: ErrResourceConflict.HTTPStatus, BizCode: ErrResourceConflict.BizCode, Message: ErrResourceConflict.Message, Cause: err}
+	}
+	if fiberErr, ok := errors.AsType[*fiber.Error](err); ok {
+		return Classification{HTTPStatus: fiberErr.Code, BizCode: response.BusinessCode(fiberErr.Code * 1000), Message: fiberErr.Message, Cause: err}
+	}
+	return Classification{HTTPStatus: fiber.StatusInternalServerError, BizCode: response.CodeInternalError, Message: "系统内部繁忙，请稍后重试", Cause: err}
+}
+
 // 常见业务领域预定义错误
 var (
 	ErrUnauthorized             = NewDomainError(fiber.StatusUnauthorized, response.CodeTokenExpired, "认证凭据无效或已过期")
@@ -66,6 +88,7 @@ var (
 	ErrRoleNotFound             = NewDomainError(fiber.StatusNotFound, response.CodeRoleNotFound, "目标角色不存在")
 	ErrResourceConflict         = NewDomainError(fiber.StatusConflict, response.CodeResourceConflict, "资源已存在或唯一性冲突")
 	ErrInternalDatabase         = NewDomainError(fiber.StatusInternalServerError, response.CodeDatabaseError, "数据库执行异常")
+	ErrAuthorizationUnavailable = NewDomainError(fiber.StatusServiceUnavailable, response.CodeAuthorizationUnavailable, "权限策略暂不可用")
 	ErrSessionRevoked           = NewDomainError(fiber.StatusUnauthorized, response.CodeSessionRevoked, "会话已失效，请重新登录")
 	ErrPasswordTooWeak          = NewDomainError(fiber.StatusBadRequest, response.CodePasswordTooWeak, "密码强度不足：至少 8 位，且包含大写字母、小写字母、数字、符号中的 3 类")
 	ErrDepartmentNotFound       = NewDomainError(fiber.StatusNotFound, response.CodeDepartmentNotFound, "目标部门不存在")
@@ -78,26 +101,17 @@ var (
 	ErrDomainNotFound           = NewDomainError(fiber.StatusBadRequest, response.CodeDomainNotFound, "认证域不存在或未启用")
 	ErrDomainInvalidCredentials = NewDomainError(fiber.StatusUnauthorized, response.CodeInvalidCredentials, "域认证账号或密码错误")
 	ErrDirectoryConfigNotFound  = NewDomainError(fiber.StatusNotFound, response.CodeDirectoryConfigNotFound, "目录配置不存在")
+	ErrDirectorySyncNotFound    = NewDomainError(fiber.StatusNotFound, response.CodeDirectorySyncNotFound, "目录同步任务或计划不存在")
 	ErrSyncInProgress           = NewDomainError(fiber.StatusConflict, response.CodeSyncInProgress, "该目录正在同步，请稍后再试")
 	ErrDirectoryUnavailable     = NewDomainError(fiber.StatusBadGateway, response.CodeDirectoryUnavailable, "目录服务暂不可用，请稍后重试或联系管理员")
 )
 
 // GlobalErrorHandler Fiber 全局错误拦截器
 func GlobalErrorHandler(c fiber.Ctx, err error) error {
-	var domainErr *DomainError
-	if errors.As(err, &domainErr) {
-		return response.Error(c, domainErr.HTTPStatus, domainErr.BizCode, domainErr.Message, domainErr.Data)
+	classified := Classify(err)
+	var data any
+	if domainErr, ok := errors.AsType[*DomainError](err); ok {
+		data = domainErr.Data
 	}
-
-	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		return response.Error(c, ErrResourceConflict.HTTPStatus, ErrResourceConflict.BizCode, ErrResourceConflict.Message)
-	}
-
-	var fiberErr *fiber.Error
-	if errors.As(err, &fiberErr) {
-		return response.Error(c, fiberErr.Code, response.BusinessCode(fiberErr.Code*1000), fiberErr.Message)
-	}
-
-	// 未知错误
-	return response.Error(c, fiber.StatusInternalServerError, response.CodeInternalError, "系统内部繁忙，请稍后重试")
+	return response.Error(c, classified.HTTPStatus, classified.BizCode, classified.Message, data)
 }

@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,25 +18,45 @@ import (
 	"gorm.io/gorm"
 
 	coreerrors "infranexus/internal/core/errors"
+	"infranexus/internal/core/requestmeta"
 	"infranexus/internal/core/secret"
 	"infranexus/internal/domain"
 )
 
 const (
-	syncLockStaleAfter = 2 * time.Hour
-	previewItemLimit   = 500
-	reportErrorLimit   = 200
+	syncLeaseDuration       = 30 * time.Second
+	syncHeartbeatInterval   = 10 * time.Second
+	syncProgressMinInterval = 500 * time.Millisecond
+	ldapSyncPlanTTL         = 10 * time.Minute
+	previewItemLimit        = 500
+	reportErrorLimit        = 200
 )
 
+var errSyncLeaseLost = errors.New("directory sync lease lost")
+
+func syncErrorCode(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, coreerrors.ErrDirectoryUnavailable):
+		return "directory_unavailable"
+	case errors.Is(err, domain.ErrEditRevisionConflict):
+		return "revision_conflict"
+	default:
+		return "sync_failed"
+	}
+}
+
 type LDAPServiceDeps struct {
-	Repo        domain.LDAPRepository
-	Users       domain.UserRepository
-	Roles       domain.RoleRepository
-	Departments domain.DepartmentRepository
-	Gateway     domain.DirectoryGateway
-	Cipher      *secret.Cipher
-	Events      domain.EventPublisher
-	Logger      *slog.Logger
+	Repo         domain.LDAPRepository
+	Users        domain.UserRepository
+	Roles        domain.RoleRepository
+	Departments  domain.DepartmentRepository
+	Organization domain.OrganizationUnitOfWork
+	Gateway      domain.DirectoryGateway
+	Cipher       *secret.Cipher
+	Events       domain.EventPublisher
+	Logger       *slog.Logger
 }
 
 type ldapService struct {
@@ -56,9 +80,11 @@ func (s *ldapService) Close() {
 	s.wg.Wait()
 }
 
-func (s *ldapService) publish(event string, data any) {
+func (s *ldapService) publish(ctx context.Context, event string, data any) {
 	if s.Events != nil {
-		s.Events.Publish(event, data)
+		if err := s.Events.Publish(ctx, event, data); err != nil {
+			s.Logger.WarnContext(ctx, "Publish directory event failed", "event", event, "error_type", fmt.Sprintf("%T", err))
+		}
 	}
 }
 
@@ -358,51 +384,73 @@ func (s *ldapService) provision(ctx context.Context, cfg *domain.LDAPConfig, du 
 }
 
 func (s *ldapService) apply(ctx context.Context, cfg *domain.LDAPConfig, resolver *departmentResolver, p plannedUser) (*domain.User, error) {
-	var deptID *uuid.UUID
-	if p.target != nil && (p.item.Action == domain.SyncActionCreate || containsChange(p.item.Changes, "department")) {
-		id, err := resolver.ensure(ctx, p.target)
+	var updated *domain.User
+	apply := func(writeCtx context.Context) error {
+		var deptID *uuid.UUID
+		if p.target != nil && (p.item.Action == domain.SyncActionCreate || containsChange(p.item.Changes, "department")) {
+			id, err := resolver.ensure(writeCtx, p.target)
+			if err != nil {
+				return err
+			}
+			deptID = id
+		}
+		switch p.item.Action {
+		case domain.SyncActionCreate:
+			user := domain.User{
+				Username:     p.item.Username,
+				Domain:       cfg.Domain,
+				AuthType:     cfg.Type,
+				ExternalID:   p.dir.ExternalID,
+				Email:        p.values["email"].(string),
+				Nickname:     p.dir.Nickname,
+				Status:       domain.StatusEnabled,
+				DepartmentID: deptID,
+			}
+			if err := s.Users.Create(writeCtx, &user); err != nil {
+				return err
+			}
+			if cfg.DefaultRoleID != nil {
+				if err := s.Users.AssignRoles(writeCtx, user.ID, []uuid.UUID{*cfg.DefaultRoleID}); err != nil {
+					return err
+				}
+			}
+			var err error
+			updated, err = s.Users.GetByID(writeCtx, user.ID)
+			return err
+		case domain.SyncActionUpdate, domain.SyncActionDisable:
+			values := make(map[string]any, len(p.values)+1)
+			for k, v := range p.values {
+				values[k] = v
+			}
+			if containsChange(p.item.Changes, "department") {
+				values["department_id"] = deptID
+			}
+			if len(values) > 0 {
+				if err := s.Users.UpdateColumnsCAS(writeCtx, p.local.ID, p.local.EditRevision, values); err != nil {
+					return err
+				}
+			}
+			var err error
+			updated, err = s.Users.GetByID(writeCtx, p.local.ID)
+			return err
+		default:
+			updated = p.local
+			return nil
+		}
+	}
+
+	departmentWrite := (p.item.Action == domain.SyncActionCreate && p.target != nil) || containsChange(p.item.Changes, "department")
+	if departmentWrite && s.Organization != nil {
+		_, err := s.Organization.Write(ctx, nil, apply)
 		if err != nil {
 			return nil, err
 		}
-		deptID = id
+		return updated, nil
 	}
-	switch p.item.Action {
-	case domain.SyncActionCreate:
-		user := domain.User{
-			Username:     p.item.Username,
-			Domain:       cfg.Domain,
-			AuthType:     cfg.Type,
-			ExternalID:   p.dir.ExternalID,
-			Email:        p.values["email"].(string),
-			Nickname:     p.dir.Nickname,
-			Status:       domain.StatusEnabled,
-			DepartmentID: deptID,
-		}
-		if err := s.Users.Create(ctx, &user); err != nil {
-			return nil, err
-		}
-		if cfg.DefaultRoleID != nil {
-			if err := s.Users.AssignRoles(ctx, user.ID, []uuid.UUID{*cfg.DefaultRoleID}); err != nil {
-				return nil, err
-			}
-		}
-		return s.Users.GetByID(ctx, user.ID)
-	case domain.SyncActionUpdate, domain.SyncActionDisable:
-		values := make(map[string]any, len(p.values)+1)
-		for k, v := range p.values {
-			values[k] = v
-		}
-		if deptID != nil {
-			values["department_id"] = *deptID
-		}
-		if len(values) > 0 {
-			if err := s.Users.UpdateColumns(ctx, p.local.ID, values); err != nil {
-				return nil, err
-			}
-		}
-		return s.Users.GetByID(ctx, p.local.ID)
+	if err := apply(ctx); err != nil {
+		return nil, err
 	}
-	return p.local, nil
+	return updated, nil
 }
 
 func containsChange(changes []string, change string) bool {
@@ -414,10 +462,60 @@ func containsChange(changes []string, change string) bool {
 	return false
 }
 
-func (s *ldapService) plan(ctx context.Context, cfg *domain.LDAPConfig, mode string, resolver departmentLookup) ([]plannedUser, domain.SyncSummary, []string, error) {
+type syncLocalRevision struct {
+	ID           uuid.UUID  `json:"id"`
+	EditRevision int64      `json:"edit_revision"`
+	Username     string     `json:"username"`
+	ExternalID   string     `json:"external_id"`
+	Email        string     `json:"email"`
+	Nickname     string     `json:"nickname"`
+	Status       int        `json:"status"`
+	DepartmentID *uuid.UUID `json:"department_id"`
+}
+
+func syncPlanFingerprint(cfg *domain.LDAPConfig, mode string, directory []domain.DirectoryUser, locals []domain.User, planned []plannedUser) (string, error) {
+	directory = append([]domain.DirectoryUser(nil), directory...)
+	sort.Slice(directory, func(i, j int) bool {
+		if directory[i].DN != directory[j].DN {
+			return directory[i].DN < directory[j].DN
+		}
+		if directory[i].ExternalID != directory[j].ExternalID {
+			return directory[i].ExternalID < directory[j].ExternalID
+		}
+		return directory[i].Username < directory[j].Username
+	})
+	localRevisions := make([]syncLocalRevision, 0, len(locals))
+	for _, user := range locals {
+		localRevisions = append(localRevisions, syncLocalRevision{
+			ID: user.ID, EditRevision: user.EditRevision, Username: user.Username,
+			ExternalID: user.ExternalID, Email: user.Email, Nickname: user.Nickname,
+			Status: user.Status, DepartmentID: user.DepartmentID,
+		})
+	}
+	sort.Slice(localRevisions, func(i, j int) bool { return localRevisions[i].ID.String() < localRevisions[j].ID.String() })
+	items := make([]domain.SyncPlanItem, 0, len(planned))
+	for _, p := range planned {
+		items = append(items, p.item)
+	}
+	payload := struct {
+		Mode           string                 `json:"mode"`
+		ConfigRevision time.Time              `json:"config_revision"`
+		Directory      []domain.DirectoryUser `json:"directory"`
+		Locals         []syncLocalRevision    `json:"locals"`
+		Items          []domain.SyncPlanItem  `json:"items"`
+	}{mode, cfg.UpdatedAt, directory, localRevisions, items}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func (s *ldapService) plan(ctx context.Context, cfg *domain.LDAPConfig, mode string, resolver departmentLookup) ([]plannedUser, domain.SyncSummary, []string, string, error) {
 	bindPassword, err := s.bindPassword(cfg)
 	if err != nil {
-		return nil, domain.SyncSummary{}, nil, err
+		return nil, domain.SyncSummary{}, nil, "", err
 	}
 	var since *time.Time
 	if mode == domain.SyncModeIncremental {
@@ -425,17 +523,22 @@ func (s *ldapService) plan(ctx context.Context, cfg *domain.LDAPConfig, mode str
 	}
 	directory, err := s.Gateway.SearchUsers(ctx, cfg, bindPassword, since)
 	if err != nil {
-		return nil, domain.SyncSummary{}, nil, directoryFailure(s.Logger, cfg, err)
+		return nil, domain.SyncSummary{}, nil, "", directoryFailure(s.Logger, cfg, err)
 	}
 	locals, err := s.Users.ListByDomain(ctx, cfg.Domain)
 	if err != nil {
-		return nil, domain.SyncSummary{}, nil, err
+		return nil, domain.SyncSummary{}, nil, "", err
 	}
 	owners, err := s.Users.EmailOwners(ctx)
 	if err != nil {
-		return nil, domain.SyncSummary{}, nil, err
+		return nil, domain.SyncSummary{}, nil, "", err
 	}
-	return buildSyncPlan(ctx, syncInputs{cfg: cfg, mode: mode, directory: directory, locals: locals, emailOwners: owners, departments: resolver})
+	planned, summary, departments, err := buildSyncPlan(ctx, syncInputs{cfg: cfg, mode: mode, directory: directory, locals: locals, emailOwners: owners, departments: resolver})
+	if err != nil {
+		return nil, summary, nil, "", err
+	}
+	fingerprint, err := syncPlanFingerprint(cfg, mode, directory, locals, planned)
+	return planned, summary, departments, fingerprint, err
 }
 
 func normalizeMode(mode string) string {
@@ -445,41 +548,122 @@ func normalizeMode(mode string) string {
 	return domain.SyncModeFull
 }
 
-func (s *ldapService) Preview(ctx context.Context, configID uuid.UUID, mode string) (*domain.SyncPlan, error) {
+func syncLogStartResponse(log *domain.LDAPSyncLog) *domain.LDAPSyncLog {
+	copy := *log
+	report := log.Report.Data()
+	report.Errors = nil
+	copy.Report = datatypes.NewJSONType(report)
+	if copy.Status == domain.SyncStatusFailed && copy.Message != "" {
+		copy.Message = "同步失败，请通过授权的任务详情接口查看诊断"
+	}
+	return &copy
+}
+
+func (s *ldapService) Preview(ctx context.Context, configID uuid.UUID, mode string, operatorID *uuid.UUID) (*domain.SyncPlan, error) {
 	cfg, err := s.Repo.GetConfig(ctx, configID)
 	if err != nil {
 		return nil, notFoundAs(err, coreerrors.ErrDirectoryConfigNotFound)
 	}
 	mode = normalizeMode(mode)
-	planned, summary, toCreate, err := s.plan(ctx, cfg, mode, newDepartmentResolver(s.Departments))
+	planned, summary, toCreate, fingerprint, err := s.plan(ctx, cfg, mode, newDepartmentResolver(s.Departments))
 	if err != nil {
 		return nil, err
 	}
-	result := &domain.SyncPlan{ConfigID: cfg.ID, Domain: cfg.Domain, Mode: mode, GeneratedAt: s.now(), Summary: summary, DepartmentsToCreate: toCreate, Items: []domain.SyncPlanItem{}}
-	for _, p := range planned {
-		if len(result.Items) >= previewItemLimit {
-			result.Truncated = true
-			break
-		}
-		result.Items = append(result.Items, p.item)
+	now := s.now()
+	if _, err := s.Repo.DeleteExpiredPlans(ctx, now); err != nil {
+		s.Logger.WarnContext(ctx, "Delete expired LDAP plans failed", "error", err)
 	}
-	return result, nil
+	items := make([]domain.SyncPlanItem, 0, len(planned))
+	for _, item := range planned {
+		items = append(items, item.item)
+	}
+	plan := &domain.LDAPSyncPlanSnapshot{
+		BaseEntity: domain.BaseEntity{ID: uuid.New()},
+		ConfigID:   cfg.ID, OperatorID: operatorID, Mode: mode,
+		ConfigRevision: cfg.UpdatedAt, Fingerprint: fingerprint, ExpiresAt: now.Add(ldapSyncPlanTTL),
+		Summary: datatypes.NewJSONType(summary), Items: datatypes.NewJSONType(items),
+		DepartmentsToCreate: datatypes.NewJSONType(toCreate),
+	}
+	if err := s.Repo.CreatePlan(ctx, plan); err != nil {
+		return nil, err
+	}
+	return &domain.SyncPlan{
+		PlanID: plan.ID, ConfigID: cfg.ID, Domain: cfg.Domain, Mode: mode,
+		GeneratedAt: now, ExpiresAt: plan.ExpiresAt, ConfigRevision: cfg.UpdatedAt,
+		Summary: summary, DepartmentsToCreate: toCreate, Items: []domain.SyncPlanItem{},
+		Truncated: len(items) > 0,
+	}, nil
 }
 
-func (s *ldapService) StartSync(ctx context.Context, configID uuid.UUID, mode, trigger string, operatorID *uuid.UUID) (*domain.LDAPSyncLog, error) {
-	cfg, err := s.Repo.GetConfig(ctx, configID)
+func (s *ldapService) ListSyncPlanItems(ctx context.Context, planID uuid.UUID, operatorID *uuid.UUID, page, pageSize int) ([]domain.SyncPlanItem, int64, error) {
+	plan, err := s.Repo.GetPlan(ctx, planID)
+	if err != nil {
+		return nil, 0, notFoundAs(err, coreerrors.ErrDirectorySyncNotFound)
+	}
+	if operatorID == nil || plan.OperatorID == nil || *operatorID != *plan.OperatorID {
+		return nil, 0, coreerrors.ErrPermissionDenied
+	}
+	if !plan.ExpiresAt.After(s.now()) {
+		return nil, 0, coreerrors.ErrResourceConflict.WithMessage("预览计划已过期，请重新生成预览")
+	}
+	items, total, err := s.Repo.ListPlanItems(ctx, planID, page, pageSize)
+	return items, total, err
+}
+
+func (s *ldapService) StartSync(ctx context.Context, req domain.LDAPSyncRequest, trigger string, operatorID *uuid.UUID) (*domain.LDAPSyncLog, error) {
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	if req.PlanID == uuid.Nil {
+		return nil, coreerrors.ErrParamInvalid.WithMessage("请先生成并确认有效的同步预览")
+	}
+	if trigger == domain.SyncTriggerManual && (operatorID == nil || len(req.IdempotencyKey) < 16 || len(req.IdempotencyKey) > 128) {
+		return nil, coreerrors.ErrParamInvalid.WithMessage("同步请求需要有效的幂等请求 ID")
+	}
+	if operatorID != nil && req.IdempotencyKey != "" {
+		previous, err := s.Repo.GetLogByIdempotency(ctx, req.ConfigID, *operatorID, req.IdempotencyKey)
+		if err == nil {
+			if previous.PlanID != req.PlanID {
+				return nil, coreerrors.ErrResourceConflict.WithMessage("幂等请求 ID 已用于其他同步计划")
+			}
+			return syncLogStartResponse(previous), nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+
+	plan, err := s.Repo.GetPlan(ctx, req.PlanID)
+	if err != nil {
+		return nil, notFoundAs(err, coreerrors.ErrDirectorySyncNotFound)
+	}
+	if plan.ConfigID != req.ConfigID || (req.Mode != "" && normalizeMode(req.Mode) != plan.Mode) {
+		return nil, coreerrors.ErrResourceConflict.WithMessage("同步请求与已确认的预览计划不匹配")
+	}
+	if (operatorID == nil) != (plan.OperatorID == nil) || (operatorID != nil && *operatorID != *plan.OperatorID) {
+		return nil, coreerrors.ErrPermissionDenied
+	}
+	if !plan.ExpiresAt.After(s.now()) {
+		return nil, coreerrors.ErrResourceConflict.WithMessage("预览计划已过期，请重新生成预览")
+	}
+	cfg, err := s.Repo.GetConfig(ctx, plan.ConfigID)
 	if err != nil {
 		return nil, notFoundAs(err, coreerrors.ErrDirectoryConfigNotFound)
 	}
-	now := s.now()
-	acquired, err := s.Repo.TryAcquireSync(ctx, cfg.ID, now, now.Add(-syncLockStaleAfter))
+	if !cfg.UpdatedAt.Equal(plan.ConfigRevision) {
+		return nil, coreerrors.ErrResourceConflict.WithMessage("目录配置在预览后已变化，请重新生成预览")
+	}
+	mode := plan.Mode
+	planned, summary, _, fingerprint, err := s.plan(ctx, cfg, mode, newDepartmentResolver(s.Departments))
 	if err != nil {
 		return nil, err
 	}
-	if !acquired {
-		return nil, coreerrors.ErrSyncInProgress
+	if fingerprint != plan.Fingerprint {
+		return nil, coreerrors.ErrResourceConflict.WithMessage("目录或本地资料在预览后已变化，请重新生成预览")
 	}
+	now := s.now()
+	taskID := uuid.New()
+	total := len(planned)
 	log := &domain.LDAPSyncLog{
+		BaseEntity: domain.BaseEntity{ID: taskID},
 		ConfigID:   cfg.ID,
 		Domain:     cfg.Domain,
 		Trigger:    trigger,
@@ -487,34 +671,203 @@ func (s *ldapService) StartSync(ctx context.Context, configID uuid.UUID, mode, t
 		Status:     domain.SyncStatusRunning,
 		StartedAt:  now,
 		OperatorID: operatorID,
-		Report:     datatypes.NewJSONType(domain.SyncReport{Errors: []domain.SyncItemError{}}),
+		RequestID:  requestmeta.RequestID(ctx),
+		PlanID:     plan.ID, IdempotencyKey: req.IdempotencyKey,
+		Phase: domain.SyncPhasePreparing, Processed: 0,
+		Report: datatypes.NewJSONType(domain.SyncReport{Errors: []domain.SyncItemError{}}),
 	}
-	if err := s.Repo.CreateLog(ctx, log); err != nil {
-		_ = s.Repo.ReleaseSync(ctx, cfg.ID, domain.SyncStatusFailed, now, nil)
+	if trigger == domain.SyncTriggerSchedule {
+		log.IdempotencyKey = ""
+	}
+	acquired, err := s.Repo.CreateSyncTask(ctx, cfg.ID, plan.ConfigRevision, now, now.Add(syncLeaseDuration), log)
+	if err != nil {
 		return nil, err
 	}
-	s.publish("ldap.sync.started", map[string]any{"config_id": cfg.ID, "log_id": log.ID, "domain": cfg.Domain, "mode": log.Mode, "trigger": trigger})
+	if !acquired {
+		if operatorID != nil && req.IdempotencyKey != "" {
+			previous, findErr := s.Repo.GetLogByIdempotency(ctx, req.ConfigID, *operatorID, req.IdempotencyKey)
+			if findErr == nil {
+				if previous.PlanID != req.PlanID {
+					return nil, coreerrors.ErrResourceConflict.WithMessage("幂等请求 ID 已用于其他同步计划")
+				}
+				return syncLogStartResponse(previous), nil
+			}
+			if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return nil, findErr
+			}
+		}
+		latest, getErr := s.Repo.GetConfig(ctx, cfg.ID)
+		if getErr == nil && !latest.UpdatedAt.Equal(plan.ConfigRevision) {
+			return nil, coreerrors.ErrResourceConflict.WithMessage("目录配置在预览后已变化，请重新生成预览")
+		}
+		return nil, coreerrors.ErrSyncInProgress
+	}
+	log.Total = nil
+	s.publish(ctx, "ldap.sync.started", map[string]any{
+		"schema_version": 1, "event_id": uuid.NewString(), "task_id": log.ID, "phase": domain.SyncPhasePreparing,
+		"mode": log.Mode, "trigger": trigger, "timestamp": now,
+	})
 	started := *log
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.runSync(cfg, log)
+		s.runSync(cfg, log, planned, summary, total)
 	}()
 	return &started, nil
 }
 
-func (s *ldapService) runSync(cfg *domain.LDAPConfig, log *domain.LDAPSyncLog) {
-	ctx := s.ctx
-	report, err := s.executeSync(ctx, cfg, log.Mode)
+func (s *ldapService) GetSyncLog(ctx context.Context, id uuid.UUID) (*domain.LDAPSyncLog, error) {
+	log, err := s.Repo.GetLog(ctx, id)
+	return log, notFoundAs(err, coreerrors.ErrDirectorySyncNotFound)
+}
+
+func (s *ldapService) runSync(cfg *domain.LDAPConfig, log *domain.LDAPSyncLog, planned []plannedUser, summary domain.SyncSummary, total int) {
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		ticker := time.NewTicker(syncHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				leaseCtx, leaseCancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+				leaseNow := s.now()
+				owned, err := s.Repo.RenewSyncLease(leaseCtx, cfg.ID, log.ID, leaseNow, leaseNow.Add(syncLeaseDuration))
+				leaseCancel()
+				if err != nil {
+					s.Logger.WarnContext(ctx, "Renew LDAP sync lease failed", "task_id", log.ID, "error", err)
+					continue
+				}
+				if !owned {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	defer func() {
+		cancel()
+		<-heartbeatDone
+	}()
+
+	report := domain.SyncReport{Total: summary.Total, Errors: []domain.SyncItemError{}}
+	resolver := newDepartmentResolver(s.Departments)
+	lastPersist := time.Time{}
+	persistProgress := func(phase string, processed int, force bool) error {
+		now := s.now()
+		if !force && !lastPersist.IsZero() && now.Sub(lastPersist) < syncProgressMinInterval {
+			return nil
+		}
+		log.Phase = phase
+		log.Processed = processed
+		log.Total = &total
+		log.Report = datatypes.NewJSONType(report)
+		persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		owned, err := s.Repo.SaveLogIfOwner(persistCtx, log, now)
+		persistCancel()
+		if err != nil {
+			return err
+		}
+		if !owned {
+			return errSyncLeaseLost
+		}
+		lastPersist = now
+		s.publish(ctx, "ldap.sync.progress", map[string]any{
+			"schema_version": 1, "event_id": uuid.NewString(), "task_id": log.ID,
+			"phase": phase, "processed": processed, "total": &total, "timestamp": now,
+			"created": report.Created, "updated": report.Updated, "unchanged": report.Unchanged,
+			"disabled": report.Disabled, "skipped": report.Skipped, "failed": report.Failed,
+		})
+		return nil
+	}
+
+	if err := persistProgress(domain.SyncPhaseApplying, 0, true); err != nil {
+		s.Logger.WarnContext(ctx, "LDAP sync lost task lease before apply", "task_id", log.ID)
+		return
+	}
+	processed := 0
+	progressInterval := len(planned) / 20
+	if progressInterval < 1 {
+		progressInterval = 1
+	}
+	fail := func(p plannedUser, reason string) {
+		report.Failed++
+		if len(report.Errors) < reportErrorLimit {
+			report.Errors = append(report.Errors, domain.SyncItemError{Username: p.item.Username, DN: p.item.DN, Reason: reason})
+		} else {
+			report.ErrorsTruncated = true
+		}
+	}
+	var runErr error
+	for _, p := range planned {
+		if ctx.Err() != nil {
+			runErr = fmt.Errorf("同步被中断：%w", ctx.Err())
+			break
+		}
+		switch p.item.Action {
+		case domain.SyncActionUnchanged:
+			report.Unchanged++
+		case domain.SyncActionSkip:
+			report.Skipped++
+		case domain.SyncActionConflict:
+			fail(p, p.item.Reason)
+		default:
+			leaseNow := s.now()
+			owned, err := s.Repo.RenewSyncLease(ctx, cfg.ID, log.ID, leaseNow, leaseNow.Add(syncLeaseDuration))
+			if err != nil {
+				runErr = err
+				break
+			}
+			if !owned {
+				runErr = errSyncLeaseLost
+				break
+			}
+			if _, err := s.apply(ctx, cfg, resolver, p); err != nil {
+				reason := err.Error()
+				if errors.Is(err, domain.ErrEditRevisionConflict) {
+					reason = "本地资料在同步过程中被修改，未覆盖该记录"
+				}
+				fail(p, reason)
+			} else {
+				switch p.item.Action {
+				case domain.SyncActionCreate:
+					report.Created++
+				case domain.SyncActionUpdate:
+					report.Updated++
+				case domain.SyncActionDisable:
+					report.Disabled++
+				}
+			}
+		}
+		if runErr != nil {
+			break
+		}
+		processed++
+		if processed%progressInterval == 0 || processed == len(planned) {
+			if err := persistProgress(domain.SyncPhaseApplying, processed, false); err != nil {
+				runErr = err
+				break
+			}
+		}
+	}
+	if errors.Is(runErr, errSyncLeaseLost) {
+		s.Logger.WarnContext(ctx, "LDAP sync stopped after losing task lease", "task_id", log.ID)
+		return
+	}
+	report.DepartmentsCreated = resolver.created
 	finished := s.now()
 	log.FinishedAt = &finished
 	log.DurationMs = finished.Sub(log.StartedAt).Milliseconds()
 	log.Report = datatypes.NewJSONType(report)
 	var successAt *time.Time
 	switch {
-	case err != nil:
+	case runErr != nil:
 		log.Status = domain.SyncStatusFailed
-		log.Message = err.Error()
+		log.Message = runErr.Error()
 	case report.Failed > 0:
 		log.Status = domain.SyncStatusPartial
 		successAt = &log.StartedAt
@@ -522,64 +875,43 @@ func (s *ldapService) runSync(cfg *domain.LDAPConfig, log *domain.LDAPSyncLog) {
 		log.Status = domain.SyncStatusSuccess
 		successAt = &log.StartedAt
 	}
-	persist := context.WithoutCancel(ctx)
-	if saveErr := s.Repo.SaveLog(persist, log); saveErr != nil {
-		s.Logger.Error("Persist directory sync log failed", "domain", cfg.Domain, "error", saveErr)
+	log.Phase = domain.SyncPhaseFinalizing
+	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	owned, saveErr := s.Repo.SaveLogIfOwner(persistCtx, log, finished)
+	released := false
+	if saveErr == nil && owned {
+		released, saveErr = s.Repo.ReleaseSync(persistCtx, cfg.ID, log.ID, log.Status, finished, successAt)
 	}
-	if relErr := s.Repo.ReleaseSync(persist, cfg.ID, log.Status, finished, successAt); relErr != nil {
-		s.Logger.Error("Release directory sync lock failed", "domain", cfg.Domain, "error", relErr)
+	persistCancel()
+	if saveErr != nil || !owned || !released {
+		s.Logger.Error("Persist LDAP sync terminal state failed", "task_id", log.ID, "operator_id", log.OperatorID, "request_id", log.RequestID, "error", saveErr)
+		return
 	}
-	s.Logger.Info("Directory sync finished", "domain", cfg.Domain, "status", log.Status, "created", report.Created, "updated", report.Updated, "failed", report.Failed)
-	s.publish("ldap.sync.finished", map[string]any{"config_id": cfg.ID, "log_id": log.ID, "domain": cfg.Domain, "status": log.Status, "report": report, "message": log.Message})
-}
-
-func (s *ldapService) executeSync(ctx context.Context, cfg *domain.LDAPConfig, mode string) (domain.SyncReport, error) {
-	report := domain.SyncReport{Errors: []domain.SyncItemError{}}
-	resolver := newDepartmentResolver(s.Departments)
-	planned, summary, _, err := s.plan(ctx, cfg, mode, resolver)
-	if err != nil {
-		return report, err
-	}
-	report.Total = summary.Total
-	fail := func(p plannedUser, reason string) {
-		report.Failed++
-		if len(report.Errors) < reportErrorLimit {
-			report.Errors = append(report.Errors, domain.SyncItemError{Username: p.item.Username, DN: p.item.DN, Reason: reason})
-		}
-	}
-	for _, p := range planned {
-		if ctx.Err() != nil {
-			return report, fmt.Errorf("同步被中断：%w", ctx.Err())
-		}
-		switch p.item.Action {
-		case domain.SyncActionUnchanged:
-			report.Unchanged++
-			continue
-		case domain.SyncActionSkip:
-			report.Skipped++
-			continue
-		case domain.SyncActionConflict:
-			fail(p, p.item.Reason)
-			continue
-		}
-		if _, err := s.apply(ctx, cfg, resolver, p); err != nil {
-			fail(p, err.Error())
-			continue
-		}
-		switch p.item.Action {
-		case domain.SyncActionCreate:
-			report.Created++
-		case domain.SyncActionUpdate:
-			report.Updated++
-		case domain.SyncActionDisable:
-			report.Disabled++
-		}
-	}
-	report.DepartmentsCreated = resolver.created
-	return report, nil
+	s.Logger.Info("Directory sync finished", "task_id", log.ID, "operator_id", log.OperatorID, "request_id", log.RequestID, "domain", cfg.Domain, "status", log.Status, "created", report.Created, "updated", report.Updated, "failed", report.Failed)
+	s.publish(ctx, "ldap.sync.progress", map[string]any{
+		"schema_version": 1, "event_id": uuid.NewString(), "task_id": log.ID,
+		"phase": domain.SyncPhaseFinalizing, "processed": processed, "total": &total,
+		"timestamp": finished, "created": report.Created, "updated": report.Updated,
+		"unchanged": report.Unchanged, "disabled": report.Disabled, "skipped": report.Skipped,
+		"failed": report.Failed, "error_code": syncErrorCode(runErr),
+	})
+	s.publish(ctx, "ldap.sync.finished", map[string]any{
+		"schema_version": 1, "event_id": uuid.NewString(), "task_id": log.ID,
+		"phase": domain.SyncPhaseFinalizing, "status": log.Status, "timestamp": finished,
+		"created": report.Created, "updated": report.Updated, "unchanged": report.Unchanged,
+		"disabled": report.Disabled, "skipped": report.Skipped, "failed": report.Failed,
+		"error_code": syncErrorCode(runErr), "message_code": "sync_result_available",
+	})
 }
 
 func (s *ldapService) RunDueSyncs(ctx context.Context, now time.Time) int {
+	actualNow := s.now()
+	if err := s.Repo.RecoverExpiredSyncs(ctx, actualNow); err != nil {
+		s.Logger.Error("Recover expired directory sync tasks failed", "error", err)
+	}
+	if _, err := s.Repo.DeleteExpiredPlans(ctx, actualNow); err != nil {
+		s.Logger.Error("Delete expired directory sync plans failed", "error", err)
+	}
 	configs, err := s.Repo.ListConfigs(ctx)
 	if err != nil {
 		s.Logger.Error("List directory configs for scheduler failed", "error", err)
@@ -593,7 +925,13 @@ func (s *ldapService) RunDueSyncs(ctx context.Context, now time.Time) int {
 		if cfg.LastSyncAt != nil && now.Sub(*cfg.LastSyncAt) < time.Duration(cfg.SyncIntervalMinutes)*time.Minute {
 			continue
 		}
-		if _, err := s.StartSync(ctx, cfg.ID, domain.SyncModeFull, domain.SyncTriggerSchedule, nil); err != nil {
+		plan, err := s.Preview(ctx, cfg.ID, domain.SyncModeFull, nil)
+		if err != nil {
+			s.Logger.Error("Scheduled directory sync preview failed", "domain", cfg.Domain, "error", err)
+			continue
+		}
+		req := domain.LDAPSyncRequest{ConfigID: cfg.ID, Mode: plan.Mode, PlanID: plan.PlanID, IdempotencyKey: uuid.NewString()}
+		if _, err := s.StartSync(ctx, req, domain.SyncTriggerSchedule, nil); err != nil {
 			if !errors.Is(err, coreerrors.ErrSyncInProgress) {
 				s.Logger.Error("Scheduled directory sync failed to start", "domain", cfg.Domain, "error", err)
 			}
@@ -605,7 +943,22 @@ func (s *ldapService) RunDueSyncs(ctx context.Context, now time.Time) int {
 }
 
 func (s *ldapService) ListSyncLogs(ctx context.Context, configID *uuid.UUID, page, pageSize int) ([]domain.LDAPSyncLog, int64, error) {
-	return s.Repo.ListLogs(ctx, configID, page, pageSize)
+	if err := s.Repo.RecoverExpiredSyncs(ctx, s.now()); err != nil {
+		s.Logger.WarnContext(ctx, "Recover expired directory sync tasks while listing failed", "error", err)
+	}
+	logs, total, err := s.Repo.ListLogs(ctx, configID, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range logs {
+		report := logs[i].Report.Data()
+		report.Errors = nil
+		logs[i].Report = datatypes.NewJSONType(report)
+		if logs[i].Status == domain.SyncStatusFailed && logs[i].Message != "" {
+			logs[i].Message = "同步失败，请打开任务详情查看诊断"
+		}
+	}
+	return logs, total, nil
 }
 
 func RunDirectoryScheduler(ctx context.Context, svc domain.LDAPService, tick time.Duration, log *slog.Logger) {

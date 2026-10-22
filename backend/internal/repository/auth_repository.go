@@ -28,6 +28,7 @@ type tokenFamily struct {
 type sessionWire struct {
 	ID                string `json:"id"`
 	UserID            string `json:"user_id"`
+	AuthVersion       int64  `json:"auth_version"`
 	CreatedAt         int64  `json:"created_at"`
 	ExpiresAt         int64  `json:"expires_at"`
 	AbsoluteExpiresAt int64  `json:"absolute_expires_at"`
@@ -35,13 +36,14 @@ type sessionWire struct {
 }
 
 func toWire(s domain.Session) sessionWire {
-	return sessionWire{s.ID, s.UserID.String(), s.CreatedAt.UnixMilli(), s.ExpiresAt.UnixMilli(), s.AbsoluteExpiresAt.UnixMilli(), s.IdleTimeout}
+	return sessionWire{ID: s.ID, UserID: s.UserID.String(), AuthVersion: s.AuthVersion, CreatedAt: s.CreatedAt.UnixMilli(), ExpiresAt: s.ExpiresAt.UnixMilli(), AbsoluteExpiresAt: s.AbsoluteExpiresAt.UnixMilli(), IdleTimeout: s.IdleTimeout}
 }
 func fromWire(w sessionWire) (domain.Session, error) {
 	id, err := uuid.Parse(w.UserID)
 	return domain.Session{
 		ID:                w.ID,
 		UserID:            id,
+		AuthVersion:       w.AuthVersion,
 		CreatedAt:         time.UnixMilli(w.CreatedAt),
 		ExpiresAt:         time.UnixMilli(w.ExpiresAt),
 		AbsoluteExpiresAt: time.UnixMilli(w.AbsoluteExpiresAt),
@@ -83,6 +85,43 @@ func (r *authRepository) SaveSession(ctx context.Context, s domain.Session, oldI
 		return ErrAuthStore
 	}
 	return saveSessionScript.Run(ctx, r.redis, []string{sessionKey(s.ID), sessionKey(oldID)}, oldID, data, ttl.Milliseconds()).Err()
+}
+
+// GetSession reads session state without extending its idle expiry. Streaming
+// authorization checks must not keep an otherwise idle browser session alive.
+func (r *authRepository) GetSession(ctx context.Context, id string) (*domain.Session, error) {
+	if id == "" {
+		return nil, nil
+	}
+	if r.redis == nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		session, ok := r.sessions[id]
+		if !ok || !time.Now().Before(session.ExpiresAt) || !time.Now().Before(session.AbsoluteExpiresAt) {
+			return nil, nil
+		}
+		return &session, nil
+	}
+	raw, err := r.redis.Get(ctx, sessionKey(id)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var wire sessionWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return nil, err
+	}
+	session, err := fromWire(wire)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	if !now.Before(session.ExpiresAt) || !now.Before(session.AbsoluteExpiresAt) {
+		return nil, nil
+	}
+	return &session, nil
 }
 
 // Session records from older versions lack millisecond expiry fields. Reject

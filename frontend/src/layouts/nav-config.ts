@@ -105,6 +105,10 @@ export const navItems = navGroups.flatMap((group) =>
   group.items.flatMap((item) => (item.children ? [item, ...item.children] : [item]))
 )
 
+export const pageNavItems = navGroups.flatMap((group) =>
+  group.items.flatMap((item) => item.children ?? [item])
+)
+
 export function findNavByPath(pathname: string) {
   for (const group of navGroups) {
     for (const item of group.items) {

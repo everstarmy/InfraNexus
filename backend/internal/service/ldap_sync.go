@@ -156,7 +156,7 @@ func buildSyncPlan(ctx context.Context, in syncInputs) ([]plannedUser, domain.Sy
 	for email, id := range in.emailOwners {
 		owners[strings.ToLower(email)] = id
 	}
-	summary := domain.SyncSummary{Total: len(in.directory)}
+	summary := domain.SyncSummary{}
 	toCreate := make([]string, 0)
 	seenCreate := make(map[string]bool)
 	seenNames := make(map[string]bool)
@@ -292,6 +292,9 @@ func buildSyncPlan(ctx context.Context, in syncInputs) ([]plannedUser, domain.Sy
 			})
 		}
 	}
+	for i := range planned {
+		planned[i].item.Diff = syncFieldDiffs(planned[i])
+	}
 
 	for _, p := range planned {
 		switch p.item.Action {
@@ -309,8 +312,57 @@ func buildSyncPlan(ctx context.Context, in syncInputs) ([]plannedUser, domain.Sy
 			summary.Conflict++
 		}
 	}
+	summary.Total = len(planned)
 	summary.DepartmentsToCreate = len(toCreate)
 	return planned, summary, toCreate, nil
+}
+
+func syncFieldDiffs(p plannedUser) []domain.SyncFieldDiff {
+	diffs := make([]domain.SyncFieldDiff, 0, len(p.item.Changes)+4)
+	add := func(field, before, after string) {
+		if before != after {
+			diffs = append(diffs, domain.SyncFieldDiff{Field: field, Before: before, After: after})
+		}
+	}
+	switch p.item.Action {
+	case domain.SyncActionCreate:
+		add("username", "", p.item.Username)
+		add("nickname", "", p.dir.Nickname)
+		if email, ok := p.values["email"].(string); ok {
+			add("email", "", email)
+		}
+		if p.target != nil {
+			add("department", "未分配", p.item.Department)
+		}
+		add("status", "不存在", "启用")
+	case domain.SyncActionDisable:
+		add("status", "启用", "停用")
+	case domain.SyncActionUpdate:
+		if p.local == nil {
+			return diffs
+		}
+		for _, change := range p.item.Changes {
+			switch change {
+			case "username":
+				add(change, p.local.Username, p.item.Username)
+			case "nickname":
+				add(change, p.local.Nickname, p.dir.Nickname)
+			case "email":
+				add(change, p.local.Email, p.dir.Email)
+			case "external_id":
+				add(change, p.local.ExternalID, p.dir.ExternalID)
+			case "department":
+				before := "未分配"
+				if p.local.DepartmentID != nil {
+					before = p.local.DepartmentID.String()
+				}
+				add(change, before, p.item.Department)
+			case "status":
+				add(change, "启用", "停用")
+			}
+		}
+	}
+	return diffs
 }
 
 type departmentResolver struct {

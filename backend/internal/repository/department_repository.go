@@ -70,27 +70,37 @@ func (r *departmentRepository) ListSubtree(ctx context.Context, treePath string)
 }
 
 func (r *departmentRepository) Move(ctx context.Context, id uuid.UUID, parentID *uuid.UUID, oldPath, newPath string) error {
-	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&domain.Department{}).Where("id = ?", id).Updates(map[string]any{
-			"parent_id": parentID,
-			"tree_path": newPath,
-		}).Error; err != nil {
-			return err
-		}
-		return tx.Exec(
-			"UPDATE departments SET tree_path = ? || SUBSTR(tree_path, ?) WHERE tree_path LIKE ?",
-			newPath, len(oldPath)+1, oldPath+"/%",
-		).Error
+	tx := r.DB(ctx)
+	result := tx.Model(&domain.Department{}).Where("id = ? AND tree_path = ?", id, oldPath).Updates(map[string]any{
+		"parent_id":     parentID,
+		"tree_path":     newPath,
+		"edit_revision": gorm.Expr("edit_revision + 1"),
 	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return domain.ErrTreeRevisionConflict
+	}
+	return tx.Model(&domain.Department{}).
+		Where("tree_path LIKE ?", oldPath+"/%").
+		Updates(map[string]any{
+			"tree_path":     gorm.Expr("? || SUBSTR(tree_path, ?)", newPath, len(oldPath)+1),
+			"edit_revision": gorm.Expr("edit_revision + 1"),
+		}).Error
 }
 
 func (r *departmentRepository) Reorder(ctx context.Context, items []domain.DepartmentOrder) error {
-	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, item := range items {
-			if err := tx.Model(&domain.Department{}).Where("id = ?", item.ID).Update("sort_order", item.SortOrder).Error; err != nil {
-				return err
-			}
+	for _, item := range items {
+		result := r.DB(ctx).Model(&domain.Department{}).
+			Where("id = ?", item.ID).
+			Updates(map[string]any{"sort_order": item.SortOrder, "edit_revision": gorm.Expr("edit_revision + 1")})
+		if result.Error != nil {
+			return result.Error
 		}
-		return nil
-	})
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+	}
+	return nil
 }

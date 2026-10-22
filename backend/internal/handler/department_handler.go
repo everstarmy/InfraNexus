@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"strconv"
+
 	"github.com/gofiber/fiber/v3"
 
+	coreerrors "infranexus/internal/core/errors"
 	"infranexus/internal/core/response"
 	"infranexus/internal/domain"
 )
@@ -72,7 +75,18 @@ func (h *DepartmentHandler) Move(c fiber.Ctx) error {
 	if err := bindBody(c, &req); err != nil {
 		return err
 	}
-	dept, err := h.deptSvc.Move(c.Context(), id, req.ParentID)
+	var dept *domain.Department
+	if req.TargetID != nil {
+		if req.Position == "" || req.ParentID != nil {
+			return coreerrors.ErrParamInvalid.WithMessage("相对移动需要 target_id 和 position，不能同时指定 parent_id")
+		}
+		dept, err = h.deptSvc.MoveRelative(c.Context(), id, *req.TargetID, req.Position, req.ExpectedRevision)
+	} else {
+		if req.Position != "" {
+			return coreerrors.ErrParamInvalid.WithMessage("position 需要配合 target_id 使用")
+		}
+		dept, err = h.deptSvc.Move(c.Context(), id, req.ParentID, req.ExpectedRevision)
+	}
 	if err != nil {
 		return err
 	}
@@ -84,7 +98,7 @@ func (h *DepartmentHandler) Reorder(c fiber.Ctx) error {
 	if err := bindBody(c, &req); err != nil {
 		return err
 	}
-	if err := h.deptSvc.Reorder(c.Context(), req.Items); err != nil {
+	if err := h.deptSvc.Reorder(c.Context(), req.Items, req.ExpectedRevision); err != nil {
 		return err
 	}
 	return response.Success(c, fiber.Map{"reordered": len(req.Items)})
@@ -95,7 +109,11 @@ func (h *DepartmentHandler) Delete(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.deptSvc.Delete(c.Context(), id); err != nil {
+	expectedRevision, err := strconv.ParseInt(c.Query("expected_revision"), 10, 64)
+	if err != nil || expectedRevision < 1 {
+		return coreerrors.ErrParamInvalid.WithMessage("expected_revision 必须为正整数")
+	}
+	if err := h.deptSvc.Delete(c.Context(), id, expectedRevision); err != nil {
 		return err
 	}
 	return response.Success(c, fiber.Map{"deleted": true})

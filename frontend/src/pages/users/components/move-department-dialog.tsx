@@ -7,7 +7,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { DepartmentSelect, departmentPathLabel } from "@/components/common/department-select"
+import { useConfirm } from "@/components/common/confirm-dialog"
 import { UserAvatar } from "@/components/common/user-avatar"
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
 import { notify } from "@/lib/notify"
 import type { DepartmentNode } from "@/services/departments"
 import type { UserDTO } from "@/services/types"
@@ -16,15 +18,18 @@ import { usersService } from "@/services/users"
 export function MoveDepartmentDialog({
   users,
   departments,
+  treeRevision,
   onOpenChange,
   onMoved,
 }: {
   users: UserDTO[]
   departments: DepartmentNode[]
+  treeRevision: number
   onOpenChange: (open: boolean) => void
   onMoved?: () => void
 }) {
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
   const [target, setTarget] = useState<string | null>(null)
   const open = users.length > 0
 
@@ -32,8 +37,11 @@ export function MoveDepartmentDialog({
     if (open) setTarget(null)
   }, [open])
 
+  const isDirty = open && target !== null
+  useUnsavedChanges(isDirty, "人员调岗方案尚未执行。离开后目标部门选择将丢失。")
+
   const mutation = useMutation({
-    mutationFn: () => usersService.batchMove(users.map((u) => u.id), target!),
+    mutationFn: () => usersService.batchMove(users.map((u) => u.id), target!, treeRevision),
     onSuccess: (res) => {
       notify.success("调岗完成", `已将 ${res.data.moved} 名人员调整至「${departmentPathLabel(departments, target)}」`)
       void queryClient.invalidateQueries({ queryKey: ["users"] })
@@ -47,8 +55,22 @@ export function MoveDepartmentDialog({
 
   const directoryCount = users.filter((u) => u.auth_type !== "local").length
 
+  const requestClose = async () => {
+    if (mutation.isPending) return
+    if (isDirty) {
+      const discard = await confirm({
+        tone: "default",
+        title: "放弃调岗方案？",
+        description: `已为 ${users.length} 名人员选择目标部门，尚未执行。`,
+        confirmText: "放弃方案",
+      })
+      if (!discard) return
+    }
+    onOpenChange(false)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(next) => !mutation.isPending && onOpenChange(next)}>
+    <Dialog open={open} onOpenChange={(next) => next ? onOpenChange(true) : void requestClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -81,10 +103,10 @@ export function MoveDepartmentDialog({
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={mutation.isPending}>
+          <Button variant="outline" onClick={() => void requestClose()} disabled={mutation.isPending}>
             取消
           </Button>
-          <Button onClick={() => mutation.mutate()} disabled={!target || mutation.isPending}>
+          <Button onClick={() => mutation.mutate()} disabled={!target || treeRevision < 1 || mutation.isPending}>
             {mutation.isPending && <Spinner />}
             确认调岗
           </Button>

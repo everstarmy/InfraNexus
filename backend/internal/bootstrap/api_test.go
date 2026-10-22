@@ -18,6 +18,8 @@ import (
 	"infranexus/internal/core/response"
 )
 
+const testAdminPassword = "Admin!23456"
+
 func setupTestApp(t *testing.T) (*AppContainer, *fiber.App, func()) {
 	tempDir, err := os.MkdirTemp("", "infranexus_api_test_*")
 	if err != nil {
@@ -73,6 +75,9 @@ func setupTestApp(t *testing.T) (*AppContainer, *fiber.App, func()) {
 	if err := Seed(container.DB, logger); err != nil {
 		t.Fatalf("Seed failed: %v", err)
 	}
+	if err := BootstrapAdmin(container.DB, testAdminPassword, logger); err != nil {
+		t.Fatalf("BootstrapAdmin failed: %v", err)
+	}
 
 	fiberApp, err := NewFiberApp(container)
 	if err != nil {
@@ -101,10 +106,10 @@ func TestE2E_FullAuthAndUserLifecycle(t *testing.T) {
 		t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 	}
 
-	// 2. 测试登录 (默认种子管理员 admin / admin123456)
+	// 2. 测试登录 (测试专用的一次性管理员凭据)
 	loginBody, _ := json.Marshal(map[string]string{
 		"username": "admin",
-		"password": "admin123456",
+		"password": testAdminPassword,
 	})
 	req = httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(loginBody))
 	req.Header.Set("Content-Type", "application/json")

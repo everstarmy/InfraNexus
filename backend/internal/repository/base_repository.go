@@ -11,11 +11,25 @@ type BaseRepository[T any, ID comparable] struct {
 	db *gorm.DB
 }
 
+type transactionContextKey struct{}
+
+func contextWithTransaction(ctx context.Context, tx *gorm.DB) context.Context {
+	return context.WithValue(ctx, transactionContextKey{}, tx)
+}
+
+func transactionFromContext(ctx context.Context) *gorm.DB {
+	tx, _ := ctx.Value(transactionContextKey{}).(*gorm.DB)
+	return tx
+}
+
 func NewBaseRepository[T any, ID comparable](db *gorm.DB) *BaseRepository[T, ID] {
 	return &BaseRepository[T, ID]{db: db}
 }
 
 func (r *BaseRepository[T, ID]) DB(ctx context.Context) *gorm.DB {
+	if tx := transactionFromContext(ctx); tx != nil {
+		return tx.WithContext(ctx)
+	}
 	return r.db.WithContext(ctx)
 }
 

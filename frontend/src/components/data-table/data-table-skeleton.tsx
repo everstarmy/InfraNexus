@@ -20,18 +20,19 @@ export function DataTableSkeleton({
   showCheckbox = true,
 }: DataTableSkeletonProps) {
   return (
-    <div className="overflow-hidden rounded-md border bg-card">
+    <div className="overflow-hidden rounded-md border bg-card" role="status" aria-label="正在加载表格数据" aria-busy="true">
+      <span className="sr-only">正在加载表格数据…</span>
       <Table>
         <TableHeader className="bg-muted/40">
           <TableRow>
             {showCheckbox && (
               <TableHead className="w-10 px-3">
-                <Skeleton className="size-4 rounded-xs" />
+                <Skeleton className="skeleton-shimmer size-4 rounded-xs" />
               </TableHead>
             )}
             {Array.from({ length: columnCount }).map((_, i) => (
               <TableHead key={i} className="h-10 px-3">
-                <Skeleton className="h-4 w-24" />
+                <Skeleton className="skeleton-shimmer h-4 w-24" />
               </TableHead>
             ))}
           </TableRow>
@@ -47,7 +48,7 @@ export function DataTableSkeleton({
               {Array.from({ length: columnCount }).map((_, colIndex) => (
                 <TableCell key={colIndex} className="p-3">
                   <Skeleton
-                    className={`h-4 ${
+                    className={`skeleton-shimmer h-4 ${
                       colIndex === 0 ? "w-32" : colIndex === 1 ? "w-24" : "w-16"
                     }`}
                   />

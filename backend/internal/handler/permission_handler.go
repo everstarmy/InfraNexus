@@ -40,11 +40,15 @@ func (h *PermissionHandler) Update(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	actor, err := currentPrincipal(c)
+	if err != nil {
+		return err
+	}
 	var req domain.PermissionRequest
 	if err := bindBody(c, &req); err != nil {
 		return err
 	}
-	perm, err := h.permSvc.Update(c.Context(), id, req)
+	perm, err := h.permSvc.Update(c.Context(), actor.Roles, id, req)
 	if err != nil {
 		return err
 	}

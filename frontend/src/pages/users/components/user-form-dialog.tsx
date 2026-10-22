@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { DepartmentSelect } from "@/components/common/department-select"
+import { useConfirm } from "@/components/common/confirm-dialog"
 import { PasswordStrength } from "@/components/common/password-strength"
 import { getErrorMessage, getFieldErrors } from "@/lib/api-error"
 import { notify } from "@/lib/notify"
@@ -18,18 +19,23 @@ import { cn } from "@/lib/utils"
 import type { DepartmentNode } from "@/services/departments"
 import type { RoleRef, UserDTO } from "@/services/types"
 import { usersService } from "@/services/users"
+import { useAuth } from "@/stores/auth-context"
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
 
 interface UserFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   user?: UserDTO | null
   departments: DepartmentNode[]
+  treeRevision: number
   roles: RoleRef[]
   defaultDepartmentId?: string | null
 }
 
-export function UserFormDialog({ open, onOpenChange, user, departments, roles, defaultDepartmentId }: UserFormDialogProps) {
+export function UserFormDialog({ open, onOpenChange, user, departments, treeRevision, roles, defaultDepartmentId }: UserFormDialogProps) {
   const queryClient = useQueryClient()
+  const { can } = useAuth()
+  const confirm = useConfirm()
   const editing = !!user
   const [username, setUsername] = useState("")
   const [email, setEmail] = useState("")
@@ -52,13 +58,23 @@ export function UserFormDialog({ open, onOpenChange, user, departments, roles, d
     setFormError("")
   }, [open, user, defaultDepartmentId])
 
+  const initialDepartmentId = user ? (user.department_id ?? null) : (defaultDepartmentId ?? null)
+  const isDirty = open && (
+    username !== (user?.username ?? "") ||
+    email !== (user?.email ?? "") ||
+    nickname !== (user?.nickname ?? "") ||
+    password !== "" ||
+    departmentId !== initialDepartmentId ||
+    roleIds.length > 0
+  )
+  useUnsavedChanges(isDirty, "用户资料尚未保存。离开后这些更改将丢失。")
+
   const mutation = useMutation({
     mutationFn: async () => {
       if (editing && user) {
         return usersService.update(user.id, {
           nickname: nickname.trim(),
           email: email.trim(),
-          department_id: departmentId,
         })
       }
       return usersService.create({
@@ -66,8 +82,9 @@ export function UserFormDialog({ open, onOpenChange, user, departments, roles, d
         email: email.trim(),
         password,
         nickname: nickname.trim() || undefined,
-        department_id: departmentId,
-        role_ids: roleIds,
+        expected_revision: treeRevision,
+        ...(can("users:move") && { department_id: departmentId }),
+        ...(can("users:assign-roles") && { role_ids: roleIds }),
       })
     },
     onSuccess: (res) => {
@@ -85,16 +102,29 @@ export function UserFormDialog({ open, onOpenChange, user, departments, roles, d
 
   const directoryManaged = editing && user?.auth_type !== "local"
   const canSubmit = editing ? !!email.trim() : !!username.trim() && !!email.trim() && meetsPolicy(password)
+  const requestClose = async () => {
+    if (mutation.isPending) return
+    if (isDirty) {
+      const discard = await confirm({
+        tone: "default",
+        title: "放弃用户更改？",
+        description: "当前表单尚未保存，离开后这些更改将丢失。",
+        confirmText: "放弃更改",
+      })
+      if (!discard) return
+    }
+    onOpenChange(false)
+  }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !mutation.isPending && onOpenChange(next)}>
+    <Dialog open={open} onOpenChange={(next) => next ? onOpenChange(true) : void requestClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {editing ? <UserRoundPen className="size-4.5 text-primary" /> : <UserPlus className="size-4.5 text-primary" />}
             {editing ? "编辑用户" : "新建用户"}
           </DialogTitle>
-          <DialogDescription>{editing ? `修改 ${user?.nickname || user?.username} 的基础资料与所属部门` : "创建本地账号，并指定初始部门与角色"}</DialogDescription>
+          <DialogDescription>{editing ? `修改 ${user?.nickname || user?.username} 的基础资料` : "创建本地账号，并按当前权限设置初始部门与角色"}</DialogDescription>
         </DialogHeader>
 
         <form
@@ -128,8 +158,10 @@ export function UserFormDialog({ open, onOpenChange, user, departments, roles, d
                   placeholder="如 zhangsan"
                   disabled={editing}
                   autoComplete="off"
+                  aria-invalid={!!fieldErrors.username || undefined}
+                  aria-describedby={fieldErrors.username ? "user-username-error" : undefined}
                 />
-                {fieldErrors.username && <FieldError>用户名需为 3-32 个字符</FieldError>}
+                {fieldErrors.username && <FieldError id="user-username-error">用户名需为 3-32 个字符</FieldError>}
               </Field>
               <Field>
                 <FieldLabel htmlFor="user-nickname">姓名 / 昵称</FieldLabel>
@@ -138,17 +170,19 @@ export function UserFormDialog({ open, onOpenChange, user, departments, roles, d
             </div>
             <Field data-invalid={!!fieldErrors.email || undefined}>
               <FieldLabel htmlFor="user-email">电子邮箱</FieldLabel>
-              <Input id="user-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" />
-              {fieldErrors.email && <FieldError>请输入有效的邮箱地址</FieldError>}
+              <Input id="user-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" aria-invalid={!!fieldErrors.email || undefined} aria-describedby={fieldErrors.email ? "user-email-error" : undefined} />
+              {fieldErrors.email && <FieldError id="user-email-error">请输入有效的邮箱地址</FieldError>}
             </Field>
-            <Field>
-              <FieldLabel htmlFor="user-department">所属部门</FieldLabel>
-              <DepartmentSelect id="user-department" nodes={departments} value={departmentId} onChange={setDepartmentId} placeholder="暂不分配部门" allowClear />
-            </Field>
+            {!editing && can("users:move") && (
+              <Field>
+                <FieldLabel htmlFor="user-department">所属部门</FieldLabel>
+                <DepartmentSelect id="user-department" nodes={departments} value={departmentId} onChange={setDepartmentId} placeholder="暂不分配部门" allowClear />
+              </Field>
+            )}
 
             {!editing && (
               <>
-                <Field>
+                {can("users:assign-roles") && <Field>
                   <FieldLabel htmlFor="user-password">初始密码</FieldLabel>
                   <InputGroup>
                     <InputGroupInput
@@ -168,7 +202,7 @@ export function UserFormDialog({ open, onOpenChange, user, departments, roles, d
                     </InputGroupAddon>
                   </InputGroup>
                   <PasswordStrength password={password} />
-                </Field>
+                </Field>}
                 <Field>
                   <FieldLabel>初始角色</FieldLabel>
                   <FieldDescription>可多选，角色的权限取并集</FieldDescription>
@@ -200,7 +234,7 @@ export function UserFormDialog({ open, onOpenChange, user, departments, roles, d
           </FieldGroup>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={mutation.isPending}>
+            <Button type="button" variant="outline" onClick={() => void requestClose()} disabled={mutation.isPending}>
               取消
             </Button>
             <Button type="submit" disabled={!canSubmit || mutation.isPending}>

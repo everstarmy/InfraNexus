@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:perf": "npm run build && playwright test --config playwright.perf.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -41,7 +43,9 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@eslint/js": "^10",
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",

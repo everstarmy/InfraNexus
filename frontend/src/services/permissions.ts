@@ -26,7 +26,7 @@ export interface RouteSyncReport {
 }
 
 export const permissionsService = {
-  tree: () => api.get("/permissions") as Promise<Envelope<PermissionDTO[]>>,
+  tree: (signal?: AbortSignal) => api.get("/permissions", { signal }) as Promise<Envelope<PermissionDTO[]>>,
   create: (payload: PermissionPayload) =>
     api.post("/permissions", payload) as Promise<Envelope<PermissionDTO>>,
   update: (id: string, payload: PermissionPayload) =>

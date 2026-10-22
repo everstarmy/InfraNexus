@@ -7,6 +7,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { BuiltinBadge } from "@/components/common/badges"
+import { useConfirm } from "@/components/common/confirm-dialog"
+import { QueryErrorState } from "@/components/common/query-error-state"
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
 import { notify } from "@/lib/notify"
 import { cn } from "@/lib/utils"
 import type { RoleRef, UserDTO } from "@/services/types"
@@ -15,17 +18,24 @@ import { usersService } from "@/services/users"
 export function AssignRolesDialog({
   user,
   roles,
+  rolesLoading = false,
+  rolesError,
+  onRetryRoles,
   isSelf,
   onOpenChange,
   onSelfChanged,
 }: {
   user: UserDTO | null
   roles: RoleRef[]
+  rolesLoading?: boolean
+  rolesError?: unknown
+  onRetryRoles?: () => void
   isSelf: boolean
   onOpenChange: (open: boolean) => void
   onSelfChanged: () => void
 }) {
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState("")
 
@@ -35,6 +45,9 @@ export function AssignRolesDialog({
   }, [user])
 
   const lockedAdmin = user?.built_in ? roles.find((r) => r.code === "admin")?.id : undefined
+  const initialSelected = new Set(user?.roles?.map((r) => r.id) ?? [])
+  const isDirty = !!user && (selected.size !== initialSelected.size || [...selected].some((id) => !initialSelected.has(id)))
+  useUnsavedChanges(isDirty, "角色分配草稿尚未保存。离开后这些更改将丢失。")
   const visible = useMemo(() => {
     const kw = query.trim().toLowerCase()
     return kw ? roles.filter((r) => r.name.toLowerCase().includes(kw) || r.code.toLowerCase().includes(kw)) : roles
@@ -60,8 +73,22 @@ export function AssignRolesDialog({
       return next
     })
 
+  const requestClose = async () => {
+    if (mutation.isPending) return
+    if (isDirty) {
+      const discard = await confirm({
+        tone: "default",
+        title: "放弃角色分配草稿？",
+        description: `「${user?.nickname || user?.username}」的角色选择尚未保存。`,
+        confirmText: "放弃更改",
+      })
+      if (!discard) return
+    }
+    onOpenChange(false)
+  }
+
   return (
-    <Dialog open={!!user} onOpenChange={(next) => !mutation.isPending && onOpenChange(next)}>
+    <Dialog open={!!user} onOpenChange={(next) => next ? onOpenChange(true) : void requestClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -73,6 +100,8 @@ export function AssignRolesDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          {rolesLoading && <p role="status" aria-live="polite" className="text-xs text-muted-foreground">正在加载可分配角色…</p>}
+          {!!rolesError && onRetryRoles && <QueryErrorState error={rolesError} label="可分配角色" onRetry={onRetryRoles} />}
           <InputGroup className="h-8 shadow-none border-input/50 bg-muted/30 focus-within:ring-0 has-[[data-slot=input-group-control]:focus-visible]:ring-0">
             <InputGroupAddon>
               <Search />
@@ -109,10 +138,10 @@ export function AssignRolesDialog({
           <p className="text-xs text-muted-foreground">已选 {selected.size} 个角色</p>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={mutation.isPending}>
+          <Button variant="outline" onClick={() => void requestClose()} disabled={mutation.isPending}>
             取消
           </Button>
-          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !isDirty || rolesLoading || !!rolesError}>
             {mutation.isPending && <Spinner />}
             保存角色
           </Button>

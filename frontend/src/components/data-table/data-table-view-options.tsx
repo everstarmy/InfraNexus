@@ -1,6 +1,7 @@
+import { Fragment } from "react"
 import type { RowData } from "@tanstack/react-table"
 import type { Table } from "./types"
-import { SlidersHorizontal, Check } from "lucide-react"
+import { SlidersHorizontal, Check, Pin, PinOff } from "lucide-react"
 
 import {
   DropdownMenu,
@@ -30,9 +31,9 @@ export function DataTableViewOptions<TData extends RowData>({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="ml-auto hidden h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-normal outline-none hover:bg-accent hover:text-accent-foreground lg:inline-flex">
+      <DropdownMenuTrigger aria-label="自定义显示列和固定列" className="ml-auto inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-normal outline-none hover:bg-accent hover:text-accent-foreground">
         <SlidersHorizontal className="size-3.5 text-muted-foreground" />
-        显示列
+        <span className="hidden sm:inline">显示列</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44 text-xs">
         <DropdownMenuGroup>
@@ -44,25 +45,45 @@ export function DataTableViewOptions<TData extends RowData>({
             const isVisible = column.getIsVisible()
             const label = columnLabels[column.id] ?? column.id
             return (
-              <DropdownMenuItem
-                key={column.id}
-                onClick={(e) => {
-                  e.preventDefault()
-                  column.toggleVisibility(!isVisible)
-                }}
-                className="flex cursor-pointer items-center justify-between"
-              >
-                <span>{label}</span>
-                <div
-                  className={`flex size-3.5 items-center justify-center rounded-xs border ${
-                    isVisible
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "opacity-40"
-                  }`}
+              <Fragment key={column.id}>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.preventDefault()
+                    column.toggleVisibility(!isVisible)
+                  }}
+                  className="flex cursor-pointer items-center justify-between"
                 >
-                  {isVisible && <Check className="size-2.5 stroke-[3]" />}
-                </div>
-              </DropdownMenuItem>
+                  <span>{label}</span>
+                  <div
+                    className={`flex size-3.5 items-center justify-center rounded-xs border ${
+                      isVisible
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "opacity-40"
+                    }`}
+                  >
+                    {isVisible && <Check className="size-2.5 stroke-[3]" />}
+                  </div>
+                </DropdownMenuItem>
+              {table.options.enableColumnPinning && column.getCanPin() && (
+                <>
+                  <DropdownMenuSeparator />
+                  {column.getIsPinned() ? (
+                    <DropdownMenuItem onClick={(e) => { e.preventDefault(); column.pin(false) }}>
+                      <PinOff /> 取消固定
+                    </DropdownMenuItem>
+                  ) : (
+                    <>
+                      <DropdownMenuItem onClick={(e) => { e.preventDefault(); column.pin("start") }}>
+                        <Pin /> 固定到左侧
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => { e.preventDefault(); column.pin("end") }}>
+                        <Pin /> 固定到右侧
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </>
+              )}
+              </Fragment>
             )
           })}
         </DropdownMenuGroup>

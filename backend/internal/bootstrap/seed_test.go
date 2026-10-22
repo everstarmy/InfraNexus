@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"testing"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"infranexus/internal/config"
 	"infranexus/internal/core/secret"
 	"infranexus/internal/domain"
@@ -28,6 +30,9 @@ func TestSeedIsIdempotentAndKeepsEditableFields(t *testing.T) {
 	db.Model(&domain.Permission{}).Where("id = ?", button.ID).Updates(map[string]any{"name": "自定义名称", "type": "api"})
 	db.Model(&domain.Permission{}).Where("id = ?", api.ID).Update("path", "/tampered")
 	if err := Seed(db, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if err := BootstrapAdmin(db, testAdminPassword, slog.Default()); err != nil {
 		t.Fatal(err)
 	}
 	var after int64
@@ -57,5 +62,62 @@ func TestProductionRequiresDedicatedEncryptionKey(t *testing.T) {
 	cfg := &config.Config{App: config.AppConfig{Env: "production"}, Security: config.SecurityConfig{EncryptionKey: "a-real-production-key-123456"}}
 	if _, err := NewCipher(cfg, slog.Default()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestProductionRequiresDedicatedJWTSecret(t *testing.T) {
+	for _, jwtSecret := range []string{"", defaultJWTSecret, "too-short"} {
+		cfg := &config.Config{App: config.AppConfig{Env: "production"}, JWT: config.JWTConfig{Secret: jwtSecret}}
+		if err := validateSecurityConfig(cfg); err == nil {
+			t.Fatalf("production accepted JWT secret %q", jwtSecret)
+		}
+	}
+	cfg := &config.Config{App: config.AppConfig{Env: "production"}, JWT: config.JWTConfig{Secret: "dedicated-production-jwt-secret-0123456789"}}
+	if err := validateSecurityConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAdminBootstrapIsIdempotentAndExplicitRotationRevokesCredentials(t *testing.T) {
+	container, _, cleanup := setupTestApp(t)
+	defer cleanup()
+	if err := BootstrapAdmin(container.DB, "", slog.Default()); err == nil {
+		t.Fatal("bootstrap accepted an empty administrator password")
+	}
+	if err := BootstrapAdmin(container.DB, "weak", slog.Default()); err == nil {
+		t.Fatal("bootstrap accepted a weak administrator password")
+	}
+	var before domain.User
+	if err := container.DB.First(&before, "username = ? AND domain = ?", "admin", "").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := Seed(container.DB, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if err := BootstrapAdmin(container.DB, "Another!Pass234", slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	var unchanged domain.User
+	if err := container.DB.First(&unchanged, "id = ?", before.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Password != before.Password || unchanged.AuthVersion != before.AuthVersion {
+		t.Fatal("normal seed/bootstrap must not rotate an existing administrator credential")
+	}
+	if err := RotateBootstrapAdminPassword(container.DB, "Rotated!Pass234"); err != nil {
+		t.Fatal(err)
+	}
+	var rotated domain.User
+	if err := container.DB.First(&rotated, "id = ?", before.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rotated.AuthVersion != before.AuthVersion+1 || rotated.Password == before.Password {
+		t.Fatalf("rotation did not replace password and revoke credentials: auth_version %d -> %d", before.AuthVersion, rotated.AuthVersion)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(rotated.Password), []byte("Rotated!Pass234")); err != nil {
+		t.Fatal("rotated password is not usable")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(rotated.Password), []byte(testAdminPassword)); err == nil {
+		t.Fatal("old password unexpectedly matches rotated hash")
 	}
 }

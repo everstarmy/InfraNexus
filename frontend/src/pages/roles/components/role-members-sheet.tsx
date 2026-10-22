@@ -7,9 +7,9 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AuthSourceBadge, StatusDot } from "@/components/common/badges"
+import { QueryErrorState, isForbiddenQueryError } from "@/components/common/query-error-state"
 import { UserAvatar } from "@/components/common/user-avatar"
 import { useDebouncedValue } from "@/hooks/use-debounced-value"
-import { getErrorStatus } from "@/lib/api-error"
 import type { RoleDTO } from "@/services/roles"
 import { usersService } from "@/services/users"
 import { useAuth } from "@/stores/auth-context"
@@ -21,11 +21,12 @@ export function RoleMembersSheet({ role, onOpenChange }: { role: RoleDTO | null;
   const keyword = useDebouncedValue(search.trim(), 250)
   const query = useQuery({
     queryKey: ["users", "role-members", role?.id, keyword],
-    queryFn: async () => (await usersService.list({ role_id: role!.id, keyword: keyword || undefined, page_size: 50 })).data,
+    queryFn: async ({ signal }) => (await usersService.list({ role_id: role!.id, keyword: keyword || undefined, page_size: 50 }, signal)).data,
     enabled: !!role && can("users"),
     retry: false,
   })
-  const forbidden = !can("users") || getErrorStatus(query.error) === 403
+  const lacksPermission = !can("users")
+  const forbidden = isForbiddenQueryError(query.error)
 
   return (
     <Sheet open={!!role} onOpenChange={onOpenChange}>
@@ -42,17 +43,39 @@ export function RoleMembersSheet({ role, onOpenChange }: { role: RoleDTO | null;
             <InputGroupAddon>
               <Search />
             </InputGroupAddon>
-            <InputGroupInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="在成员中搜索" className="text-xs" disabled={forbidden} />
+            <InputGroupInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="在成员中搜索" className="text-xs" disabled={lacksPermission || forbidden} />
           </InputGroup>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
-          {forbidden ? (
+          {lacksPermission ? (
             <p className="py-10 text-center text-xs text-muted-foreground">当前角色无权查看人员列表</p>
+          ) : forbidden ? (
+            <QueryErrorState error={query.error} label="成员列表" onRetry={() => void query.refetch()} retrying={query.isFetching} />
           ) : query.isLoading ? (
-            <div className="space-y-2 p-2">
+            <div className="space-y-2 p-2" role="status" aria-label="正在加载角色成员" aria-busy="true">
+              <span className="sr-only">正在加载角色成员…</span>
               {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
+            </div>
+          ) : query.isError && !query.data ? (
+            <QueryErrorState error={query.error} label="成员列表" onRetry={() => void query.refetch()} retrying={query.isFetching} />
+          ) : query.isError && query.data ? (
+            <div className="space-y-3">
+              <QueryErrorState error={query.error} label="成员列表" onRetry={() => void query.refetch()} retrying={query.isFetching} />
+              <ul className="space-y-1">
+                {query.data.items.map((u) => (
+                  <li key={u.id} className="flex items-center gap-3 rounded-lg px-3 py-2 opacity-75">
+                    <UserAvatar name={u.nickname || u.username} seed={u.username} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{u.nickname || u.username}</p>
+                      <p className="truncate font-mono text-[11px] text-muted-foreground">{u.department?.name ?? "未分配部门"}</p>
+                    </div>
+                    <AuthSourceBadge authType={u.auth_type} domain={u.domain} />
+                    <StatusDot active={u.status === 1} />
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : (query.data?.items.length ?? 0) === 0 ? (
             <p className="py-10 text-center text-xs text-muted-foreground">{keyword ? "没有匹配的成员" : "该角色暂未分配给任何成员"}</p>

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -12,9 +13,9 @@ import (
 	"infranexus/internal/domain"
 )
 
-const unclassifiedAPIGroup = "api-unclassified"
+const unclassifiedAPIGroup = domain.UnclassifiedAPIGroup
 
-type RoutesProvider func() []domain.RouteInfo
+type RoutesProvider func() ([]domain.RouteInfo, error)
 
 type permissionService struct {
 	permRepo domain.PermissionRepository
@@ -129,7 +130,7 @@ func (s *permissionService) Create(ctx context.Context, req domain.PermissionReq
 	return &perm, nil
 }
 
-func (s *permissionService) Update(ctx context.Context, id uuid.UUID, req domain.PermissionRequest) (*domain.Permission, error) {
+func (s *permissionService) Update(ctx context.Context, actorRoles []string, id uuid.UUID, req domain.PermissionRequest) (*domain.Permission, error) {
 	perm, err := s.get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -139,6 +140,18 @@ func (s *permissionService) Update(ctx context.Context, id uuid.UUID, req domain
 	}
 	if perm.BuiltIn && (req.Code != perm.Code || req.Type != perm.Type || req.Path != perm.Path || req.Method != perm.Method || !sameParent(req.ParentID, perm.ParentID)) {
 		return nil, coreerrors.ErrBuiltinProtected.WithMessage("内置权限点仅允许修改名称、图标与排序")
+	}
+	if (perm.Path != req.Path || perm.Method != req.Method) && !slices.Contains(actorRoles, domain.AdminRoleCode) {
+		if req.Method == "*" || strings.Contains(req.Path, "*") {
+			return nil, coreerrors.ErrPermissionDenied.WithMessage("只有超级管理员可以配置通配 API 权限")
+		}
+		allowed, err := s.authz.HasAPIAccess(ctx, actorRoles, req.Method, req.Path)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, coreerrors.ErrPermissionDenied.WithMessage("不能将 API 权限改写到自身范围以外")
+		}
 	}
 	if err := s.checkParent(ctx, perm.ID, req.ParentID); err != nil {
 		return nil, err
@@ -156,28 +169,15 @@ func (s *permissionService) Update(ctx context.Context, id uuid.UUID, req domain
 	perm.Component = req.Component
 	perm.Icon = req.Icon
 	perm.SortOrder = req.SortOrder
-	if err := s.permRepo.Update(ctx, perm); err != nil {
+	if err := s.permRepo.UpdateWithAuthorization(ctx, perm); err != nil {
 		return nil, err
 	}
 	if policyChanged {
-		if err := s.resyncRolesOf(ctx, perm.ID); err != nil {
+		if err := s.authz.RefreshIfStale(ctx); err != nil {
 			return nil, err
 		}
 	}
 	return perm, nil
-}
-
-func (s *permissionService) resyncRolesOf(ctx context.Context, permID uuid.UUID) error {
-	roleIDs, err := s.permRepo.RoleIDsByPermission(ctx, permID)
-	if err != nil {
-		return err
-	}
-	for _, roleID := range roleIDs {
-		if err := s.authz.SyncRolePolicies(ctx, roleID); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *permissionService) Delete(ctx context.Context, id uuid.UUID) error {
@@ -195,55 +195,95 @@ func (s *permissionService) Delete(ctx context.Context, id uuid.UUID) error {
 	if children > 0 {
 		return coreerrors.ErrPermissionHasChildren
 	}
-	roleIDs, err := s.permRepo.RoleIDsByPermission(ctx, id)
-	if err != nil {
-		return err
-	}
 	if err := s.permRepo.DeleteWithLinks(ctx, id); err != nil {
 		return err
 	}
-	for _, roleID := range roleIDs {
-		if err := s.authz.SyncRolePolicies(ctx, roleID); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.authz.RefreshIfStale(ctx)
 }
 
 func (s *permissionService) SyncRoutes(ctx context.Context) (*domain.RouteSyncReport, error) {
-	report := &domain.RouteSyncReport{CreatedRoutes: []domain.RouteInfo{}}
+	report := &domain.RouteSyncReport{
+		CreatedRoutes:   []domain.RouteInfo{},
+		RetiredRoutes:   []domain.RouteInfo{},
+		DuplicateRoutes: []domain.RouteInfo{},
+		DriftedRoutes:   []domain.RouteInfo{},
+	}
 	routes := []domain.RouteInfo{}
 	if s.routes != nil {
-		routes = s.routes()
-	}
-	report.Discovered = len(routes)
-	for _, route := range routes {
-		code := domain.APIPermissionCode(route.Method, route.Path)
-		_, err := s.permRepo.GetByCode(ctx, code)
-		if err == nil {
-			report.Existing++
-			continue
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, err
-		}
-		parent, err := s.moduleParent(ctx, route.Path)
+		var err error
+		routes, err = s.routes()
 		if err != nil {
 			return nil, err
 		}
-		perm := domain.Permission{
-			ParentID: &parent.ID,
-			Code:     code,
-			Name:     route.Method + " " + route.Path,
-			Type:     domain.PermTypeAPI,
-			Path:     route.Path,
-			Method:   route.Method,
+	}
+	report.Discovered = len(routes)
+	all, err := s.permRepo.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byIdentity := make(map[string][]domain.Permission, len(all))
+	byCode := make(map[string]domain.Permission, len(all))
+	for _, permission := range all {
+		byCode[permission.Code] = permission
+		if permission.Type == domain.PermTypeAPI {
+			key := routeIdentity(domain.RouteInfo{Method: permission.Method, Path: permission.Path})
+			byIdentity[key] = append(byIdentity[key], permission)
 		}
-		if err := s.permRepo.Create(ctx, &perm); err != nil {
+	}
+	discovered := make(map[string]struct{}, len(routes))
+	for _, route := range routes {
+		identity := routeIdentity(route)
+		discovered[identity] = struct{}{}
+		code := domain.APIPermissionCode(route.Method, route.Path)
+		candidates := byIdentity[identity]
+		if len(candidates) > 1 {
+			report.Duplicates += len(candidates) - 1
+			report.DuplicateRoutes = append(report.DuplicateRoutes, route)
+			report.Existing++
+			continue
+		}
+		if len(candidates) == 1 {
+			if routePermissionDrift(candidates[0], route) {
+				report.FieldDrift++
+				report.DriftedRoutes = append(report.DriftedRoutes, route)
+			} else {
+				report.Existing++
+			}
+			continue
+		}
+		if _, exists := byCode[code]; exists {
+			report.FieldDrift++
+			report.DriftedRoutes = append(report.DriftedRoutes, route)
+			continue
+		}
+		parentCode, err := s.routeParentCode(ctx, route.Path)
+		if err != nil {
 			return nil, err
 		}
-		report.Created++
-		report.CreatedRoutes = append(report.CreatedRoutes, route)
+		permission, created, err := s.permRepo.EnsureRoutePermission(ctx, route, parentCode)
+		if err != nil {
+			return nil, err
+		}
+		if created {
+			report.Created++
+			report.CreatedRoutes = append(report.CreatedRoutes, route)
+		} else {
+			report.Existing++
+			if routePermissionDrift(*permission, route) {
+				report.FieldDrift++
+				report.DriftedRoutes = append(report.DriftedRoutes, route)
+			}
+		}
+	}
+	for _, permission := range all {
+		if !permission.BuiltIn || permission.Type != domain.PermTypeAPI {
+			continue
+		}
+		if _, active := discovered[routeIdentity(domain.RouteInfo{Method: permission.Method, Path: permission.Path})]; active {
+			continue
+		}
+		report.Retired++
+		report.RetiredRoutes = append(report.RetiredRoutes, domain.RouteInfo{Method: permission.Method, Path: permission.Path})
 	}
 	added, removed, err := s.authz.SyncAllPolicies(ctx)
 	if err != nil {
@@ -254,24 +294,26 @@ func (s *permissionService) SyncRoutes(ctx context.Context) (*domain.RouteSyncRe
 	return report, nil
 }
 
-func (s *permissionService) moduleParent(ctx context.Context, path string) (*domain.Permission, error) {
+func routeIdentity(route domain.RouteInfo) string {
+	return route.Method + "\x00" + route.Path
+}
+
+func routePermissionDrift(permission domain.Permission, route domain.RouteInfo) bool {
+	return permission.Code != domain.APIPermissionCode(route.Method, route.Path) ||
+		permission.Type != domain.PermTypeAPI || permission.Path != route.Path || permission.Method != route.Method
+}
+
+func (s *permissionService) routeParentCode(ctx context.Context, path string) (string, error) {
 	rest := strings.TrimPrefix(path, "/api/v1/")
 	module, _, _ := strings.Cut(rest, "/")
 	if module != "" {
-		if menu, err := s.permRepo.GetByCode(ctx, module); err == nil && menu.Type == domain.PermTypeMenu {
-			return menu, nil
+		if menu, err := s.permRepo.GetByCode(ctx, module); err == nil {
+			if menu.Type == domain.PermTypeMenu {
+				return module, nil
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", err
 		}
 	}
-	group, err := s.permRepo.GetByCode(ctx, unclassifiedAPIGroup)
-	if err == nil {
-		return group, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	group = &domain.Permission{Code: unclassifiedAPIGroup, Name: "未归类接口", Type: domain.PermTypeMenu, Icon: "Unplug", SortOrder: 999}
-	if err := s.permRepo.Create(ctx, group); err != nil {
-		return nil, err
-	}
-	return group, nil
+	return unclassifiedAPIGroup, nil
 }

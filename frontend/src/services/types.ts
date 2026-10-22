@@ -35,6 +35,7 @@ export interface DepartmentRef {
 
 export interface UserDTO {
   id: string
+  edit_revision: number
   username: string
   domain: string
   email: string

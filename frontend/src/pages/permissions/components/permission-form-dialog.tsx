@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { useConfirm } from "@/components/common/confirm-dialog"
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
 import { getErrorMessage } from "@/lib/api-error"
 import { notify } from "@/lib/notify"
 import { collectIds, findNode } from "@/lib/tree"
@@ -25,6 +27,7 @@ export type PermissionFormState = { mode: "create"; parentId: string | null } | 
 
 export function PermissionFormDialog({ state, tree, onOpenChange }: { state: PermissionFormState; tree: PermissionDTO[]; onOpenChange: (open: boolean) => void }) {
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
   const editing = state?.mode === "edit" ? state.permission : null
   const locked = !!editing?.built_in
   const [parentId, setParentId] = useState<string>(ROOT)
@@ -70,6 +73,21 @@ export function PermissionFormDialog({ state, tree, onOpenChange }: { state: Per
   )
 
   const valid = name.trim() && code.trim().length >= 2 && (type !== "api" || (path.startsWith("/") && method))
+  const initialPermission = state?.mode === "edit" ? state.permission : null
+  const initialParent = state?.mode === "create" ? state.parentId : (initialPermission?.parent_id ?? null)
+  const initialParentNode = initialParent ? findNode(tree, initialParent) : undefined
+  const initialForm = [
+    initialParent ?? ROOT,
+    initialPermission?.type ?? (initialParentNode?.type === "button" ? "api" : initialParentNode ? "button" : "menu"),
+    initialPermission?.name ?? "",
+    initialPermission?.code ?? "",
+    initialPermission?.path ?? "",
+    initialPermission?.method || "GET",
+    initialPermission?.icon ?? "",
+    String(initialPermission?.sort_order ?? 0),
+  ]
+  const isDirty = !!state && JSON.stringify([parentId, type, name, code, path, method, icon, sortOrder]) !== JSON.stringify(initialForm)
+  useUnsavedChanges(isDirty, "权限点表单尚未保存。离开后这些更改将丢失。")
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -94,8 +112,22 @@ export function PermissionFormDialog({ state, tree, onOpenChange }: { state: Per
     onError: (err) => setError(getErrorMessage(err, "保存失败")),
   })
 
+  const requestClose = async () => {
+    if (mutation.isPending) return
+    if (isDirty) {
+      const discard = await confirm({
+        tone: "default",
+        title: "放弃权限点更改？",
+        description: "当前表单尚未保存，离开后这些更改将丢失。",
+        confirmText: "放弃更改",
+      })
+      if (!discard) return
+    }
+    onOpenChange(false)
+  }
+
   return (
-    <Dialog open={!!state} onOpenChange={(next) => !mutation.isPending && onOpenChange(next)}>
+    <Dialog open={!!state} onOpenChange={(next) => next ? onOpenChange(true) : void requestClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{editing ? "编辑权限点" : "新建权限点"}</DialogTitle>
@@ -226,7 +258,7 @@ export function PermissionFormDialog({ state, tree, onOpenChange }: { state: Per
             </div>
           </FieldGroup>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={mutation.isPending}>
+            <Button type="button" variant="outline" onClick={() => void requestClose()} disabled={mutation.isPending}>
               取消
             </Button>
             <Button type="submit" disabled={!valid || mutation.isPending}>

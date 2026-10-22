@@ -1,4 +1,5 @@
 import type { UserListParams } from "@/services/users"
+import type { RoleListParams } from "@/services/roles"
 
 export const queryKeys = {
   users: (params: UserListParams) => ["users", "list", params] as const,
@@ -7,7 +8,7 @@ export const queryKeys = {
   departmentTree: ["departments", "tree"] as const,
   roleOptions: ["options", "roles"] as const,
   departmentOptions: ["options", "departments"] as const,
-  roles: (keyword: string) => ["roles", keyword] as const,
+  roles: (params: RoleListParams) => ["roles", "list", params] as const,
   rolesAll: ["roles"] as const,
   permissions: ["permissions"] as const,
   ldapConfigs: ["ldap", "configs"] as const,

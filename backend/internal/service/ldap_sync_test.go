@@ -117,7 +117,7 @@ func TestBuildSyncPlanClassifiesEveryDirectoryEntry(t *testing.T) {
 			t.Fatalf("rename not detected: %+v", p.item.Changes)
 		}
 	}
-	if summary.Create != 1 || summary.Disable != 1 || summary.Conflict != 1 || summary.Skip != 2 || summary.Total != len(dir) {
+	if summary.Create != 1 || summary.Disable != 1 || summary.Conflict != 1 || summary.Skip != 2 || summary.Total != len(planned) {
 		t.Fatalf("summary: %+v", summary)
 	}
 	if !slices.Contains(toCreate, "Sales") {

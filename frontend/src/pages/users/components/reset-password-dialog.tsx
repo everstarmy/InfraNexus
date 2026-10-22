@@ -118,9 +118,10 @@ export function ResetPasswordDialog({
                 className="font-mono"
                 autoComplete="new-password"
                 aria-invalid={mismatch || undefined}
+                aria-describedby={mismatch ? "reset-confirm-error" : undefined}
               />
             </InputGroup>
-            {mismatch && <FieldError>两次输入的密码不一致</FieldError>}
+            {mismatch && <FieldError id="reset-confirm-error">两次输入的密码不一致</FieldError>}
           </Field>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={mutation.isPending}>

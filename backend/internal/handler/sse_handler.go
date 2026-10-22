@@ -2,119 +2,169 @@ package handler
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 
-	"infranexus/internal/middleware"
+	"infranexus/internal/core/requestmeta"
+	"infranexus/internal/domain"
 )
 
-type SSEEvent struct {
-	Event string `json:"event"`
-	Data  any    `json:"data"`
-	Time  int64  `json:"time"`
+const (
+	sseReadBlock       = 10 * time.Second
+	sseAuthCheckPeriod = 20 * time.Second
+	sseBatchLimit      = 100
+)
+
+type SSEHandler struct {
+	events domain.SSEEventStore
+	auth   domain.AuthService
+	authz  domain.AuthorizationService
+	logger *slog.Logger
 }
 
-type SSEHub struct {
-	mu      sync.RWMutex
-	clients map[chan SSEEvent]bool
-}
-
-var GlobalSSEHub = &SSEHub{
-	clients: make(map[chan SSEEvent]bool),
-}
-
-func (h *SSEHub) Broadcast(event string, data any) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	e := SSEEvent{
-		Event: event,
-		Data:  data,
-		Time:  time.Now().Unix(),
+func NewSSEHandler(events domain.SSEEventStore, auth domain.AuthService, authz domain.AuthorizationService, logger *slog.Logger) *SSEHandler {
+	if logger == nil {
+		logger = slog.Default()
 	}
+	return &SSEHandler{events: events, auth: auth, authz: authz, logger: logger}
+}
 
-	for ch := range h.clients {
-		select {
-		case ch <- e:
-		default:
+// StreamNotifications binds the stream to the authenticated identity and
+// periodically validates the session and the permission that opened it.
+func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
+	principal, ok := c.Locals("current_principal").(*domain.Principal)
+	if !ok || principal == nil {
+		return fiber.ErrUnauthorized
+	}
+	if h.events == nil {
+		return fiber.NewError(fiber.StatusServiceUnavailable, "event stream is unavailable")
+	}
+	requestID := requestmeta.RequestID(c.Context())
+	logger := h.logger.With("request_id", requestID, "user_id", principal.UserID)
+	lastID := c.Get("Last-Event-ID")
+	if lastID == "" {
+		lastID = c.Query("lastEventId")
+	}
+	if lastID == "" {
+		var err error
+		lastID, err = h.events.LatestID(c.Context())
+		if err != nil {
+			return fiber.NewError(fiber.StatusServiceUnavailable, "event stream is unavailable")
 		}
-	}
-}
-
-func (h *SSEHub) Publish(event string, data any) {
-	h.Broadcast(event, data)
-}
-
-func (h *SSEHub) AddClient(ch chan SSEEvent) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.clients[ch] = true
-}
-
-func (h *SSEHub) RemoveClient(ch chan SSEEvent) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	delete(h.clients, ch)
-	close(ch)
-}
-
-// StreamNotifications Server-Sent Events 长连接实时事件推送端点
-func StreamNotifications(c fiber.Ctx) error {
-	userCtx, _ := c.Locals("current_user").(*middleware.UserContext)
-	username := "guest"
-	if userCtx != nil {
-		username = userCtx.Username
 	}
 
 	c.Set("Content-Type", "text/event-stream")
-	c.Set("Cache-Control", "no-cache")
+	c.Set("Cache-Control", "no-cache, no-transform")
 	c.Set("Connection", "keep-alive")
+	c.Set("X-Accel-Buffering", "no")
 	c.Set("Transfer-Encoding", "chunked")
 
-	ch := make(chan SSEEvent, 10)
-	GlobalSSEHub.AddClient(ch)
-
+	owner := *principal
+	owner.Roles = append([]string(nil), principal.Roles...)
 	return c.SendStreamWriter(func(w *bufio.Writer) {
-		defer GlobalSSEHub.RemoveClient(ch)
+		if err := writeSSE(w, "", "connected", []byte(`{"status":"connected"}`)); err != nil {
+			logger.Debug("Write SSE connected event failed", "error_type", fmt.Sprintf("%T", err))
+			return
+		}
+		if err := w.Flush(); err != nil {
+			logger.Debug("Flush SSE connected event failed", "error_type", fmt.Sprintf("%T", err))
+			return
+		}
 
-		// 发送初始连接成功事件
-		initEvent, _ := json.Marshal(map[string]any{
-			"message": "Connected to InfraNexus SSE channel",
-			"user":    username,
-		})
-		_, _ = fmt.Fprintf(w, "event: connected\ndata: %s\n\n", initEvent)
-		_ = w.Flush()
-
-		ticker := time.NewTicker(25 * time.Second) // 心跳保活
-		defer ticker.Stop()
-
+		current := &owner
+		lastAuthCheck := time.Now()
 		for {
-			select {
-			case event, ok := <-ch:
-				if !ok {
+			if time.Since(lastAuthCheck) >= sseAuthCheckPeriod {
+				validated, err := h.validateStreamIdentity(current)
+				if err != nil {
+					_ = writeSSE(w, "", "auth.expired", []byte(`{"status":"closed"}`))
+					_ = w.Flush()
+					logger.Info("SSE stream closed after identity validation failed", "error_type", fmt.Sprintf("%T", err))
 					return
 				}
-				dataBytes, _ := json.Marshal(event.Data)
-				_, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Event, dataBytes)
-				if err != nil {
+				current = validated
+				lastAuthCheck = time.Now()
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), sseReadBlock+time.Second)
+			events, _, err := h.events.Read(ctx, lastID, sseReadBlock, sseBatchLimit)
+			cancel()
+			if err != nil {
+				logger.Warn("Read SSE event stream failed", "error_type", fmt.Sprintf("%T", err))
+				return
+			}
+			if len(events) == 0 {
+				if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
+					logger.Debug("Write SSE heartbeat failed", "error_type", fmt.Sprintf("%T", err))
 					return
 				}
 				if err := w.Flush(); err != nil {
+					logger.Debug("Flush SSE heartbeat failed", "error_type", fmt.Sprintf("%T", err))
 					return
 				}
-			case <-ticker.C:
-				_, err := fmt.Fprintf(w, ": keep-alive\n\n")
-				if err != nil {
+				continue
+			}
+			for _, event := range events {
+				if time.Since(lastAuthCheck) >= sseAuthCheckPeriod {
+					validated, err := h.validateStreamIdentity(current)
+					if err != nil {
+						_ = writeSSE(w, "", "auth.expired", []byte(`{"status":"closed"}`))
+						_ = w.Flush()
+						logger.Info("SSE stream closed after identity validation failed", "error_type", fmt.Sprintf("%T", err))
+						return
+					}
+					current = validated
+					lastAuthCheck = time.Now()
+				}
+				if err := writeSSE(w, event.ID, event.Name, event.Data); err != nil {
+					logger.Debug("Write SSE event failed", "event", event.Name, "error_type", fmt.Sprintf("%T", err))
 					return
 				}
 				if err := w.Flush(); err != nil {
+					logger.Debug("Flush SSE event failed", "event", event.Name, "error_type", fmt.Sprintf("%T", err))
 					return
 				}
+				lastID = event.ID
 			}
 		}
 	})
+}
+
+func (h *SSEHandler) validateStreamIdentity(principal *domain.Principal) (*domain.Principal, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	validated, err := h.auth.ValidateStreamPrincipal(ctx, principal)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := h.authz.HasAPIAccess(ctx, validated.Roles, "GET", "/api/v1/ldap/sync-logs")
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, fiber.ErrForbidden
+	}
+	return validated, nil
+}
+
+func writeSSE(w *bufio.Writer, id, event string, data []byte) error {
+	if event == "" || strings.ContainsAny(event, "\r\n") || strings.ContainsAny(id, "\r\n") {
+		return fmt.Errorf("invalid SSE event metadata")
+	}
+	if len(data) == 0 {
+		data = []byte("null")
+	}
+	if !json.Valid(data) {
+		return fmt.Errorf("invalid SSE event payload")
+	}
+	if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", id, event, json.RawMessage(data)); err != nil {
+		return err
+	}
+	return nil
 }

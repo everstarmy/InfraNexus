@@ -32,20 +32,31 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [options, setOptions] = React.useState<ConfirmOptions | null>(null)
   const [open, setOpen] = React.useState(false)
   const [pending, setPending] = React.useState(false)
-  const resolver = React.useRef<((value: boolean) => void) | null>(null)
+  const active = React.useRef<{ options: ConfirmOptions; resolve: (value: boolean) => void } | null>(null)
+  const queue = React.useRef<Array<{ options: ConfirmOptions; resolve: (value: boolean) => void }>>([])
 
   const confirm = React.useCallback<ConfirmFn>((next) => {
-    setOptions(next)
-    setOpen(true)
     return new Promise<boolean>((resolve) => {
-      resolver.current = resolve
+      const entry = { options: next, resolve }
+      if (active.current) {
+        queue.current.push(entry)
+        return
+      }
+      active.current = entry
+      setOptions(next)
+      setOpen(true)
     })
   }, [])
 
   const settle = (value: boolean) => {
-    resolver.current?.(value)
-    resolver.current = null
-    setOpen(false)
+    active.current?.resolve(value)
+    active.current = queue.current.shift() ?? null
+    if (active.current) {
+      setOptions(active.current.options)
+    } else {
+      setOptions(null)
+      setOpen(false)
+    }
   }
 
   const handleConfirm = async () => {

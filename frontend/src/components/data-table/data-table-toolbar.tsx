@@ -117,21 +117,21 @@ export function DataTableToolbar<TData extends RowData>({
     <div className="flex w-full min-w-0 flex-col gap-2.5">
       {/* Batch Selection Action Bar (Appears when rows are selected) */}
       {hasSelection && batchActions && (
-        <div className="flex w-full min-w-0 animate-in items-center justify-between rounded-lg border border-primary/20 bg-primary/10 px-3.5 py-2 text-xs text-primary fade-in-50 slide-in-from-top-1">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold">
-              已勾选 {selectedRows.length} 条数据
+        <div role="region" aria-label="批量操作" className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-50 flex max-h-[45svh] w-[calc(100%-1.5rem)] max-w-3xl -translate-x-1/2 animate-in flex-col items-stretch gap-2 overflow-y-auto rounded-lg border border-primary/30 bg-background/95 px-3.5 py-2.5 text-xs text-primary shadow-xl backdrop-blur-md fade-in-50 slide-in-from-bottom-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <div className="flex items-center justify-between gap-2 sm:justify-start">
+            <span role="status" aria-live="polite" className="font-semibold">
+              已勾选 {selectedRows.length} 条（当前页）
             </span>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => table.resetRowSelection()}
-              className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+              className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
             >
               取消选择
             </Button>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             {batchActions(selectedRows, () => table.resetRowSelection())}
           </div>
         </div>

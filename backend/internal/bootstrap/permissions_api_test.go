@@ -67,31 +67,48 @@ func permissionIDs(t *testing.T, container *AppContainer, codes ...string) []uui
 	return ids
 }
 
+func assignRolePermissions(t *testing.T, app *fiber.App, bearer string, roleID uuid.UUID, ids []uuid.UUID) apiResult {
+	t.Helper()
+	role := call(t, app, "GET", "/api/v1/roles/"+roleID.String(), bearer, nil)
+	expectCode(t, role, 200, response.CodeSuccess)
+	current := decode[domain.Role](t, role.Data)
+	return call(t, app, "POST", "/api/v1/roles/"+roleID.String()+"/permissions", bearer, map[string]any{
+		"permission_ids":    ids,
+		"expected_revision": current.EditRevision,
+	})
+}
+
 func TestNonAdminRoleIsLimitedToAssignedAPIsAndSeesItsCodes(t *testing.T) {
 	container, app, cleanup := setupTestApp(t)
 	defer cleanup()
 	bearer := adminToken(t, app)
 	role := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "auditor", "name": "审计员"}).Data)
 	readOnly := permissionIDs(t, container, "users", domain.APIPermissionCode("GET", "/api/v1/users"), domain.APIPermissionCode("GET", "/api/v1/users/:id"))
-	expectCode(t, call(t, app, "POST", "/api/v1/roles/"+role.ID.String()+"/permissions", bearer, map[string]any{"permission_ids": readOnly}), 200, response.CodeSuccess)
+	expectCode(t, assignRolePermissions(t, app, bearer, role.ID, readOnly), 200, response.CodeSuccess)
 	createLocalUser(t, app, bearer, "aud", map[string]any{"role_ids": []uuid.UUID{role.ID}})
 	aud := tokenFor(t, app, "aud", "Str0ng!pass")
 	expectCode(t, call(t, app, "GET", "/api/v1/users", aud, nil), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "GET", "/api/v1/sse/notifications", aud, nil), 403, response.CodePermissionDenied)
 	expectCode(t, call(t, app, "POST", "/api/v1/users", aud, map[string]any{"username": "newbie1", "email": "newbie1@x.com", "password": "Str0ng!pass"}), 403, response.CodePermissionDenied)
 	expectCode(t, call(t, app, "GET", "/api/v1/roles", aud, nil), 403, response.CodePermissionDenied)
 	expectCode(t, call(t, app, "GET", "/api/v1/roles/permission-tree", aud, nil), 403, response.CodePermissionDenied)
 	assigner := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "assigner", "name": "授权专员"}).Data)
-	expectCode(t, call(t, app, "POST", "/api/v1/roles/"+assigner.ID.String()+"/permissions", bearer, map[string]any{"permission_ids": permissionIDs(t, container, "roles:assign", domain.APIPermissionCode("GET", "/api/v1/roles/permission-tree"))}), 200, response.CodeSuccess)
+	expectCode(t, assignRolePermissions(t, app, bearer, assigner.ID, permissionIDs(t, container, "roles:assign", domain.APIPermissionCode("GET", "/api/v1/roles/permission-tree"))), 200, response.CodeSuccess)
 	createLocalUser(t, app, bearer, "granter", map[string]any{"role_ids": []uuid.UUID{assigner.ID}})
 	granter := tokenFor(t, app, "granter", "Str0ng!pass")
 	expectCode(t, call(t, app, "GET", "/api/v1/roles/permission-tree", granter, nil), 200, response.CodeSuccess)
 	expectCode(t, call(t, app, "GET", "/api/v1/permissions", granter, nil), 403, response.CodePermissionDenied)
+	scopeTarget := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "scope-target", "name": "范围目标"}).Data)
+	expectCode(t, call(t, app, "POST", "/api/v1/roles/"+scopeTarget.ID.String()+"/permissions", granter, map[string]any{
+		"permission_ids":    permissionIDs(t, container, domain.APIPermissionCode("POST", "/api/v1/roles")),
+		"expected_revision": scopeTarget.EditRevision,
+	}), 403, response.CodePermissionDenied)
 	me := decode[domain.CurrentUser](t, call(t, app, "GET", "/api/v1/auth/me", aud, nil).Data)
 	if me.IsAdmin || !slices.Contains(me.Permissions, "users") || !slices.Contains(me.Permissions, "org") || slices.Contains(me.Permissions, "users:create") {
 		t.Fatalf("effective codes must include granted nodes and their ancestors only: %v", me.Permissions)
 	}
 	withCreate := append(readOnly, permissionIDs(t, container, "users:create", domain.APIPermissionCode("POST", "/api/v1/users"))...)
-	expectCode(t, call(t, app, "POST", "/api/v1/roles/"+role.ID.String()+"/permissions", bearer, map[string]any{"permission_ids": withCreate}), 200, response.CodeSuccess)
+	expectCode(t, assignRolePermissions(t, app, bearer, role.ID, withCreate), 200, response.CodeSuccess)
 	expectCode(t, call(t, app, "POST", "/api/v1/users", aud, map[string]any{"username": "newbie2", "email": "newbie2@x.com", "password": "Str0ng!pass"}), 200, response.CodeSuccess)
 	expectCode(t, call(t, app, "PUT", "/api/v1/roles/"+role.ID.String(), bearer, map[string]any{"status": 2}), 200, response.CodeSuccess)
 	expectCode(t, call(t, app, "GET", "/api/v1/users", aud, nil), 403, response.CodePermissionDenied)
@@ -125,6 +142,31 @@ func TestPermissionCRUDRespectsBuiltinLocksAndTree(t *testing.T) {
 	expectCode(t, call(t, app, "DELETE", "/api/v1/permissions/"+menuID.String(), bearer, nil), 200, response.CodeSuccess)
 }
 
+func TestNonAdminCannotBroadenAssignedPermissionPath(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	admin := adminToken(t, app)
+	permission := decode[domain.Permission](t, call(t, app, "POST", "/api/v1/permissions", admin, map[string]any{
+		"code": "api:GET:/api/v1/custom-report", "name": "自定义报表", "type": "api",
+		"path": "/api/v1/custom-report", "method": "GET",
+	}).Data)
+	role := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", admin, map[string]any{"code": "permission-editor", "name": "权限编辑员"}).Data)
+	expectCode(t, assignRolePermissions(t, app, admin, role.ID, permissionIDs(t, container, "permissions:update", domain.APIPermissionCode("PUT", "/api/v1/permissions/:id"))), 200, response.CodeSuccess)
+	actor := createLocalUser(t, app, admin, "permission-editor", map[string]any{"role_ids": []uuid.UUID{role.ID}})
+	actorToken := tokenFor(t, app, actor.Username, "Str0ng!pass")
+	expectCode(t, call(t, app, "PUT", "/api/v1/permissions/"+permission.ID.String(), actorToken, map[string]any{
+		"code": permission.Code, "name": permission.Name, "type": "api",
+		"path": "/api/v1/roles", "method": "POST",
+	}), 403, response.CodePermissionDenied)
+	var unchanged domain.Permission
+	if err := container.DB.First(&unchanged, "id = ?", permission.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Path != "/api/v1/custom-report" || unchanged.Method != "GET" {
+		t.Fatalf("permission scope changed after denied request: %s %s", unchanged.Method, unchanged.Path)
+	}
+}
+
 func TestSyncRoutesRegistersNewAPIsAndRepairsPolicyDrift(t *testing.T) {
 	container, app, cleanup := setupTestApp(t)
 	defer cleanup()
@@ -138,6 +180,11 @@ func TestSyncRoutesRegistersNewAPIsAndRepairsPolicyDrift(t *testing.T) {
 	}
 	var created domain.Permission
 	container.DB.First(&created, "code = ?", domain.APIPermissionCode("GET", "/api/v1/reports/daily"))
+	var grants int64
+	container.DB.Table("sys_role_permissions").Where("permission_id = ?", created.ID).Count(&grants)
+	if grants != 0 {
+		t.Fatalf("route discovery must not grant new permissions, found %d grants", grants)
+	}
 	var group domain.Permission
 	container.DB.First(&group, "id = ?", created.ParentID)
 	if group.Code != "api-unclassified" {
@@ -146,12 +193,37 @@ func TestSyncRoutesRegistersNewAPIsAndRepairsPolicyDrift(t *testing.T) {
 	if again := decode[domain.RouteSyncReport](t, call(t, app, "POST", "/api/v1/permissions/sync", bearer, nil).Data); again.Created != 0 {
 		t.Fatalf("second sync must be idempotent: %+v", again)
 	}
-	role := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "ops", "name": "运维"}).Data)
-	expectCode(t, call(t, app, "POST", "/api/v1/roles/"+role.ID.String()+"/permissions", bearer, map[string]any{"permission_ids": permissionIDs(t, container, domain.APIPermissionCode("GET", "/api/v1/users"))}), 200, response.CodeSuccess)
-	container.DB.Exec("DELETE FROM sys_role_permissions WHERE role_id = ?", role.ID)
+	if err := container.DB.Model(&domain.Permission{}).Where("id = ?", created.ID).Update("path", "/api/v1/reports/renamed").Error; err != nil {
+		t.Fatal(err)
+	}
 	drift := decode[domain.RouteSyncReport](t, call(t, app, "POST", "/api/v1/permissions/sync", bearer, nil).Data)
-	if drift.PoliciesRemoved != 1 {
-		t.Fatalf("stale policy not removed: %+v", drift)
+	if drift.FieldDrift != 1 || drift.Retired != 1 || len(drift.DriftedRoutes) != 1 {
+		t.Fatalf("edited permission should be reported without silent repair: %+v", drift)
+	}
+	duplicate := domain.Permission{
+		Code: "custom:reports:daily:duplicate", Name: "Duplicate daily report", Type: domain.PermTypeAPI,
+		Path: "/api/v1/reports/daily", Method: "GET",
+	}
+	if err := container.DB.Create(&duplicate).Error; err != nil {
+		t.Fatal(err)
+	}
+	duplicateTwo := domain.Permission{
+		Code: "custom:reports:daily:duplicate-two", Name: "Second duplicate daily report", Type: domain.PermTypeAPI,
+		Path: "/api/v1/reports/daily", Method: "GET",
+	}
+	if err := container.DB.Create(&duplicateTwo).Error; err != nil {
+		t.Fatal(err)
+	}
+	duplicates := decode[domain.RouteSyncReport](t, call(t, app, "POST", "/api/v1/permissions/sync", bearer, nil).Data)
+	if duplicates.Duplicates != 1 || len(duplicates.DuplicateRoutes) != 1 {
+		t.Fatalf("duplicate permission mapping should be reported: %+v", duplicates)
+	}
+	role := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "ops", "name": "运维"}).Data)
+	expectCode(t, assignRolePermissions(t, app, bearer, role.ID, permissionIDs(t, container, domain.APIPermissionCode("GET", "/api/v1/users"))), 200, response.CodeSuccess)
+	container.DB.Exec("DELETE FROM sys_role_permissions WHERE role_id = ?", role.ID)
+	policyDrift := decode[domain.RouteSyncReport](t, call(t, app, "POST", "/api/v1/permissions/sync", bearer, nil).Data)
+	if policyDrift.PoliciesRemoved != 1 {
+		t.Fatalf("stale policy not removed: %+v", policyDrift)
 	}
 }
 

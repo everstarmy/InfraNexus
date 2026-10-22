@@ -20,8 +20,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { StatCard, StatGrid } from "@/components/common/stat-card"
-import { navItems } from "@/layouts/nav-config"
-import { formatCompact, formatPercent, formatRelative } from "@/lib/format"
+import { QueryErrorState, isForbiddenQueryError } from "@/components/common/query-error-state"
+import { pageNavItems } from "@/layouts/nav-config"
+import { formatCompact, formatDateTime, formatPercent, formatRelative } from "@/lib/format"
 import { queryKeys } from "@/lib/query-keys"
 import { cn } from "@/lib/utils"
 import { dashboardService, type DashboardOverview } from "@/services/dashboard"
@@ -111,11 +112,14 @@ function greeting() {
 
 export default function DashboardPage() {
   const { user, can } = useAuth()
-  const query = useQuery({ queryKey: queryKeys.dashboard, queryFn: async () => (await dashboardService.overview()).data })
+  const query = useQuery({ queryKey: queryKeys.dashboard, queryFn: async ({ signal }) => (await dashboardService.overview(signal)).data })
   const data = query.data
   const segments = useMemo(() => (data ? sourceSegments(data) : []), [data])
-  const shortcuts = navItems.filter((item) => item.url !== "/dashboard" && can(item.permission))
+  const shortcuts = pageNavItems.filter((item) => item.url !== "/dashboard" && can(item.permission))
   const users = data?.users
+  const overviewForbidden = isForbiddenQueryError(query.error)
+  const overviewUnavailable = query.isError && (!data || overviewForbidden)
+  const dashboardStatus = query.isError ? "数据更新失败" : query.isFetching ? "正在刷新数据" : data ? "数据已加载" : "正在加载数据"
 
   return (
     <>
@@ -129,13 +133,16 @@ export default function DashboardPage() {
               <h1 className="text-xl font-semibold tracking-tight text-foreground md:text-2xl">
                 {greeting()}，{user?.nickname || user?.username}
               </h1>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                平台运行正常
+              <span className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                query.isError ? "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+              )} role="status" aria-live="polite">
+                <span className={cn("size-1.5 rounded-full", query.isError ? "bg-amber-500" : "bg-emerald-500", !query.isError && "motion-safe:animate-pulse")} />
+                {dashboardStatus}
               </span>
             </div>
             <p className="text-sm text-muted-foreground">
-              {new Intl.DateTimeFormat("zh-CN", { dateStyle: "full" }).format(new Date())} · 以下为平台实时运行概况
+              {new Intl.DateTimeFormat("zh-CN", { dateStyle: "full" }).format(new Date())} · {data ? `数据更新于 ${formatDateTime(new Date(query.dataUpdatedAt).toISOString(), "yyyy-MM-dd HH:mm:ss")}` : "等待工作台数据"}
             </p>
           </div>
         </div>
@@ -155,6 +162,12 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {query.isError && data && !overviewForbidden && (
+        <QueryErrorState error={query.error} label="工作台数据" onRetry={() => void query.refetch()} retrying={query.isFetching} />
+      )}
+      {overviewUnavailable ? (
+        <QueryErrorState error={query.error} label="工作台数据" onRetry={() => void query.refetch()} retrying={query.isFetching} />
+      ) : <>
       <StatGrid>
         <StatCard label="用户总数" value={formatCompact(users?.total ?? 0)} icon={Users} tone="primary" loading={query.isLoading} hint={users ? `启用 ${users.active} · 停用 ${users.disabled}` : undefined} />
         <StatCard label="组织部门" value={formatCompact(data?.departments.total ?? 0)} icon={Network} tone="info" loading={query.isLoading} hint={data ? `目录同步 ${data.departments.from_directory} · 停用 ${data.departments.disabled}` : undefined} />
@@ -318,6 +331,7 @@ export default function DashboardPage() {
           数据实时汇总自平台数据库 · <Badge variant="outline" className="h-4 px-1.5 text-[10px]">{formatCompact(data.users.total)} 名成员</Badge>
         </p>
       )}
+      </>}
     </>
   )
 }

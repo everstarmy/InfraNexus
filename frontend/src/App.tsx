@@ -1,8 +1,8 @@
 import React, { Suspense, lazy } from "react"
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
+import { createBrowserRouter, Navigate, RouterProvider, useLocation } from "react-router-dom"
 import { Layers, RotateCcw, WifiOff } from "lucide-react"
 import { AdminLayout } from "@/layouts/admin-layout"
-import { navItems } from "@/layouts/nav-config"
+import { pageNavItems } from "@/layouts/nav-config"
 import { AuthProvider, useAuth } from "@/stores/auth-context"
 import { NotificationsProvider } from "@/stores/notifications"
 import { RequirePermission } from "@/components/common/require-permission"
@@ -73,7 +73,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function HomeRedirect() {
   const { can } = useAuth()
-  const first = navItems.find((item) => can(item.permission))
+  const first = pageNavItems.find((item) => can(item.permission))
   if (!first) return <ForbiddenPage description="当前账号尚未分配任何菜单权限，请联系管理员为你的角色授权。" />
   return <Navigate to={first.url} replace />
 }
@@ -82,41 +82,40 @@ export default function App() {
   return (
     <AuthProvider>
       <NotificationsProvider>
-        <BrowserRouter>
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/login" element={<LoginPage />} />
-              <Route
-                element={
-                  <ProtectedRoute>
-                    <AdminLayout />
-                  </ProtectedRoute>
-                }
-              >
-                <Route path="/" element={<HomeRedirect />} />
-                {navItems.map((item) => {
-                  const { Page } = routePages[item.url as keyof typeof routePages]
-                  return (
-                    <Route
-                      key={item.url}
-                      path={item.url}
-                      element={
-                        <RequirePermission code={item.permission}>
-                          <Suspense fallback={<RoutePageSkeleton />}>
-                            <RoutePage key={item.url}><Page /></RoutePage>
-                          </Suspense>
-                        </RequirePermission>
-                      }
-                    />
-                  )
-                })}
-                <Route path="/403" element={<ForbiddenPage />} />
-                <Route path="*" element={<HomeRedirect />} />
-              </Route>
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
+        <Suspense fallback={<PageLoader />}>
+          <RouterProvider router={router} />
+        </Suspense>
       </NotificationsProvider>
     </AuthProvider>
   )
 }
+
+const router = createBrowserRouter([
+  { path: "/login", element: <Suspense fallback={<PageLoader />}><LoginPage /></Suspense> },
+  {
+    path: "/",
+    element: (
+      <ProtectedRoute>
+        <AdminLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <HomeRedirect /> },
+      ...pageNavItems.map((item) => {
+        const { Page } = routePages[item.url as keyof typeof routePages]
+        return {
+          path: item.url.replace(/^\//, ""),
+          element: (
+            <RequirePermission code={item.permission}>
+              <Suspense fallback={<RoutePageSkeleton />}>
+                <RoutePage key={item.url}><Page /></RoutePage>
+              </Suspense>
+            </RequirePermission>
+          ),
+        }
+      }),
+      { path: "403", element: <ForbiddenPage /> },
+      { path: "*", element: <HomeRedirect /> },
+    ],
+  },
+])

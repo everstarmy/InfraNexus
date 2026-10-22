@@ -8,6 +8,7 @@ import { useAuth } from "@/stores/auth-context"
 import { AppSidebar } from "./app-sidebar"
 import { useMainScroll } from "@/routing/use-main-scroll"
 import { Header } from "./header"
+import { UnsavedChangesProvider } from "@/hooks/use-unsaved-changes"
 
 export function AdminLayout() {
   const navigate = useNavigate()
@@ -28,18 +29,20 @@ export function AdminLayout() {
   }
 
   return (
-    <MotionConfig reducedMotion="user">
-      <SidebarProvider className="h-svh w-full overflow-hidden">
-        <AppSidebar onLogout={handleLogout} />
-        <SidebarInset className="flex h-svh w-full flex-col overflow-hidden bg-slate-100/60 dark:bg-background">
-          <Header onLogout={handleLogout} />
-          <main ref={mainRef} className="w-full flex-1 overflow-x-hidden overflow-y-auto bg-slate-100/60 dark:bg-background">
-            <div className="w-full space-y-3.5 p-3 md:p-4">
-              <Outlet />
-            </div>
-          </main>
-        </SidebarInset>
-      </SidebarProvider>
-    </MotionConfig>
+    <UnsavedChangesProvider>
+      <MotionConfig reducedMotion="user">
+        <SidebarProvider className="h-svh w-full overflow-hidden">
+          <AppSidebar onLogout={handleLogout} />
+          <SidebarInset className="flex h-svh w-full flex-col overflow-hidden bg-slate-100/60 dark:bg-background">
+            <Header onLogout={handleLogout} />
+            <main ref={mainRef} className="w-full flex-1 overflow-x-hidden overflow-y-auto bg-slate-100/60 dark:bg-background">
+              <div className="w-full space-y-3.5 p-3 md:p-4">
+                <Outlet />
+              </div>
+            </main>
+          </SidebarInset>
+        </SidebarProvider>
+      </MotionConfig>
+    </UnsavedChangesProvider>
   )
 }

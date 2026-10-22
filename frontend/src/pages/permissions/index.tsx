@@ -30,6 +30,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { BuiltinBadge, MethodBadge } from "@/components/common/badges"
 import { useConfirm } from "@/components/common/confirm-dialog"
 import { PageHeader } from "@/components/common/page-header"
+import { QueryErrorState, isForbiddenQueryError } from "@/components/common/query-error-state"
 import { StatCard, StatGrid } from "@/components/common/stat-card"
 import { notify } from "@/lib/notify"
 import { queryKeys } from "@/lib/query-keys"
@@ -54,7 +55,9 @@ export default function PermissionsPage() {
   const [report, setReport] = useState<RouteSyncReport | null>(null)
   const [syncing, setSyncing] = useState(false)
 
-  const query = useQuery({ queryKey: queryKeys.permissions, queryFn: async () => (await permissionsService.tree()).data })
+  const query = useQuery({ queryKey: queryKeys.permissions, queryFn: async ({ signal }) => (await permissionsService.tree(signal)).data })
+  const forbidden = isForbiddenQueryError(query.error)
+  const queryUnavailable = query.isError && (!query.data || forbidden)
   const tree = useMemo(() => query.data ?? [], [query.data])
   const flat = useMemo(() => flattenTree(tree), [tree])
 
@@ -278,15 +281,19 @@ export default function PermissionsPage() {
       />
 
       <StatGrid>
-        <StatCard label="菜单" value={counts.menu} icon={PanelsTopLeft} tone="primary" loading={query.isLoading} hint="控制侧栏与路由可见性" />
-        <StatCard label="按钮" value={counts.button} icon={MousePointerClick} tone="warning" loading={query.isLoading} hint="控制页面内操作入口" />
-        <StatCard label="接口" value={counts.api} icon={Webhook} tone="info" loading={query.isLoading} hint="控制后端接口访问，按 (角色, 路径, 请求方法) 鉴权" />
-        <StatCard label="内置节点" value={counts.builtIn} icon={ShieldCheck} tone="default" loading={query.isLoading} hint="随系统升级维护，不可删除" />
+        <StatCard label="菜单" value={queryUnavailable ? "—" : counts.menu} icon={PanelsTopLeft} tone="primary" loading={query.isLoading} hint="控制侧栏与路由可见性" />
+        <StatCard label="按钮" value={queryUnavailable ? "—" : counts.button} icon={MousePointerClick} tone="warning" loading={query.isLoading} hint="控制页面内操作入口" />
+        <StatCard label="接口" value={queryUnavailable ? "—" : counts.api} icon={Webhook} tone="info" loading={query.isLoading} hint="控制后端接口访问，按 (角色, 路径, 请求方法) 鉴权" />
+        <StatCard label="内置节点" value={queryUnavailable ? "—" : counts.builtIn} icon={ShieldCheck} tone="default" loading={query.isLoading} hint="随系统升级维护，不可删除" />
       </StatGrid>
+
+      {query.isError && query.data && !forbidden && <QueryErrorState error={query.error} label="权限树" onRetry={() => void query.refetch()} retrying={query.isFetching} />}
 
       <Card className="border border-border/80 bg-card shadow-xs rounded-xl">
         <CardContent>
-          <DataTable
+          {queryUnavailable ? (
+            <QueryErrorState error={query.error} label="权限树" onRetry={() => void query.refetch()} retrying={query.isFetching} />
+          ) : <DataTable
             columns={columns}
             data={tree}
             loading={query.isLoading}
@@ -304,7 +311,7 @@ export default function PermissionsPage() {
             stickyActionColumn
             emptyTitle="暂无权限点"
             emptyDescription="点击「同步系统路由」自动登记服务端接口"
-          />
+          />}
         </CardContent>
       </Card>
 

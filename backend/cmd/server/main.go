@@ -37,6 +37,21 @@ func main() {
 		log.Error("Database seeding failed", "error", err)
 		os.Exit(1)
 	}
+	if len(os.Args) > 1 && (os.Args[1] == "bootstrap-admin" || os.Args[1] == "rotate-admin-password") {
+		password := os.Getenv("INFRANEXUS_BOOTSTRAP_ADMIN_PASSWORD")
+		var commandErr error
+		if os.Args[1] == "bootstrap-admin" {
+			commandErr = bootstrap.BootstrapAdmin(container.DB, password, log)
+		} else {
+			commandErr = bootstrap.RotateBootstrapAdminPassword(container.DB, password)
+		}
+		if commandErr != nil {
+			log.Error("Administrator credential operation failed", "command", os.Args[1], "error", commandErr)
+			os.Exit(1)
+		}
+		log.Info("Administrator credential operation completed", "command", os.Args[1])
+		return
+	}
 
 	// 5. 装配 GoFiber v3 引擎 (全局中间件 + 路由)
 	fiberApp, err := bootstrap.NewFiberApp(container)

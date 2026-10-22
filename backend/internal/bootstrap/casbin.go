@@ -28,6 +28,7 @@ func InitCasbin(db *gorm.DB, log *slog.Logger) (*casbin.SyncedEnforcer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create casbin enforcer: %w", err)
 	}
+	enforcer.EnableAutoSave(false)
 
 	if err := enforcer.LoadPolicy(); err != nil {
 		return nil, fmt.Errorf("failed to load casbin policy: %w", err)

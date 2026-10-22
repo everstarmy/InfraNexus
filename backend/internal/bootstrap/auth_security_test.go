@@ -59,7 +59,7 @@ func getString(t *testing.T, m map[string]json.RawMessage, key string) string {
 func TestAuthSecurityContract(t *testing.T) {
 	container, app, cleanup := setupTestApp(t)
 	defer cleanup()
-	body := `{"username":"admin","password":"admin123456"}`
+	body := `{"username":"admin","password":"Admin!23456"}`
 	origin := "http://localhost:5173"
 	for _, bad := range []string{"", "https://evil.example"} {
 		res := doAuth(t, app, "POST", "/api/v1/auth/login", body, bad, "", nil)
@@ -234,7 +234,7 @@ func TestAuthSecurityContract(t *testing.T) {
 func TestAuthDatabaseFailureIsServerError(t *testing.T) {
 	container, app, cleanup := setupTestApp(t)
 	defer cleanup()
-	body := `{"username":"admin","password":"admin123456"}`
+	body := `{"username":"admin","password":"Admin!23456"}`
 	origin := "http://localhost:5173"
 	res := doAuth(t, app, "POST", "/api/v1/auth/login", body, origin, "", nil)
 	if res.StatusCode != 200 {
@@ -264,7 +264,7 @@ func TestAuthDatabaseFailureIsServerError(t *testing.T) {
 func TestSessionReplacementCSRFAndSecureCookie(t *testing.T) {
 	container, app, cleanup := setupTestApp(t)
 	defer cleanup()
-	body := `{"username":"admin","password":"admin123456"}`
+	body := `{"username":"admin","password":"Admin!23456"}`
 	origin := "http://localhost:5173"
 	first := doAuth(t, app, "POST", "/api/v1/auth/login", body, origin, "", nil)
 	if first.StatusCode != 200 {

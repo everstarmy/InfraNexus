@@ -22,5 +22,5 @@ export interface DashboardOverview {
 }
 
 export const dashboardService = {
-  overview: () => api.get("/dashboard/overview") as Promise<Envelope<DashboardOverview>>,
+  overview: (signal?: AbortSignal) => api.get("/dashboard/overview", { signal }) as Promise<Envelope<DashboardOverview>>,
 }

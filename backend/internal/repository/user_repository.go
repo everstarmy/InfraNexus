@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"infranexus/internal/domain"
 )
@@ -147,24 +148,129 @@ func (r *userRepository) AssignRoles(ctx context.Context, userID uuid.UUID, role
 			if err := tx.Where("id IN ?", roleIDs).Find(&roles).Error; err != nil {
 				return err
 			}
+			if len(roles) != len(roleIDs) {
+				return gorm.ErrRecordNotFound
+			}
 		}
 
 		return tx.Model(&user).Association("Roles").Replace(roles)
 	})
 }
 
+func (r *userRepository) CreateWithRoles(ctx context.Context, user *domain.User, roleIDs []uuid.UUID) error {
+	return r.DB(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(user).Error; err != nil {
+			return err
+		}
+		if len(roleIDs) == 0 {
+			return nil
+		}
+		var roles []domain.Role
+		if err := tx.Where("id IN ?", roleIDs).Find(&roles).Error; err != nil {
+			return err
+		}
+		if len(roles) != len(roleIDs) {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Model(user).Association("Roles").Append(roles)
+	})
+}
+
 func (r *userRepository) UpdateColumns(ctx context.Context, id uuid.UUID, values map[string]any) error {
-	return r.DB(ctx).Model(&domain.User{}).Where("id = ?", id).Updates(values).Error
+	updates := make(map[string]any, len(values)+2)
+	for key, value := range values {
+		updates[key] = value
+	}
+	_, onlyLoginTimestamp := values["last_login_at"]
+	if !onlyLoginTimestamp || len(values) > 1 {
+		updates["edit_revision"] = gorm.Expr("edit_revision + 1")
+	}
+	if status, ok := values["status"].(int); ok && status == domain.StatusDisabled {
+		updates["auth_version"] = gorm.Expr("auth_version + CASE WHEN status <> ? THEN 1 ELSE 0 END", domain.StatusDisabled)
+	}
+	if _, ok := values["password"]; ok {
+		updates["auth_version"] = gorm.Expr("auth_version + 1")
+	}
+	result := r.DB(ctx).Model(&domain.User{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *userRepository) UpdateColumnsCAS(ctx context.Context, id uuid.UUID, expectedRevision int64, values map[string]any) error {
+	updates := make(map[string]any, len(values)+1)
+	for key, value := range values {
+		updates[key] = value
+	}
+	updates["edit_revision"] = gorm.Expr("edit_revision + 1")
+	if status, ok := values["status"].(int); ok && status == domain.StatusDisabled {
+		updates["auth_version"] = gorm.Expr("auth_version + CASE WHEN status <> ? THEN 1 ELSE 0 END", domain.StatusDisabled)
+	}
+	result := r.DB(ctx).Model(&domain.User{}).
+		Where("id = ? AND edit_revision = ?", id, expectedRevision).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		var user domain.User
+		if err := r.DB(ctx).Select("id").First(&user, "id = ?", id).Error; err != nil {
+			return err
+		}
+		return domain.ErrEditRevisionConflict
+	}
+	return nil
+}
+
+func (r *userRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status int, expectedRevision int64) error {
+	result := r.DB(ctx).Model(&domain.User{}).
+		Where("id = ? AND edit_revision = ?", id, expectedRevision).
+		Updates(map[string]any{
+			"status":        status,
+			"edit_revision": gorm.Expr("edit_revision + 1"),
+			"auth_version":  gorm.Expr("auth_version + CASE WHEN status <> ? AND ? = ? THEN 1 ELSE 0 END", domain.StatusDisabled, status, domain.StatusDisabled),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		var user domain.User
+		if err := r.DB(ctx).Select("id").First(&user, "id = ?", id).Error; err != nil {
+			return err
+		}
+		return domain.ErrEditRevisionConflict
+	}
+	return nil
 }
 
 func (r *userRepository) MoveToDepartment(ctx context.Context, userIDs []uuid.UUID, deptID uuid.UUID) (int64, error) {
-	var moved int64
-	err := r.DB(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&domain.User{}).Where("id IN ?", userIDs).Update("department_id", deptID)
-		moved = result.RowsAffected
-		return result.Error
-	})
-	return moved, err
+	tx := r.DB(ctx)
+	var lockedIDs []uuid.UUID
+	if err := tx.Model(&domain.User{}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").
+		Where("id IN ?", userIDs).
+		Order("id ASC").
+		Find(&lockedIDs).Error; err != nil {
+		return 0, err
+	}
+	if len(lockedIDs) != len(userIDs) {
+		return 0, gorm.ErrRecordNotFound
+	}
+	result := tx.Model(&domain.User{}).
+		Where("id IN ?", lockedIDs).
+		Updates(map[string]any{"department_id": deptID, "edit_revision": gorm.Expr("edit_revision + 1")})
+	if result.Error != nil {
+		return result.RowsAffected, result.Error
+	}
+	if result.RowsAffected != int64(len(userIDs)) {
+		return result.RowsAffected, gorm.ErrRecordNotFound
+	}
+	return result.RowsAffected, nil
 }
 
 func (r *userRepository) CountByDepartmentIDs(ctx context.Context, deptIDs []uuid.UUID) (int64, error) {

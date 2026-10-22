@@ -1,10 +1,11 @@
-import type React from "react"
-import type { LucideIcon } from "lucide-react"
-import { Card } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
-import { cn } from "@/lib/utils"
+import type React from "react";
+import type { LucideIcon } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
-export type Tone = "default" | "primary" | "success" | "warning" | "danger" | "info" | "violet"
+export type Tone =
+  "default" | "primary" | "success" | "warning" | "danger" | "info" | "violet";
 
 export const toneIconStyles: Record<Tone, { icon: string; glow: string }> = {
   default: {
@@ -35,7 +36,7 @@ export const toneIconStyles: Record<Tone, { icon: string; glow: string }> = {
     icon: "bg-gradient-to-br from-violet-500/20 via-purple-500/10 to-violet-500/5 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/25 shadow-2xs",
     glow: "bg-violet-500/15",
   },
-}
+};
 
 const toneBarStyles: Record<Tone, { fill: string; track: string }> = {
   default: { fill: "bg-muted-foreground/60", track: "bg-muted-foreground/15" },
@@ -45,21 +46,30 @@ const toneBarStyles: Record<Tone, { fill: string; track: string }> = {
   danger: { fill: "bg-rose-500", track: "bg-rose-500/15" },
   info: { fill: "bg-sky-500", track: "bg-sky-500/15" },
   violet: { fill: "bg-violet-500", track: "bg-violet-500/15" },
-}
+};
 
 export interface StatCardProps {
-  label: string
-  value: React.ReactNode
-  icon: LucideIcon
-  hint?: React.ReactNode
-  tone?: Tone
-  ratio?: number
-  loading?: boolean
-  className?: string
+  label: string;
+  value: React.ReactNode;
+  icon: LucideIcon;
+  hint?: React.ReactNode;
+  tone?: Tone;
+  ratio?: number;
+  loading?: boolean;
+  className?: string;
 }
 
-export function StatCard({ label, value, icon: Icon, hint, tone = "default", ratio, loading, className }: StatCardProps) {
-  const currentTone = toneIconStyles[tone] || toneIconStyles.default
+export function StatCard({
+  label,
+  value,
+  icon: Icon,
+  hint,
+  tone = "default",
+  ratio,
+  loading,
+  className,
+}: StatCardProps) {
+  const currentTone = toneIconStyles[tone] || toneIconStyles.default;
 
   return (
     <Card
@@ -78,11 +88,15 @@ export function StatCard({ label, value, icon: Icon, hint, tone = "default", rat
 
       <div className="relative z-10 flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">{label}</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {label}
+          </p>
           {loading ? (
             <Skeleton className="h-8 w-20" />
           ) : (
-            <p className="font-mono text-3xl font-extrabold tracking-tight text-foreground">{value}</p>
+            <p className="font-mono text-3xl font-extrabold tracking-tight text-foreground">
+              {value}
+            </p>
           )}
         </div>
         <div
@@ -101,24 +115,42 @@ export function StatCard({ label, value, icon: Icon, hint, tone = "default", rat
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(Math.min(Math.max(ratio, 0), 1) * 100)}
-          className={cn("relative z-10 h-1.5 w-full overflow-hidden rounded-full ring-1 ring-border/40", toneBarStyles[tone].track)}
+          className={cn(
+            "relative z-10 h-1.5 w-full overflow-hidden rounded-full ring-1 ring-border/40",
+            toneBarStyles[tone].track,
+          )}
         >
           <div
-            className={cn("h-full rounded-full transition-[width] duration-700 ease-out", toneBarStyles[tone].fill)}
-            style={{ width: `${Math.round(Math.min(Math.max(ratio, 0), 1) * 100)}%` }}
+            className={cn(
+              "h-full rounded-full transition-[width] duration-700 ease-out",
+              toneBarStyles[tone].fill,
+            )}
+            style={{
+              width: `${Math.round(Math.min(Math.max(ratio, 0), 1) * 100)}%`,
+            }}
           />
         </div>
       )}
       {hint && (
-        <div className="relative z-10 flex items-center gap-1.5 truncate text-xs text-muted-foreground/90">
+        <div className="relative z-10 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
           <span className="size-1 shrink-0 rounded-full bg-muted-foreground/40" />
           <span className="truncate">{hint}</span>
         </div>
       )}
     </Card>
-  )
+  );
 }
 
-export function StatGrid({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn("grid w-full grid-cols-12 gap-3 md:gap-4", className)}>{children}</div>
+export function StatGrid({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("grid w-full grid-cols-12 gap-3 md:gap-4", className)}>
+      {children}
+    </div>
+  );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { CheckCircle2, CircleX, FolderTree, Info, Network, Plug, Plus, RotateCcw, ShieldAlert, Trash2 } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -15,9 +15,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { DepartmentSelect } from "@/components/common/department-select"
+import { QueryErrorState } from "@/components/common/query-error-state"
 import { getErrorMessage } from "@/lib/api-error"
 import { notify } from "@/lib/notify"
 import { cn } from "@/lib/utils"
+import { useConfirm } from "@/components/common/confirm-dialog"
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
 import type { DepartmentNode } from "@/services/departments"
 import { ldapService, type AttributeMapping, type DirectoryType, type LDAPConfig, type LDAPConfigPayload, type LDAPTestResult } from "@/services/ldap"
 import type { RoleRef } from "@/services/types"
@@ -102,27 +105,53 @@ export function LdapConfigSheet({
   config,
   departments,
   roles,
+  optionsLoading = false,
+  optionsError,
+  onRetryOptions,
   onOpenChange,
 }: {
   open: boolean
   config: LDAPConfig | null
   departments: DepartmentNode[]
   roles: RoleRef[]
+  optionsLoading?: boolean
+  optionsError?: unknown
+  onRetryOptions?: () => void
   onOpenChange: (open: boolean) => void
 }) {
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
   const [form, setForm] = useState<LDAPConfigPayload>(emptyForm)
+  const initialSnapshot = useRef("")
   const [tab, setTab] = useState("connection")
   const [error, setError] = useState("")
   const [testResult, setTestResult] = useState<LDAPTestResult | null>(null)
 
   useEffect(() => {
     if (!open) return
-    setForm(config ? fromConfig(config) : emptyForm())
+    const initial = config ? fromConfig(config) : emptyForm()
+    initialSnapshot.current = JSON.stringify(initial)
+    setForm(initial)
     setTab("connection")
     setError("")
     setTestResult(null)
   }, [open, config])
+
+  const isDirty = useMemo(() => open && JSON.stringify(form) !== initialSnapshot.current, [form, open])
+  useUnsavedChanges(isDirty, "目录连接、映射或同步策略尚未保存。离开后这些更改将丢失。")
+  const requestClose = async () => {
+    if (save.isPending) return
+    if (isDirty) {
+      const discard = await confirm({
+        tone: "default",
+        title: "放弃目录配置更改？",
+        description: "当前配置尚未保存，离开后这些更改将丢失。",
+        confirmText: "放弃更改",
+      })
+      if (!discard) return
+    }
+    onOpenChange(false)
+  }
 
   const set = <K extends keyof LDAPConfigPayload>(key: K, value: LDAPConfigPayload[K]) => setForm((f) => ({ ...f, [key]: value }))
   const security = form.use_ssl ? "ldaps" : form.start_tls ? "starttls" : "none"
@@ -172,7 +201,7 @@ export function LdapConfigSheet({
   })
 
   return (
-    <Sheet open={open} onOpenChange={(next) => !save.isPending && onOpenChange(next)}>
+    <Sheet open={open} onOpenChange={(next) => next ? onOpenChange(true) : void requestClose()}>
       <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-2xl">
         <SheetHeader className="border-b p-5">
           <SheetTitle className="flex items-center gap-2">
@@ -181,6 +210,9 @@ export function LdapConfigSheet({
           </SheetTitle>
           <SheetDescription>连接 Windows AD 或 OpenLDAP，开启域账号登录并同步组织架构</SheetDescription>
         </SheetHeader>
+
+        {optionsLoading && <p className="border-b px-5 py-2 text-xs text-muted-foreground" role="status" aria-live="polite">正在加载部门与角色映射选项…</p>}
+        {!!optionsError && onRetryOptions && <div className="border-b p-4"><QueryErrorState error={optionsError} label="部门与角色映射选项" onRetry={onRetryOptions} /></div>}
 
         <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="min-h-0 flex-1 gap-0">
           <div className="border-b px-5 py-3">
@@ -499,10 +531,10 @@ export function LdapConfigSheet({
             测试连接
           </Button>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={save.isPending}>
+            <Button variant="ghost" onClick={() => void requestClose()} disabled={save.isPending}>
               取消
             </Button>
-            <Button onClick={() => save.mutate()} disabled={!valid || save.isPending}>
+            <Button onClick={() => save.mutate()} disabled={!valid || optionsLoading || !!optionsError || save.isPending}>
               {save.isPending && <Spinner />}
               {config ? "保存配置" : "创建配置"}
             </Button>

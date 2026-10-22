@@ -8,6 +8,8 @@ import (
 
 type PermissionType string
 
+const UnclassifiedAPIGroup = "api-unclassified"
+
 const (
 	PermTypeMenu   PermissionType = "menu"
 	PermTypeButton PermissionType = "button"
@@ -53,6 +55,8 @@ type PermissionRepository interface {
 	GetByRoleID(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
 	CountChildren(ctx context.Context, id uuid.UUID) (int64, error)
 	RoleIDsByPermission(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error)
+	EnsureRoutePermission(ctx context.Context, route RouteInfo, parentCode string) (*Permission, bool, error)
+	UpdateWithAuthorization(ctx context.Context, permission *Permission) error
 	DeleteWithLinks(ctx context.Context, id uuid.UUID) error
 	CountByType(ctx context.Context) (map[PermissionType]int64, error)
 }
@@ -60,7 +64,7 @@ type PermissionRepository interface {
 type PermissionService interface {
 	Tree(ctx context.Context) ([]Permission, error)
 	Create(ctx context.Context, req PermissionRequest) (*Permission, error)
-	Update(ctx context.Context, id uuid.UUID, req PermissionRequest) (*Permission, error)
+	Update(ctx context.Context, actorRoles []string, id uuid.UUID, req PermissionRequest) (*Permission, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	SyncRoutes(ctx context.Context) (*RouteSyncReport, error)
 }

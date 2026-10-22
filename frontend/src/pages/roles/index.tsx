@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Crown, KeyRound, Lock, MoreHorizontal, Pencil, ShieldCheck, ShieldOff, ShieldPlus, Trash2, UsersRound } from "lucide-react"
 import { DataTable, type ColumnDef } from "@/components/data-table"
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header"
@@ -14,32 +15,63 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Switch } from "@/components/ui/switch"
+import { toast } from "@/components/ui/toast"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { BuiltinBadge, StatusDot } from "@/components/common/badges"
 import { useConfirm } from "@/components/common/confirm-dialog"
 import { PageHeader } from "@/components/common/page-header"
+import { QueryErrorState, QueryPlaceholderNotice, isForbiddenQueryError } from "@/components/common/query-error-state"
 import { StatCard, StatGrid } from "@/components/common/stat-card"
 import { formatDateTime } from "@/lib/format"
 import { notify } from "@/lib/notify"
 import { queryKeys } from "@/lib/query-keys"
+import { useDebouncedValue } from "@/hooks/use-debounced-value"
 import { cn } from "@/lib/utils"
 import { rolesService, type RoleDTO } from "@/services/roles"
+import type { PageData } from "@/services/types"
 import { useAuth } from "@/stores/auth-context"
 import { RoleFormDialog } from "./components/role-form-dialog"
 import { RoleMembersSheet } from "./components/role-members-sheet"
 import { RolePermissionDialog } from "./components/role-permission-dialog"
 
 export default function RolesPage() {
-  const { can } = useAuth()
+  const { user, can } = useAuth()
   const confirm = useConfirm()
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [form, setForm] = useState<RoleDTO | "new" | null>(null)
   const [permRole, setPermRole] = useState<RoleDTO | null>(null)
   const [membersRole, setMembersRole] = useState<RoleDTO | null>(null)
-  const [pending, setPending] = useState<string | null>(null)
+  const [pending, setPending] = useState<Set<string>>(() => new Set())
+  const statusRequests = useRef(new Map<string, Promise<void>>())
+  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 20 })
+  const [search, setSearch] = useState("")
+  const keyword = useDebouncedValue(search.trim(), 250)
 
-  const query = useQuery({ queryKey: queryKeys.roles(""), queryFn: async () => (await rolesService.list()).data.items })
-  const roles = useMemo(() => query.data ?? [], [query.data])
+  useEffect(() => {
+    if (searchParams.get("create") !== "1") return
+    if (can("roles:create")) setForm("new")
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous)
+      next.delete("create")
+      return next
+    }, { replace: true })
+  }, [searchParams, setSearchParams, can])
+
+  useEffect(() => {
+    setPagination((current) => current.pageIndex === 0 ? current : { ...current, pageIndex: 0 })
+  }, [keyword])
+
+  const params = useMemo(() => ({ page: pagination.pageIndex + 1, page_size: pagination.pageSize, keyword: keyword || undefined }), [pagination, keyword])
+  const query = useQuery({
+    queryKey: queryKeys.roles(params),
+    queryFn: async ({ signal }) => (await rolesService.list(params, signal)).data,
+    placeholderData: keepPreviousData,
+  })
+  const roles = useMemo(() => query.data?.items ?? [], [query.data?.items])
+  const total = query.data?.total ?? 0
+  const forbidden = isForbiddenQueryError(query.error)
+  const listUnavailable = query.isError && (!query.data || forbidden)
 
   const invalidate = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["roles"] })
@@ -48,19 +80,82 @@ export default function RolesPage() {
   }, [queryClient])
 
   const toggleStatus = useCallback(
-    async (role: RoleDTO, enabled: boolean) => {
-      setPending(role.id)
+    async (role: RoleDTO, enabled: boolean, silent = false) => {
+      const existingRequest = statusRequests.current.get(role.id)
+      if (existingRequest) {
+        await existingRequest
+        return
+      }
+      const status = enabled ? 1 : 2
+      const optimisticRevision = role.edit_revision + 1
+      const detailKey = ["roles", "detail", role.id] as const
+      const detailSnapshot = queryClient.getQueryData<RoleDTO>(detailKey)
+      setPending((current) => new Set(current).add(role.id))
+      await queryClient.cancelQueries({ queryKey: ["roles", "list"] })
+      const snapshots = new Map<string, RoleDTO>()
+      for (const [key, page] of queryClient.getQueriesData<PageData<RoleDTO>>({ queryKey: ["roles", "list"] })) {
+        const previous = page?.items.find((item) => item.id === role.id)
+        if (!page || !previous) continue
+        snapshots.set(JSON.stringify(key), previous)
+        queryClient.setQueryData<PageData<RoleDTO>>(key, {
+          ...page,
+          items: page.items.map((item) => item.id === role.id ? { ...item, status, edit_revision: optimisticRevision } : item),
+        })
+      }
+      if (detailSnapshot) {
+        queryClient.setQueryData<RoleDTO>(detailKey, { ...detailSnapshot, status, edit_revision: optimisticRevision })
+      }
+      const request = (async () => {
       try {
-        await rolesService.update(role.id, { status: enabled ? 1 : 2 })
-        notify.success(enabled ? "角色已启用" : "角色已停用", enabled ? role.name : `拥有「${role.name}」的成员将即刻失去其授权`)
+        const updated = (await rolesService.setStatus(role.id, status, role.edit_revision)).data
+        for (const [key, page] of queryClient.getQueriesData<PageData<RoleDTO>>({ queryKey: ["roles", "list"] })) {
+          if (!page) continue
+          queryClient.setQueryData<PageData<RoleDTO>>(key, {
+            ...page,
+            items: page.items.map((item) => item.id === role.id && item.edit_revision === optimisticRevision ? { ...item, ...updated } : item),
+          })
+        }
+        const currentDetail = queryClient.getQueryData<RoleDTO>(detailKey)
+        if (currentDetail?.edit_revision === optimisticRevision) queryClient.setQueryData<RoleDTO>(detailKey, { ...currentDetail, ...updated })
+        if (!silent) {
+          toast.add({
+            title: enabled ? "角色已启用" : "角色已停用",
+            description: enabled ? role.name : `拥有「${role.name}」的成员将即刻失去其授权`,
+            type: "success",
+            actionProps: { children: "撤销", onClick: () => void toggleStatus(updated, !enabled, true) },
+          })
+        }
         invalidate()
       } catch (error) {
+        for (const [key, page] of queryClient.getQueriesData<PageData<RoleDTO>>({ queryKey: ["roles", "list"] })) {
+          const previous = snapshots.get(JSON.stringify(key))
+          if (!page || !previous) continue
+          queryClient.setQueryData<PageData<RoleDTO>>(key, {
+            ...page,
+            items: page.items.map((item) => item.id === role.id && item.status === status && item.edit_revision === optimisticRevision ? { ...item, status: previous.status, edit_revision: previous.edit_revision } : item),
+          })
+        }
+        const currentDetail = queryClient.getQueryData<RoleDTO>(detailKey)
+        if (detailSnapshot && currentDetail?.status === status && currentDetail.edit_revision === optimisticRevision) {
+          queryClient.setQueryData<RoleDTO>(detailKey, { ...currentDetail, status: detailSnapshot.status, edit_revision: detailSnapshot.edit_revision })
+        }
         notify.apiError(error, "状态更新失败")
       } finally {
-        setPending(null)
+        setPending((current) => {
+          const next = new Set(current)
+          next.delete(role.id)
+          return next
+        })
+      }
+      })()
+      statusRequests.current.set(role.id, request)
+      try {
+        await request
+      } finally {
+        if (statusRequests.current.get(role.id) === request) statusRequests.current.delete(role.id)
       }
     },
-    [invalidate],
+    [invalidate, queryClient],
   )
 
   const remove = useCallback(
@@ -76,6 +171,9 @@ export default function RolesPage() {
           try {
             await rolesService.remove(role.id)
             notify.success("角色已删除", role.name)
+            if (roles.length === 1 && pagination.pageIndex > 0) {
+              setPagination((current) => ({ ...current, pageIndex: current.pageIndex - 1 }))
+            }
             invalidate()
           } catch (error) {
             notify.apiError(error, "删除失败")
@@ -83,7 +181,7 @@ export default function RolesPage() {
           }
         },
       }),
-    [confirm, invalidate],
+    [confirm, invalidate, roles.length, pagination.pageIndex],
   )
 
   const columns = useMemo<ColumnDef<RoleDTO>[]>(
@@ -163,7 +261,7 @@ export default function RolesPage() {
             <div className="flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
               <Switch
                 checked={role.status === 1}
-                disabled={!!disabledReason || pending === role.id}
+                disabled={!!disabledReason || pending.has(role.id) || query.isPlaceholderData}
                 onCheckedChange={(checked) => void toggleStatus(role, checked)}
                 aria-label={role.status === 1 ? "停用角色" : "启用角色"}
               />
@@ -196,7 +294,7 @@ export default function RolesPage() {
           return (
             <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
               <DropdownMenu>
-                <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`${role.name} 的操作`} />}>
+                <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`${role.name} 的操作`} disabled={query.isPlaceholderData} />}>
                   <MoreHorizontal />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-44">
@@ -232,11 +330,11 @@ export default function RolesPage() {
         },
       },
     ],
-    [can, pending, toggleStatus, remove],
+    [can, pending, toggleStatus, remove, query.isPlaceholderData],
   )
 
   const stats = {
-    total: roles.length,
+    total,
     builtIn: roles.filter((r) => r.built_in).length,
     disabled: roles.filter((r) => r.status !== 1).length,
     grants: roles.reduce((sum, r) => sum + r.user_count, 0),
@@ -265,29 +363,42 @@ export default function RolesPage() {
       />
 
       <StatGrid>
-        <StatCard label="角色总数" value={stats.total} icon={ShieldCheck} tone="primary" loading={query.isLoading} hint={`自定义角色 ${stats.total - stats.builtIn} 个`} />
-        <StatCard label="内置角色" value={stats.builtIn} icon={Crown} tone="warning" loading={query.isLoading} hint="受保护：不可删除、不可停用" />
-        <StatCard label="授权关系" value={stats.grants} icon={UsersRound} tone="info" loading={query.isLoading} hint="成员-角色绑定总数（多角色按人次计）" />
-        <StatCard label="已停用角色" value={stats.disabled} icon={ShieldOff} tone="default" loading={query.isLoading} hint="停用后其权限对所有成员失效" />
+        <StatCard label="角色总数" value={listUnavailable ? "—" : stats.total} icon={ShieldCheck} tone="primary" loading={query.isLoading} hint={listUnavailable ? "角色数据不可用" : "当前搜索条件下的总数"} />
+        <StatCard label="内置角色（本页）" value={listUnavailable ? "—" : stats.builtIn} icon={Crown} tone="warning" loading={query.isLoading} hint={`本页 ${roles.length} 个角色`} />
+        <StatCard label="成员绑定（本页）" value={listUnavailable ? "—" : stats.grants} icon={UsersRound} tone="info" loading={query.isLoading} hint="本页角色的成员绑定数" />
+        <StatCard label="停用角色（本页）" value={listUnavailable ? "—" : stats.disabled} icon={ShieldOff} tone="default" loading={query.isLoading} hint="停用后其权限对所有成员失效" />
       </StatGrid>
+
+      {query.isError && query.data && !forbidden && <QueryErrorState error={query.error} label="角色列表" onRetry={() => void query.refetch()} retrying={query.isFetching} />}
 
       <Card className="border border-border/80 bg-card shadow-xs rounded-xl">
         <CardContent>
-          <DataTable
+          {query.isPlaceholderData && <QueryPlaceholderNotice label="角色列表" />}
+          {listUnavailable ? (
+            <QueryErrorState error={query.error} label="角色列表" onRetry={() => void query.refetch()} retrying={query.isFetching} />
+          ) : <DataTable
             columns={columns}
             data={roles}
             loading={query.isLoading}
             getRowId={(r) => r.id}
+            externalSearch={{ value: search, onChange: setSearch }}
+            serverFiltering
+            serverPagination={{ pageIndex: pagination.pageIndex, pageSize: pagination.pageSize, total, onChange: setPagination }}
+            defaultPageSize={20}
             searchPlaceholder="搜索角色名称或编码"
             columnLabels={{ name: "角色", code: "角色编码", user_count: "成员", permissions: "权限点", status: "状态", created_at: "创建时间" }}
             initialColumnVisibility={{ created_at: false }}
             onRefresh={() => void query.refetch()}
             isRefreshing={query.isFetching}
-            onRowClick={(role) => can("roles:assign") && setPermRole(role)}
+            onRowClick={(role) => !query.isPlaceholderData && can("roles:assign") && setPermRole(role)}
             stickyActionColumn
+            enableColumnResizing
+            enableColumnPinning
+            initialColumnPinning={{ start: ["name"], end: ["actions"] }}
+            tablePreference={user?.id ? { userId: user.id, tableId: "roles", schemaVersion: 1 } : undefined}
             emptyTitle="还没有角色"
             emptyDescription="创建角色并分配权限点，再将角色授予成员"
-          />
+          />}
         </CardContent>
       </Card>
 

@@ -177,7 +177,7 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             {error && (
-              <Alert variant="destructive" className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1">
+              <Alert id="login-form-error" variant="destructive" role="alert" aria-live="assertive" className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1">
                 <AlertCircle />
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
@@ -227,6 +227,7 @@ export default function LoginPage() {
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder={domainMode ? "工号 / 统一通行证账号，如 zhangsan" : "请输入用户名"}
                   aria-invalid={usernameMissing || undefined}
+                  aria-describedby={usernameMissing ? "login-username-error" : error ? "login-form-error" : undefined}
                   disabled={submitting}
                 />
                 {domainMode && domain && (
@@ -236,7 +237,7 @@ export default function LoginPage() {
                 )}
               </InputGroup>
               {domainMode && <FieldDescription>支持企业域工号 / 统一通行证登录，使用域账号密码验证，首次登录将自动建档。</FieldDescription>}
-              {usernameMissing && <FieldError>请输入{domainMode ? "域账号" : "用户名"}</FieldError>}
+              {usernameMissing && <FieldError id="login-username-error">请输入{domainMode ? "域账号" : "用户名"}</FieldError>}
             </Field>
 
             <Field data-invalid={passwordMissing || undefined}>
@@ -253,6 +254,7 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={domainMode ? "请输入域账号密码" : "请输入登录密码"}
                   aria-invalid={passwordMissing || undefined}
+                  aria-describedby={passwordMissing ? "login-password-error" : error ? "login-form-error" : undefined}
                   disabled={submitting}
                 />
                 <InputGroupAddon align="inline-end">
@@ -265,7 +267,7 @@ export default function LoginPage() {
                   </InputGroupButton>
                 </InputGroupAddon>
               </InputGroup>
-              {passwordMissing && <FieldError>请输入密码</FieldError>}
+              {passwordMissing && <FieldError id="login-password-error">请输入密码</FieldError>}
             </Field>
 
             <Button type="submit" size="lg" className="h-10 w-full" disabled={submitting || noDomains}>
