@@ -135,10 +135,11 @@ npm --prefix frontend test
 ---
 
 ## 📑 核心文档索引
-- [需求规格说明书 (REQUIREMENTS.md)](REQUIREMENTS.md)
+- [需求规格说明书 (REQUIREMENTS.md)](docs/REQUIREMENTS.md)
 - [AI 智能体开发规范与协作指南 (AGENTS.md)](AGENTS.md)
-- [具体系统架构与实现方案 (ARCHITECTURE_AND_PLAN.md)](ARCHITECTURE_AND_PLAN.md)
-- [任务跟踪看板 (TODOLIST.md)](TODOLIST.md)
+- [具体系统架构与实现方案 (ARCHITECTURE_AND_PLAN.md)](docs/ARCHITECTURE_AND_PLAN.md)
+- [问题处理与前端交互改造方案（2026-10-22）](docs/REMEDIATION_AND_UX_PLAN.md)
+- [任务跟踪看板 (TODOLIST.md)](docs/TODOLIST.md)
 
 ## 认证部署配置
 `security.trusted_origins` 是可携带凭据的精确 Web 来源列表，同时用于 Cookie 写请求的 Origin/Referer 校验；不得使用 `*`。生产 `session.secure` 强制为 true，建议经 HTTPS 同源部署。`session.max_age` 为空闲有效期，`session.absolute_max_age` 为绝对有效期。登录/Token 获取限流为单进程实现，多实例需另行部署分布式限流。浏览器只使用 Cookie；CLI 使用 `/api/v1/auth/token`、`/api/v1/auth/refresh` 和 Bearer Header。注销只撤销当前会话或令牌族。
