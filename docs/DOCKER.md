@@ -53,6 +53,12 @@ docker compose down
 
 R09 专用故障脚本、诊断接口和构建标签已移除。SSE 生命周期修复及正式回归测试保留，历史验收证据见 [R09 历史记录](R09_DOCKER_VALIDATION.md)。
 
+## 日志
+
+后端输出单行 JSON，应用/访问/SQL 分别使用 category=app/access/sql；`.env` 的 LOG_LEVEL（默认 info）与 SQL_LOG_LEVEL（默认 warn）独立控制。SQL warn 记录错误与慢查询，绑定参数及驱动原始错误详情不输出；Fiber 启动 banner 已关闭。
+
+四服务显式使用 local 日志驱动，max-size=20m、max-file=5。通过 `docker compose logs --since 30m app` 查询；容量轮转不保证固定保留天数或容器删除后的历史留存。直接部署的文件模式、轮转、Service 写法与故障处理见 [日志使用说明](BACKEND_LOGGING.md)。
+
 ## 本轮构建验证（2026-10-23）
 
 已实际执行上面的两条 docker build，产出 Linux/arm64 的 `infranexus/backend:local` 和 `infranexus/frontend:local`。隔离 Compose 冒烟通过：四服务健康、SPA 回退/静态资源/404、可信 Origin 的 HttpOnly Cookie 登录、SSE 初始检查点，以及后端重建后的账号/会话保留。测试容器与测试卷已清理，正式镜像保留在本机。结果和镜像 ID 见 [构建证据](evidence/docker-build-2026-10-23.json)。

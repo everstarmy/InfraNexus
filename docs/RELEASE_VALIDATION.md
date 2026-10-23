@@ -1,5 +1,10 @@
 # M6 最终验证与发布准备记录
 
+## 2026-10-23 后端日志专项
+
+L01–L08 完成本地验收：Context 自动关联、Service/任务日志、SQL 参数保护、独立级别、文件轮转与停机、Compose local logging 已实施。全量 Go race 的 200 项测试事件通过（含子用例），go vet、双数据库/真实 Redis、Docker 构建与输出/停机冒烟通过；3 项 Live AD 测试未提供凭据而跳过。详细命令、覆盖与限制见 [日志验证](BACKEND_LOGGING_VALIDATION.md) 和 [结构化证据](evidence/backend-logging-2026-10-23.json)。未进行正式部署，不替代既有生产门禁。
+
+
 > 深度复审更新（2026-10-22）：本文件是 M6 当时的验证记录，保留原始结果供追溯。后续定向审计已复现授权数据竞争、LDAP 原子性/缓存/JIT、订阅释放与 SSE 客户端边界缺陷，当时评级调整为 **Needs Fixes**。本文件的历史通过不能替代新增场景验收；当前改造与发布门禁见 [深度复审整改方案](DEEP_REVIEW_REMEDIATION_PLAN.md)，进度见 [TODOLIST](TODOLIST.md)。
 
 ## 2026-10-23 R13/R14 测试环境收口（最新结论）

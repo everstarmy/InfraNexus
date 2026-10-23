@@ -71,6 +71,7 @@ func NewLDAPService(deps LDAPServiceDeps) domain.LDAPService {
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
 	}
+	deps.Logger = deps.Logger.With("component", "ldap_service")
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ldapService{LDAPServiceDeps: deps, now: time.Now, ctx: ctx, cancel: cancel}
 }
@@ -306,13 +307,13 @@ func (s *ldapService) ListLoginDomains(ctx context.Context) ([]domain.AuthDomain
 	return domains, nil
 }
 
-func directoryFailure(log *slog.Logger, cfg *domain.LDAPConfig, err error) error {
+func directoryFailure(ctx context.Context, log *slog.Logger, cfg *domain.LDAPConfig, err error) error {
 	switch {
 	case errors.Is(err, domain.ErrDirectoryBindFailed):
-		log.Error("Directory service account bind failed", "domain", cfg.Domain, "error", err)
+		log.ErrorContext(ctx, "Directory service account bind failed", "event", "ldap.bind_failed", "domain", cfg.Domain, "error_type", fmt.Sprintf("%T", err))
 		return coreerrors.ErrDirectoryUnavailable.WithMessage("目录服务账号认证失败，请联系管理员检查目录配置")
 	case errors.Is(err, domain.ErrDirectoryUnavailable):
-		log.Error("Directory server unavailable", "domain", cfg.Domain, "error", err)
+		log.ErrorContext(ctx, "Directory server unavailable", "event", "ldap.unavailable", "domain", cfg.Domain, "error_type", fmt.Sprintf("%T", err))
 		return coreerrors.ErrDirectoryUnavailable
 	}
 	return err
@@ -340,7 +341,7 @@ func (s *ldapService) AuthenticateDomain(ctx context.Context, domainName, userna
 	case errors.Is(err, domain.ErrDirectoryAccountDisabled):
 		return nil, coreerrors.ErrAccountDisabled
 	case err != nil:
-		return nil, directoryFailure(s.Logger, cfg, err)
+		return nil, directoryFailure(ctx, s.Logger, cfg, err)
 	}
 	return s.provision(ctx, cfg, *du)
 }
@@ -557,7 +558,7 @@ func (s *ldapService) plan(ctx context.Context, cfg *domain.LDAPConfig, mode str
 	}
 	directory, err := s.Gateway.SearchUsers(ctx, cfg, bindPassword, since)
 	if err != nil {
-		return nil, domain.SyncSummary{}, nil, "", directoryFailure(s.Logger, cfg, err)
+		return nil, domain.SyncSummary{}, nil, "", directoryFailure(ctx, s.Logger, cfg, err)
 	}
 	locals, err := s.Users.ListByDomain(ctx, cfg.Domain)
 	if err != nil {
@@ -605,7 +606,7 @@ func (s *ldapService) Preview(ctx context.Context, configID uuid.UUID, mode stri
 	}
 	now := s.now()
 	if _, err := s.Repo.DeleteExpiredPlans(ctx, now); err != nil {
-		s.Logger.WarnContext(ctx, "Delete expired LDAP plans failed", "error", err)
+		s.Logger.WarnContext(ctx, "Delete expired LDAP plans failed", "event", "ldap.delete_expired_ldap_plans_failed", "error_type", fmt.Sprintf("%T", err))
 	}
 	items := make([]domain.SyncPlanItem, 0, len(planned))
 	for _, item := range planned {
@@ -742,11 +743,7 @@ func (s *ldapService) StartSync(ctx context.Context, req domain.LDAPSyncRequest,
 		"mode": log.Mode, "trigger": trigger, "timestamp": now,
 	})
 	started := *log
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.runSync(cfg, log, planned, summary, total)
-	}()
+	s.wg.Go(func() { s.runSync(cfg, log, planned, summary, total) })
 	return &started, nil
 }
 
@@ -756,7 +753,13 @@ func (s *ldapService) GetSyncLog(ctx context.Context, id uuid.UUID) (*domain.LDA
 }
 
 func (s *ldapService) runSync(cfg *domain.LDAPConfig, log *domain.LDAPSyncLog, planned []plannedUser, summary domain.SyncSummary, total int) {
-	ctx, cancel := context.WithCancel(s.ctx)
+	taskCtx := requestmeta.WithRequestID(s.ctx, log.RequestID)
+	operatorID := ""
+	if log.OperatorID != nil {
+		operatorID = log.OperatorID.String()
+	}
+	taskCtx = requestmeta.WithTask(taskCtx, log.ID.String(), operatorID)
+	ctx, cancel := context.WithCancel(taskCtx)
 	defer cancel()
 	heartbeatDone := make(chan struct{})
 	go func() {
@@ -773,7 +776,7 @@ func (s *ldapService) runSync(cfg *domain.LDAPConfig, log *domain.LDAPSyncLog, p
 				owned, err := s.Repo.RenewSyncLease(leaseCtx, cfg.ID, log.ID, leaseNow, leaseNow.Add(syncLeaseDuration))
 				leaseCancel()
 				if err != nil {
-					s.Logger.WarnContext(ctx, "Renew LDAP sync lease failed", "task_id", log.ID, "error", err)
+					s.Logger.WarnContext(ctx, "Renew LDAP sync lease failed", "event", "ldap.renew_ldap_sync_lease_failed", "task_id", log.ID, "error_type", fmt.Sprintf("%T", err))
 					continue
 				}
 				if !owned {
@@ -820,7 +823,7 @@ func (s *ldapService) runSync(cfg *domain.LDAPConfig, log *domain.LDAPSyncLog, p
 	}
 
 	if err := persistProgress(domain.SyncPhaseApplying, 0, true); err != nil {
-		s.Logger.WarnContext(ctx, "LDAP sync lost task lease before apply", "task_id", log.ID)
+		s.Logger.WarnContext(ctx, "LDAP sync lost task lease before apply", "event", "ldap.ldap_sync_lost_task_lease_before_apply", "task_id", log.ID)
 		return
 	}
 	processed := 0
@@ -889,7 +892,7 @@ func (s *ldapService) runSync(cfg *domain.LDAPConfig, log *domain.LDAPSyncLog, p
 		}
 	}
 	if errors.Is(runErr, errSyncLeaseLost) {
-		s.Logger.WarnContext(ctx, "LDAP sync stopped after losing task lease", "task_id", log.ID)
+		s.Logger.WarnContext(ctx, "LDAP sync stopped after losing task lease", "event", "ldap.ldap_sync_stopped_after_losing_task_lease", "task_id", log.ID)
 		return
 	}
 	report.DepartmentsCreated = resolver.created
@@ -922,10 +925,16 @@ func (s *ldapService) runSync(cfg *domain.LDAPConfig, log *domain.LDAPSyncLog, p
 	}
 	persistCancel()
 	if saveErr != nil || !owned || !released {
-		s.Logger.Error("Persist LDAP sync terminal state failed", "task_id", log.ID, "operator_id", log.OperatorID, "request_id", log.RequestID, "error", saveErr)
+		s.Logger.ErrorContext(ctx, "Persist LDAP sync terminal state failed", "event", "ldap.sync_persist_failed", "error_type", fmt.Sprintf("%T", saveErr))
 		return
 	}
-	s.Logger.Info("Directory sync finished", "task_id", log.ID, "operator_id", log.OperatorID, "request_id", log.RequestID, "domain", cfg.Domain, "status", log.Status, "created", report.Created, "updated", report.Updated, "failed", report.Failed)
+	level := slog.LevelInfo
+	if log.Status == domain.SyncStatusFailed {
+		level = slog.LevelError
+	} else if log.Status == domain.SyncStatusPartial {
+		level = slog.LevelWarn
+	}
+	s.Logger.Log(ctx, level, "Directory sync finished", "event", "ldap.sync_finished", "domain", cfg.Domain, "status", log.Status, "created", report.Created, "updated", report.Updated, "failed", report.Failed)
 	s.publish(ctx, "ldap.sync.progress", map[string]any{
 		"schema_version": 1, "event_id": uuid.NewString(), "task_id": log.ID,
 		"phase": domain.SyncPhaseFinalizing, "processed": processed, "total": &total,
@@ -945,14 +954,14 @@ func (s *ldapService) runSync(cfg *domain.LDAPConfig, log *domain.LDAPSyncLog, p
 func (s *ldapService) RunDueSyncs(ctx context.Context, now time.Time) int {
 	actualNow := s.now()
 	if err := s.Repo.RecoverExpiredSyncs(ctx, actualNow); err != nil {
-		s.Logger.Error("Recover expired directory sync tasks failed", "error", err)
+		s.Logger.ErrorContext(ctx, "Recover expired directory sync tasks failed", "event", "ldap.recover_expired_directory_sync_tasks_failed", "error_type", fmt.Sprintf("%T", err))
 	}
 	if _, err := s.Repo.DeleteExpiredPlans(ctx, actualNow); err != nil {
-		s.Logger.Error("Delete expired directory sync plans failed", "error", err)
+		s.Logger.ErrorContext(ctx, "Delete expired directory sync plans failed", "event", "ldap.delete_expired_directory_sync_plans_failed", "error_type", fmt.Sprintf("%T", err))
 	}
 	configs, err := s.Repo.ListConfigs(ctx)
 	if err != nil {
-		s.Logger.Error("List directory configs for scheduler failed", "error", err)
+		s.Logger.ErrorContext(ctx, "List directory configs for scheduler failed", "event", "ldap.list_directory_configs_for_scheduler_failed", "error_type", fmt.Sprintf("%T", err))
 		return 0
 	}
 	started := 0
@@ -965,13 +974,13 @@ func (s *ldapService) RunDueSyncs(ctx context.Context, now time.Time) int {
 		}
 		plan, err := s.Preview(ctx, cfg.ID, domain.SyncModeFull, nil)
 		if err != nil {
-			s.Logger.Error("Scheduled directory sync preview failed", "domain", cfg.Domain, "error", err)
+			s.Logger.ErrorContext(ctx, "Scheduled directory sync preview failed", "event", "ldap.scheduled_directory_sync_preview_failed", "domain", cfg.Domain, "error_type", fmt.Sprintf("%T", err))
 			continue
 		}
 		req := domain.LDAPSyncRequest{ConfigID: cfg.ID, Mode: plan.Mode, PlanID: plan.PlanID, IdempotencyKey: uuid.NewString()}
 		if _, err := s.StartSync(ctx, req, domain.SyncTriggerSchedule, nil); err != nil {
 			if !errors.Is(err, coreerrors.ErrSyncInProgress) {
-				s.Logger.Error("Scheduled directory sync failed to start", "domain", cfg.Domain, "error", err)
+				s.Logger.ErrorContext(ctx, "Scheduled directory sync failed to start", "event", "ldap.scheduled_directory_sync_failed_to_start", "domain", cfg.Domain, "error_type", fmt.Sprintf("%T", err))
 			}
 			continue
 		}
@@ -982,7 +991,7 @@ func (s *ldapService) RunDueSyncs(ctx context.Context, now time.Time) int {
 
 func (s *ldapService) ListSyncLogs(ctx context.Context, configID *uuid.UUID, page, pageSize int) ([]domain.LDAPSyncLog, int64, error) {
 	if err := s.Repo.RecoverExpiredSyncs(ctx, s.now()); err != nil {
-		s.Logger.WarnContext(ctx, "Recover expired directory sync tasks while listing failed", "error", err)
+		s.Logger.WarnContext(ctx, "Recover expired directory sync tasks while listing failed", "event", "ldap.recover_expired_directory_sync_tasks_while_listing_failed", "error_type", fmt.Sprintf("%T", err))
 	}
 	logs, total, err := s.Repo.ListLogs(ctx, configID, page, pageSize)
 	if err != nil {
@@ -1007,8 +1016,9 @@ func RunDirectoryScheduler(ctx context.Context, svc domain.LDAPService, tick tim
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			if started := svc.RunDueSyncs(ctx, now); started > 0 {
-				log.Info("Scheduled directory syncs started", "count", started)
+			tickCtx := requestmeta.WithTask(ctx, uuid.NewString(), "")
+			if started := svc.RunDueSyncs(tickCtx, now); started > 0 {
+				log.InfoContext(tickCtx, "Scheduled directory syncs started", "component", "ldap_scheduler", "event", "ldap.scheduler_started_tasks", "count", started)
 			}
 		}
 	}

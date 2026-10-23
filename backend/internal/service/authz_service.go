@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"github.com/casbin/casbin/v3"
 	"github.com/google/uuid"
 
+	"infranexus/internal/core/requestmeta"
 	"infranexus/internal/domain"
 )
 
@@ -117,6 +119,7 @@ func (s *authorizationService) Enforce(ctx context.Context, subject, object, act
 }
 
 func (s *authorizationService) Run(ctx context.Context) {
+	ctx = requestmeta.WithTask(ctx, uuid.NewString(), "")
 	if s.notifier == nil || s.state == nil {
 		<-ctx.Done()
 		return
@@ -130,7 +133,7 @@ func (s *authorizationService) Run(ctx context.Context) {
 		if revisions == nil && (retrySubscribeAt.IsZero() || !time.Now().Before(retrySubscribeAt)) {
 			channel, err := s.notifier.Subscribe(ctx)
 			if err != nil {
-				s.logWorkerError("subscribe", err)
+				s.logWorkerError(ctx, "subscribe", err)
 				retrySubscribeAt = time.Now().Add(2 * time.Second)
 			} else {
 				revisions = channel
@@ -138,7 +141,7 @@ func (s *authorizationService) Run(ctx context.Context) {
 				// Subscribe before taking the snapshot so changes are either
 				// included in this load or delivered by the stream after it.
 				if err := s.RefreshIfStale(ctx); err != nil {
-					s.logWorkerError("refresh-after-subscribe", err)
+					s.logWorkerError(ctx, "refresh-after-subscribe", err)
 				}
 			}
 		}
@@ -152,21 +155,23 @@ func (s *authorizationService) Run(ctx context.Context) {
 				continue
 			}
 			if err := s.RefreshIfStale(ctx); err != nil {
-				s.logWorkerError("refresh", err)
+				s.logWorkerError(ctx, "refresh", err)
 			} else if s.loadedRev.Load() < revision {
 				// Revision checks are authoritative; a later poll retries transient DB visibility.
-				s.logWorkerError("refresh-revision", errors.New("notifier revision is ahead of local snapshot"))
+				s.logWorkerError(ctx, "refresh-revision", errors.New("notifier revision is ahead of local snapshot"))
 			}
 		case <-ticker.C:
 			if err := s.publishPending(ctx); err != nil {
-				s.logWorkerError("outbox", err)
+				s.logWorkerError(ctx, "outbox", err)
 			}
 		}
 	}
 }
 
 func (s *authorizationService) publishPending(ctx context.Context) error {
-	rows, err := s.state.Pending(ctx, time.Now(), 100)
+	// Scope idle-log suppression to this polling SELECT, never the subsequent
+	// publish/update operations or other queries sharing the worker context.
+	rows, err := s.state.Pending(requestmeta.WithSQLPoll(ctx), time.Now(), 100)
 	if err != nil {
 		return err
 	}
@@ -194,9 +199,9 @@ func authorizationRetryDelay(attempt int) time.Duration {
 	return min(delay, authorizationMaxRetry)
 }
 
-func (s *authorizationService) logWorkerError(operation string, err error) {
+func (s *authorizationService) logWorkerError(ctx context.Context, operation string, err error) {
 	if s.logger != nil {
-		s.logger.Warn("authorization convergence worker operation failed", "operation", operation, "error", err)
+		s.logger.WarnContext(ctx, "authorization convergence worker operation failed", "component", "authorization_service", "event", "authorization.worker_retry", "operation", operation, "error_type", fmt.Sprintf("%T", err))
 	}
 }
 

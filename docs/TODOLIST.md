@@ -1,6 +1,53 @@
 # InfraNexus 工程交付与实施待办清单 (TODOLIST.md)
 
-本清单用于追踪 **InfraNexus** 的工程交付。当前执行任务为下方「M0–M6 深度复审整改」；原 M0–M6 看板保留供追溯，不作为本轮验收结论。
+本清单用于追踪 **InfraNexus** 的工程交付。最近完成专项为下方「后端日志专项」；「M0–M6 深度复审整改」保留既有验收结论，原 M0–M6 看板保留供追溯。
+
+## 2026-10-23 后端日志专项（已完成本地验收）
+
+详细契约、字段、配置、存放位置、错误处理示例与验收矩阵见 [后端日志实施方案](BACKEND_LOGGING_PLAN.md)。本轮 L01–L08 已完成本地代码与隔离环境验收；具体命令、正式回归、兼容和未覆盖范围见 [专项验证记录](BACKEND_LOGGING_VALIDATION.md) 与 [结构化证据](evidence/backend-logging-2026-10-23.json)。3 项既有 Live AD 测试因本轮未提供目录凭据而跳过，日志专项的双数据库/Redis 测试已实际通过；不修改既有 R01–R14 的验收状态。任务完成必须登记变更、实际命令/结果、环境及未覆盖项，不以文档或 mock 代替端到端证据。
+
+- [x] **L01 / P1：字段与配置契约**
+  - [x] 增加 logging 配置、缺省/显式值区分、环境变量独立绑定和启动校验；缺少 logging 块兼容原 debug 行为。
+  - [x] 固定 app/access/sql 分类、数值毫秒耗时、关联保留字段、安全错误结构和独立 app/sql 级别；明确 stdout/file/both 行为。
+  - [x] 验收：配置缺失、YAML、仅环境变量、优先级、false、非法值和独立级别测试通过。
+- [x] **L02 / P0：统一 Context 与日志自动关联**（依赖 L01）
+  - [x] requestmeta 作为唯一元数据入口，修复 logger.WithContext 的旧键错配；扩展 task_id/operator_id。
+  - [x] Context Handler 自动提取字段，WithAttrs/WithGroup 派生保留能力，去重与顶层位置固定，禁止共享 logger 保存请求状态。
+  - [x] 验收：Buffer 断言普通 WarnContext/ErrorContext 的关联字段；无请求/后台任务/并发不同请求与 race 通过。
+- [x] **L03 / P1：HTTP 全链路与请求汇总**（依赖 L02）
+  - [x] 保留 requestid.FromContext(c)，复制 ID 桥接标准 Context；128 字节上限、超长重建且响应头同步。
+  - [x] 调整 requestid→请求日志→recover→其余中间件顺序；访问字段、业务码、错误安全摘要和路由模板统一。
+  - [x] 验收：透传/生成/超长 ID、并发、成功与 4xx/5xx/panic/CORS 提前返回；请求头、响应头/错误正文与日志一致，单次访问汇总只有一条。
+- [x] **L04 / P0：GORM 参数保护与 SQL 分类**（依赖 L01、L02；全链路验收依赖 L03）
+  - [x] 核心 GORM 适配器实现 Interface/ParamsFilter 和编译断言，移除 bootstrap 对 middleware 元数据的依赖。
+  - [x] SQL 独立开关/级别/慢阈值、惰性回调、LogMode 副本；数据库错误安全分类；Raw/Exec/表达式参数化巡检。
+  - [x] 验收：SQLite/PostgreSQL 参数及驱动错误哨兵不泄露；普通/慢/错误/NotFound/禁用/级别矩阵与三类日志关联通过，缺环境不得勾选。
+- [x] **L05 / P1：Service、后台任务与 SSE 日志迁移**（依赖 L02、L03、L04 的安全错误契约）
+  - [x] 逐一盘点 auth、LDAP、authz 等既有日志和关键 err 分支；明确返回错误、消化错误与后台终态的记录责任，保留错误链和原业务结果。
+  - [x] Context 调用替换无 Context 日志；必要时注入 logger；统一 operation/event 和安全字段，不逐层重复打印。
+  - [x] LDAP 请求来源从持久化记录恢复到任务 Context；定时任务/SSE 使用正确生命周期，不持有 fiber.Ctx。
+  - [x] 验收：非致命 Warn+成功响应、致命失败、重试、后台最终失败、任务恢复、无请求来源和 SSE 停机通过。
+- [x] **L06 / P1：文件输出、轮转与关闭**（依赖 L01、L02、L04）
+  - [x] 选定并锁定成熟轮转库；app/access→app.log，sql→sql.log，stdout/file/both 分类分流与独立级别。
+  - [x] 100MB/10 备份/14 天/压缩配置、目录路径/权限、事件限长、故障 stderr 限频降级、both 独立写入和资源关闭。
+  - [x] 梳理 main 的 os.Exit 和 defer，保证最终停机日志先于 writer 关闭，日志初始化失败有安全启动诊断。
+  - [x] 验收：临时目录轮转/压缩/数量/年龄/JSON/权限/关闭测试；注入 Writer 故障、初始化失败及正常/失败退出回归通过。
+- [x] **L07 / P1：部署配置与操作说明**（依赖 L06）
+  - [x] Compose 四服务配置 local logging（20m×5）；补环境变量示例、JSON 启动输出、容器日志查询和文件挂载 UID 说明。
+  - [x] .gitignore 覆盖日志目录及压缩备份；说明应用轮转和平台轮转的职责、容量与历史保留限制。
+  - [x] 验收：隔离 Docker 冒烟和配置检查通过，无生产凭据或真实部署变更。
+- [x] **L08 / P1：集成回归、兼容与证据收口**（依赖 L01–L07）
+  - [x] 正式 HTTP→Service→SQLite/PostgreSQL 关联回归；后台与 SSE 生命周期回归；全输出敏感哨兵检查。
+  - [x] backend 全量 go test -race ./...、go vet ./... 通过；登记实际环境、命令、Skip 和限制。
+  - [x] 更新 REQUIREMENTS、ARCHITECTURE_AND_PLAN、DOCKER 和 RELEASE_VALIDATION，说明字段变更、默认值及输出回退方案；按完成证据勾选本专项。
+
+- [x] **L09 / P1：默认配置下的授权空轮询 SQL 降噪**（L01–L08 后续增量）
+  - [x] 在授权 Outbox Pending SELECT 的派生 Context 上标记后台轮询，仅过滤成功、非慢、零行且无请求来源的 INFO SQL；不改配置或轮询频率。
+  - [x] 先复现真实 Service→Repository/GORM 的三次空轮询噪声，再通过 SQLite/PostgreSQL 正式回归；保留实际处理、错误、慢查询、未知行数和普通请求日志。
+  - [x] 默认配置启动冒烟：空闲观察 2 秒，授权空轮询 SQL 为 0；普通启动 SQL 与正常停机事件保留。README、AGENTS 和日志说明同步。
+  - [x] 全量 race/vet 结果与跳过项登记到日志验证及独立证据，清理本轮测试实例后完成验收。
+
+专项证据模板：任务 ID / 变更与提交 / 实际命令与结果 / SQLite、PostgreSQL、Docker 环境 / 未覆盖项 / 字段兼容与回退影响。
 
 ## 2026-10-22 当前看板：M0–M6 深度复审整改
 

@@ -40,7 +40,7 @@ func NewAuthService(cfg *config.Config, users domain.UserRepository, store domai
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &authService{cfg: cfg, users: users, store: store, authz: authz, directory: directory, logger: logger, now: time.Now}
+	return &authService{cfg: cfg, users: users, store: store, authz: authz, directory: directory, logger: logger.With("component", "auth_service"), now: time.Now}
 }
 
 func (s *authService) Domains(ctx context.Context) ([]domain.AuthDomain, error) {
@@ -165,13 +165,13 @@ func (s *authService) AuthenticateSession(ctx context.Context, id string) (*doma
 	}
 	if sess.AuthVersion < 1 || sess.AuthVersion != user.AuthVersion {
 		if err := s.store.DeleteSession(ctx, id); err != nil {
-			s.logger.WarnContext(ctx, "Delete revoked session failed", "error_type", fmt.Sprintf("%T", err))
+			s.logger.WarnContext(ctx, "Delete revoked session failed", "event", "auth.revoked_session_cleanup_failed", "operation", "delete_revoked_session", "error_type", fmt.Sprintf("%T", err))
 		}
 		return nil, time.Time{}, coreerrors.ErrSessionRevoked
 	}
 	if revokedBefore(user, sess.CreatedAt, time.Millisecond) {
 		if err := s.store.DeleteSession(ctx, id); err != nil {
-			s.logger.WarnContext(ctx, "Delete revoked session failed", "error_type", fmt.Sprintf("%T", err))
+			s.logger.WarnContext(ctx, "Delete revoked session failed", "event", "auth.revoked_session_cleanup_failed", "operation", "delete_revoked_session", "error_type", fmt.Sprintf("%T", err))
 		}
 		return nil, time.Time{}, coreerrors.ErrSessionRevoked
 	}
@@ -187,7 +187,7 @@ func revokedBefore(user *domain.User, issuedAt time.Time, precision time.Duratio
 
 func (s *authService) recordLogin(ctx context.Context, user *domain.User) {
 	if err := s.users.UpdateColumns(ctx, user.ID, map[string]any{"last_login_at": s.now()}); err != nil {
-		s.logger.WarnContext(ctx, "Update last login timestamp failed", "user_id", user.ID, "error_type", fmt.Sprintf("%T", err))
+		s.logger.WarnContext(ctx, "Update last login timestamp failed", "event", "auth.last_login_update_failed", "operation", "update_last_login", "user_id", user.ID, "error_type", fmt.Sprintf("%T", err))
 	}
 }
 func principal(user *domain.User, sessionID, familyID string) *domain.Principal {

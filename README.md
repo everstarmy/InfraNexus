@@ -1,179 +1,261 @@
-# InfraNexus - 企业级云原生全栈敏捷开发脚手架
+# InfraNexus
 
-[![Go](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat&logo=go)](https://go.dev/)
-[![Fiber](https://img.shields.io/badge/Fiber-v3-00ACD7?style=flat&logo=gofiber)](https://gofiber.io/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat&logo=react)](https://react.dev/)
-[![TailwindCSS](https://img.shields.io/badge/Tailwind-v4-38B2AC?style=flat&logo=tailwind-css)](https://tailwindcss.com/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+基于 **Go / Fiber v3 / React 19** 的前后端分离管理工作台脚手架，提供身份认证、权限控制、组织人员管理、AD/LDAP 目录同步、实时通知和日志基础设施，可在此基础上扩展业务模块。
 
-**InfraNexus** 是一套开箱即用的现代化企业级 SaaS 工作台脚手架。
-后端基于 **Go 1.27+ / GoFiber v3 / GORM / Casbin v3 / Redis**，前端基于 **React 19 / Vite 8 / Tailwind CSS v4 / @base-ui/react / TanStack Table v9**。
+项目已实现登录及六个工作台模块：**仪表盘、用户管理、部门管理、角色管理、权限清单、目录同步**。后端采用 Handler → Service → Repository 分层与接口注入；前端提供通用工作台布局、数据表格、表单和权限组件。
 
----
+本文按当前代码与截至 **2026-10-23** 的验收记录汇总已完成内容。验证范围和环境限制见文末，后续进度以 [任务清单](docs/TODOLIST.md) 为准。
 
-## 🌟 核心特性与架构亮点
+## 已完成的业务模块
 
-### 1. 后端工程 (Go 1.27+ / Fiber v3)
-- **极简薄入口与依赖注入**：`cmd/server/main.go` 保持薄装配，严格遵循 `Handler -> Service -> Repository` 3 层解耦与接口抽象。
-- **全局 UUID 主键**：数据表主键全面采用 UUID（`github.com/google/uuid`），通过 `BeforeCreate` 钩子自动发号，降低顺序 ID 枚举风险。
-- **GORM 双引擎驱动与 JSONB 强类型**：
-  - 同一套模型兼容 **PostgreSQL**（原生 `uuid` 与高效 `jsonb` 索引）与 **SQLite**（本地单文件免运维）。
-  - 集成 `gorm.io/datatypes`，使用 `datatypes.JSONType[T]` 泛型强类型映射个性化偏好配置。
-- **认证双通道体系 (Dual-Channel Auth)**：
-  - **Web 端 SaaS 工作台**：采用 `HttpOnly + Secure + SameSite=Lax` Session Cookie，避免脚本直接读取 Cookie，服务端滑动窗口自动静默续签。
-  - **开放 API / CLI 工具**：采用 `Authorization: Bearer <JWT>`，使用令牌族支持撤销。
-- **统一响应模型与领域业务状态码**：
-  - 泛型包装 `response.Success[T](c, data)`、`response.Page[T](c, items, total, page, pageSize)` 与 `response.Error`。
-  - 业务 `code` 与领域状态强挂钩（如 `200000` 成功，`400001` 参数错误，`401001` 凭据过期，`403001` Casbin 权限阻断等）。
-- **细粒度 Casbin RBAC**：基于 `(Role, Path, Method)` 动态策略模型与 GORM 适配器，授权变动实时生效；菜单 → 按钮 → API 三级权限点差量同步为策略，`POST /api/v1/permissions/sync` 扫描已注册路由并修复策略漂移。
-- **组织架构与人员调动**：部门树（TreePath 物化路径，最多 15 级）、负责人与排序、子部门/成员删除保护；`POST /api/v1/users/batch-move-department` 事务化批量调岗。
-- **AD / LDAP 目录集成与多源认证**：基于 `go-ldap/v3` 的连接测试、同步预览、手动全量/增量同步与按间隔定时全量同步，OU 自动映射部门树；登录支持本地账号与企业域账号，首次域登录自动建档（JIT），域认证失败统一返回 `401002`。
-- **实时事件推送 (SSE)**：基于 GoFiber v3 流式响应实现 Server-Sent Events 长连接通知中心。
+| 模块 | 当前能力 |
+| --- | --- |
+| 登录与身份 | 本地账号及企业域账号登录；Web Cookie 会话恢复、滑动续期和单会话退出；外部客户端 JWT 签发、刷新与令牌族撤销 |
+| 仪表盘 | 从后端获取平台概览、用户与组织统计，按权限展示工作台入口 |
+| 用户管理 | 分页、搜索与筛选；创建、编辑、详情、启停、重置密码、多角色分配；部门归属和批量调岗；编辑版本冲突检测与草稿保留 |
+| 部门管理 | 部门树、创建和编辑、移动与排序、成员管理；层级、循环引用和删除保护；可见节点虚拟化、搜索定位及拖拽交互 |
+| 角色管理 | 角色创建、编辑、启停和删除；权限树授权、角色成员查看与内置角色保护 |
+| 权限清单 | 菜单、按钮、API 权限点树；权限维护；扫描后端路由、同步权限并展示差异报告 |
+| AD / LDAP 目录同步 | 多目录配置与连接测试；属性映射和 OU/属性部门映射；域账号首次登录建档；全量/增量同步预览、差异确认、手动/定时执行、任务详情与结果报告 |
+| 实时通知 | 目录同步进度与终态通知；SSE 心跳、游标恢复、去重、重连退避与断档后重新获取数据；连接期间复核身份和权限 |
 
-### 2. 前端工程 (React 19 / Tailwind CSS v4 / Base UI)
-- **SaaS 全宽流式自适应画布 (Full-width Fluid Canvas)**：
-  - 核心工作区采用流式铺满设计，超宽屏（2K/4K/带鱼屏）绝不居中受限收窄；移动端自适应抽屉式侧栏。
-- **Base UI 12 列代码网格**：
-  - 全面使用 `@base-ui/react` 原语体系与 Tailwind CSS v4 现代化 `@theme` 样式系统。
-- **企业级数据表格 (TanStack Table v9)**：
-  - 深度集成高级数据表格，提供多列头排序、客户端/服务端分页、Faceted 标签筛选、动态列显隐与骨架屏。
-- **Web Cookie 会话**：
-  - 启动时调用 `/auth/me` 校验身份；401 清理内存身份，网络错误可重试。外部客户端通过 `/auth/token` 获取 JWT。
+## 前端基础能力
 
----
+- **工作台布局**：固定视口外壳、独立主区滚动、可折叠侧栏、移动端抽屉导航、全宽内容区；支持明暗主题、系统主题和用户偏好。
+- **通用数据表格**：TanStack Table v9 封装，提供类型化列、排序、分页、搜索、多选筛选、日期区间、列显隐、选择操作、骨架屏及空状态。
+- **交互组件**：基于 shadcn / Base UI 的对话框、侧滑面板、表单和菜单；统一危险操作确认、Toast 反馈、加载与错误重试状态。
+- **认证与授权**：Axios Cookie 请求，启动时恢复身份；401 清理身份、网络异常保留重试入口；按有效权限控制导航、页面和按钮，使用 `RequirePermission`、`can()` 和 `<Can>`。
+- **表单与并发编辑**：未保存内容离开提醒；用户编辑发生版本冲突时保留草稿、显示差异并由用户确认重试；异步提交期间防重复操作。
+- **导航与性能**：命令面板、页面懒加载和预加载；部门树虚拟化；键盘、触控、焦点恢复与 reduced-motion 适配。
 
-## 📁 目录结构概览
+## 后端基础能力
 
-```
+- **分层与统一契约**：domain 定义实体和接口，构造函数装配依赖；泛型 Repository、UUID 主键、强类型 JSON 配置；统一 JSON 响应、业务码、领域错误与 Request ID。
+- **双数据库与迁移**：GORM 支持 SQLite/PostgreSQL、连接池、版本化迁移与初始化数据；组织调整和授权变更使用事务、版本检查及并发控制。
+- **双通道认证**：Web 使用 HttpOnly Session Cookie，支持空闲/绝对有效期；外部客户端使用 Bearer JWT。Header 凭据优先，失效时不回退 Cookie；用户停用、改密及认证版本变更参与凭据校验。
+- **RBAC 与多实例一致性**：Casbin v3 控制角色/API 访问，前后端共用有效权限；授权 revision、事务 Outbox、Redis 通知和后台收敛实现跨实例更新。Casbin 中间件为项目适配实现。
+- **目录任务可靠性**：绑定密码加密存储；目录请求支持取消和总时限；预览计划、幂等提交、任务租约、进度持久化与过期任务恢复；不完整搜索不会直接作为完整目录执行缺失账号停用。
+- **运行日志**：统一 slog，应用/访问/SQL 分类；Service 自动关联请求，后台任务关联任务来源；独立级别、慢查询、SQL 绑定参数保护、标准输出和文件轮转。
+- **存储与生命周期**：统一 Fiber Storage 工厂已接入 memory、SQLite、PostgreSQL、Redis、S3 驱动；提供后台任务管理、资源关闭及 SIGINT/SIGTERM 平滑停机。存储驱动属于基础设施，可供后续业务接入。
+
+## 技术栈
+
+| 层次 | 使用技术 |
+| --- | --- |
+| 后端 | Go 1.27.2+、Fiber v3、GORM、Casbin v3、Viper、slog |
+| 数据与存储 | SQLite / PostgreSQL、Redis、gorm datatypes、Fiber Storage |
+| 前端 | React 19、TypeScript、Vite 8、React Router 7、Axios、React Query |
+| UI 与数据展示 | Tailwind CSS v4、shadcn / Base UI、TanStack Table v9、Lucide、Recharts |
+| 测试 | Go test / race / vet、Vitest、Playwright、Axe |
+| 部署 | 多阶段 Docker 镜像、Docker Compose、Nginx、非 root 运行及健康检查 |
+
+具体依赖版本以 [go.mod](backend/go.mod)、[package.json](frontend/package.json) 和锁文件为准。
+
+## 项目结构
+
+```text
 InfraNexus/
-├── backend/                        # Go 后端工程
-│   ├── cmd/server/main.go          # 薄入口主程序 (配置加载, 依赖装配, Graceful Shutdown)
+├── backend/
+│   ├── cmd/server/             # 服务入口与管理员初始化/口令轮换命令
 │   ├── internal/
-│   │   ├── bootstrap/              # 启动器 (DB 双驱动, Redis, Casbin, Fiber 装配)
-│   │   ├── config/                 # Viper 集中配置
-│   │   ├── core/                   # 核心通用设施 (logger, response, errors, validator)
-│   │   ├── domain/                 # 领域实体模型与接口定义 (User, Department, Role, Permission, LDAP)
-│   │   ├── handler/                # HTTP 接入层 (Auth, Users, Departments, Roles, Permissions, LDAP, SSE)
-│   │   ├── middleware/             # 中间件 (RequestLog, DualAuth, CasbinRBAC)
-│   │   ├── repository/             # 持久化层 (BaseRepository 泛型仓储, UserRepo, RoleRepo)
-│   │   ├── service/                # 业务逻辑层 (Auth, Users, Departments, Roles, Authz, LDAP)
-│   │   └── storage/                # Fiber Storage 统一驱动工厂
-│   ├── config.yaml                 # 默认配置文件
+│   │   ├── bootstrap/          # 数据库、Redis、Casbin、路由及依赖装配
+│   │   ├── config/             # 配置加载与校验
+│   │   ├── core/               # 日志、响应、错误、请求元数据、加密等
+│   │   ├── domain/             # 领域实体与接口
+│   │   ├── handler/            # HTTP 接入与 SSE
+│   │   ├── service/            # 业务逻辑及后台任务
+│   │   ├── repository/         # 数据库、认证存储及目录访问
+│   │   └── storage/            # Fiber Storage 驱动工厂
+│   ├── config.yaml
 │   └── go.mod
-├── frontend/                       # React 19 前端工程
+├── frontend/
 │   ├── src/
-│   │   ├── components/
-│   │   │   ├── ui/                 # Base UI 原子组件 (Button, Input, Dialog, DropdownMenu...)
-│   │   │   └── data-table/         # TanStack Table v9 企业级数据表格套件
-│   │   ├── layouts/                # SaaS 工作台布局 (Sidebar, Header, Full-width Main)
-│   │   ├── pages/                  # 业务路由页面 (Login, Dashboard, Users, Departments, Roles, Permissions, LDAP)
-│   │   ├── services/               # Axios 实例与 API (Cookie 会话请求)
-│   │   └── App.tsx
-│   ├── package.json
-│   └── vite.config.ts
-├── Makefile                        # 快捷运维指令
-├── REQUIREMENTS.md                 # 需求规格说明书
-├── AGENTS.md                       # AI 智能体开发规范与协作指南
-├── ARCHITECTURE_AND_PLAN.md        # 具体系统架构与工程实现方案
-└── TODOLIST.md                     # 开发任务追踪看板
+│   │   ├── components/         # 通用组件、ui、data-table、权限与确认组件
+│   │   ├── layouts/            # 工作台外壳、导航及用户偏好
+│   │   ├── pages/              # 登录及六个工作台模块
+│   │   ├── services/           # Axios 实例与 API 调用
+│   │   ├── stores/             # 认证与通知 Context
+│   │   ├── hooks/              # 通用交互逻辑
+│   │   └── routing/            # 页面加载及路由相关封装
+│   ├── e2e/                    # 浏览器与性能回归
+│   ├── nginx.conf
+│   └── package.json
+├── docs/                       # 需求、架构、API、操作手册与验收证据
+├── compose.yaml
+├── .env.example
+├── Makefile
+└── AGENTS.md                   # 开发约定与日志记录规范
 ```
 
----
+## 本地开发
 
-## 🚀 快速启动指南
+以下命令均从仓库根目录执行。
 
-### 1. 前置环境要求
-- **Go**: 1.27+
-- **Node.js**: 20+ (推荐 22+) 与 npm
+### 环境与依赖
 
-### 2. 首次初始化管理员
-服务启动不会创建公开默认密码账号。首次安装先显式提供一次性口令：
-```bash
-cd backend
-INFRANEXUS_BOOTSTRAP_ADMIN_PASSWORD='请替换为强口令' go run ./cmd/server bootstrap-admin
-```
-
-该命令只在 `admin` 账号不存在时创建管理员；再次执行不会重置已有密码。遗失密码时使用已登录的密码重置流程。生产环境还必须设置独立的 `APP_JWT_SECRET` 和 `APP_SECURITY_ENCRYPTION_KEY`。
-
-从旧版本升级且管理员可能仍使用公开的演示口令时，升级后立即显式轮换并撤销旧凭据：
-```bash
-INFRANEXUS_BOOTSTRAP_ADMIN_PASSWORD='新的强口令' go run ./cmd/server rotate-admin-password
-```
-此命令只操作已存在的内置本地 `admin` 账号；它会递增认证版本，使旧 Session 与令牌失效。服务重启不会执行口令轮换。
-
-### 3. 启动后端开发服务
-```bash
-make dev-backend
-# 或在 backend/ 中运行：go run ./cmd/server
-```
-> 默认采用 SQLite 驱动（自动在 `backend/data/infranexus.db` 创建数据文件），无需预先安装外部数据库。服务监听 `http://127.0.0.1:8080`。
-
-### 4. 启动前端开发服务
-```bash
-# 方式 A：使用根目录 Makefile
-make dev-frontend
-
-# 方式 B：手动进入 frontend 目录
-cd frontend
-npm run dev
-```
-> 前端默认访问地址为 `http://127.0.0.1:5173`。
-
-管理员用户名为 `admin`，初始化口令由部署者自行设置。
-
----
-
-## 🐳 Docker 构建与部署
+需要 Go 1.27.2+、支持 CGO 的 C 编译工具链（SQLite 驱动使用 CGO）、Node.js 22.12+ 和 npm。前端 Docker 构建使用 Node 24.11.1。
 
 ```sh
-docker build -f backend/Dockerfile -t infranexus/backend:local .
-docker build -f frontend/Dockerfile -t infranexus/frontend:local .
+go -C backend mod tidy
+npm --prefix frontend install
 ```
 
-复制 `.env.example` 为 `.env` 并设置独立数据库口令、JWT 密钥和加密密钥后，运行 `docker compose up -d --build --wait`。默认入口为 `http://localhost:8080`，管理员需显式初始化。配置、持久化及初始化步骤见 [Docker 部署说明](docs/DOCKER.md)。
+默认配置使用 SQLite，数据库目录会自动创建。开发环境 Redis 不可用时，认证存储可回退进程内模式；要使用 Redis SSE 事件和跨实例能力，需要连接 Redis。生产环境 Redis 不可用会拒绝启动。
 
----
+### 初始化管理员
 
-## 🧪 自动化测试验证
+服务不会创建带公开默认密码的账号。通过运行环境注入一次性的 `INFRANEXUS_BOOTSTRAP_ADMIN_PASSWORD` 强口令后执行：
 
-后端默认使用临时 SQLite 测试数据库。运行完整测试、竞争检测和静态检查：
-```bash
-cd backend
-go test -count=1 -p=1 ./...
-go test -race -count=1 -p=1 ./...
-go vet ./...
+```sh
+go -C backend run ./cmd/server bootstrap-admin
 ```
 
-PostgreSQL/Redis 集成矩阵需要指向**空白、隔离、可丢弃**的测试服务；测试会创建和修改表、状态及事件，不要连接生产或共享开发实例：
-```bash
-cd backend
+用户名为 `admin`。该命令只创建缺失账号，重复执行不覆盖密码。需要轮换已存在的内置管理员密码时，重新注入上述一次性变量并执行：
+
+```sh
+go -C backend run ./cmd/server rotate-admin-password
+```
+
+轮换会递增认证版本，使旧 Session 和令牌失效；完成后移除一次性口令变量。平时也可使用已授权的用户密码重置操作。
+
+### 启动前后端
+
+在两个终端分别执行：
+
+```sh
+make dev-backend
+```
+
+```sh
+make dev-frontend
+```
+
+访问 [前端工作台](http://127.0.0.1:5173)，后端监听端口 8080；Vite 将 `/api` 代理到后端。健康接口为 [GET /api/v1/health](http://127.0.0.1:8080/api/v1/health)。其他开发、构建命令可用 `make help` 查看。
+
+## 配置与认证
+
+后端配置位于 [backend/config.yaml](backend/config.yaml)，由 Viper 加载。环境变量使用 `APP_` 前缀，将配置路径的点替换为下划线，例如：
+
+| 配置 | 环境变量 | 用途 |
+| --- | --- | --- |
+| `app.env` | `APP_APP_ENV` | development / test / production |
+| `database.driver` | `APP_DATABASE_DRIVER` | sqlite / postgres |
+| `redis.host` | `APP_REDIS_HOST` | Redis 主机 |
+| `jwt.secret` | `APP_JWT_SECRET` | JWT 签名密钥 |
+| `security.encryption_key` | `APP_SECURITY_ENCRYPTION_KEY` | 目录绑定密码加密密钥 |
+| `security.trusted_origins` | `APP_SECURITY_TRUSTED_ORIGINS` | 可信 Web 来源，影响 CORS 与 Cookie 写请求校验 |
+
+Web 使用 Cookie，生产环境强制 Secure 并应经 HTTPS 同源部署；前端不存储 JWT。会话空闲/绝对有效期分别由 session.max_age/session.absolute_max_age 控制。外部客户端使用 `/api/v1/auth/token` 和 `/api/v1/auth/refresh`，携带 `Authorization: Bearer ...` 调用 API。当前 Web 退出撤销单个会话。
+
+生产环境需设置独立 JWT/加密密钥和真实可信来源；更换目录加密密钥需要按现有目录凭据处理流程执行。接口、权限和版本冲突契约见 [API 文档](docs/API.md)。
+
+## Docker 部署
+
+```sh
+cp .env.example .env
+```
+
+在 `.env` 中设置相互独立的 `DB_PASSWORD`、`JWT_SECRET` 和 `ENCRYPTION_KEY` 后启动：
+
+```sh
+docker compose up -d --build --wait
+```
+
+Compose 启动前端 Nginx、后端、PostgreSQL 和 Redis；默认入口为 [http://localhost:8080](http://localhost:8080)，只绑定宿主机 loopback。PostgreSQL/Redis 使用持久卷且不向宿主机发布端口，前端通过 Nginx 代理 API/SSE。
+
+通过当前 shell 注入一次性管理员口令后执行：
+
+```sh
+docker compose run --rm -e INFRANEXUS_BOOTSTRAP_ADMIN_PASSWORD app bootstrap-admin
+unset INFRANEXUS_BOOTSTRAP_ADMIN_PASSWORD
+```
+
+`.env.example` 面向本机 HTTP 开发；正式 HTTPS 部署设置 APP_ENV=production、SESSION_SECURE=true 和实际 TRUSTED_ORIGINS，并配置外层 TLS 终止。Compose 的 APP_ENV/JWT_SECRET 等变量由 compose.yaml 映射到后端环境变量。
+
+```sh
+docker compose ps
+docker compose logs -f app frontend
+docker compose down
+```
+
+日常停止保留数据卷。构建参数、初始化、持久化和网关配置见 [Docker 部署说明](docs/DOCKER.md)。
+
+## 日志与排查
+
+默认日志进入 stdout。开发 debug 模式缺省使用 text，非 debug 模式缺省使用 JSON，生产环境缺省格式为 JSON。应用、访问、SQL 分别标记 category=app/access/sql；Service 使用 Context 日志方法自动携带 request_id，异步任务携带 task_id 和可用的来源信息。
+
+授权 Outbox 后台轮询的正常空结果 SQL 自动过滤，无需修改日志参数；查到待处理记录、慢查询和错误仍按配置记录，普通请求的空结果查询也保留。
+
+应用与 SQL 级别独立。例如，同时输出终端和文件，SQL 只记录错误与慢查询：
+
+```sh
+APP_LOGGING_OUTPUT=both APP_LOGGING_SQL_LEVEL=warn go -C backend run ./cmd/server
+```
+
+该命令工作目录为 backend，默认文件位于 `backend/logs/app.log` 和 `backend/logs/sql.log`。logging.file.directory 可调整目录；默认单文件 100MB 轮转、最多 10 个备份、最长保留年龄 14 天并压缩。数量和年龄共同约束，不保证完整保存 14 天。
+
+Compose 使用 `.env` 的 LOG_LEVEL/SQL_LOG_LEVEL 控制级别，四服务均配置 local 驱动、每容器 20m×5 轮转：
+
+```sh
+docker compose logs --since 30m app
+```
+
+SQL 绑定参数与驱动原始错误详情不输出，业务仍须使用参数化查询并遵守日志脱敏约定。完整字段、Context 传递、Service 错误写法及故障边界见 [日志使用说明](docs/BACKEND_LOGGING.md) 和 [AGENTS.md §2.7](AGENTS.md#27-日志记录与请求关联规范)。
+
+## 测试与当前验证范围
+
+后端默认使用临时 SQLite；完整测试、竞争检测与静态检查：
+
+```sh
+go -C backend test -count=1 -p=1 ./...
+go -C backend test -race -count=1 -p=1 ./...
+go -C backend vet ./...
+```
+
+PostgreSQL/Redis 集成矩阵需指向**独立、空白、可丢弃**的测试实例，测试会修改数据库和事件状态：
+
+```sh
 INFRANEXUS_TEST_POSTGRES_DSN='postgres://<user>:<password>@127.0.0.1:5432/<isolated_test_db>?sslmode=disable' \
-INFRANEXUS_TEST_REDIS_ADDR='127.0.0.1:6379' \
-go test -race -count=1 -p=1 ./...
+INFRANEXUS_TEST_REDIS_ADDR='127.0.0.1:<isolated_redis_port>' \
+go -C backend test -race -count=1 -p=1 ./...
 ```
 
-前端单测、生产构建、浏览器回归与性能采样：
-```bash
+前端单测、构建、浏览器与性能回归：
+
+```sh
 npm --prefix frontend test
 npm --prefix frontend run build
+npm --prefix frontend exec -- playwright install chromium
 npm --prefix frontend run test:e2e
 npm --prefix frontend run test:perf
 ```
-Playwright 首次运行前，在 `frontend/` 执行 `npx playwright install chromium`。`test:perf` 会重新构建并测量 1,000/10,000 部门节点、500 条 LDAP 预览和过滤响应；它是基线采样，不是虚拟化已达标的承诺。
 
----
+已登记的验证包括：
 
-## 📑 核心文档索引
-- [需求规格说明书 (REQUIREMENTS.md)](docs/REQUIREMENTS.md)
-- [AI 智能体开发规范与协作指南 (AGENTS.md)](AGENTS.md)
-- [具体系统架构与实现方案 (ARCHITECTURE_AND_PLAN.md)](docs/ARCHITECTURE_AND_PLAN.md)
-- [问题处理与前端交互改造方案（2026-10-22）](docs/REMEDIATION_AND_UX_PLAN.md)
-- [任务跟踪看板 (TODOLIST.md)](docs/TODOLIST.md)
-- [API 行为与实时事件契约 (API.md)](docs/API.md)
-- [M6 发布验证记录 (RELEASE_VALIDATION.md)](docs/RELEASE_VALIDATION.md)
-- [数据库迁移与升级操作](docs/MIGRATION_OPERATIONS.md)
+| 范围 | 记录 |
+| --- | --- |
+| 后端 | 全量 race/vet，SQLite/PostgreSQL 并发、事务及故障回滚，真实 Redis 跨实例通知与连接回收 |
+| 前端 | Vitest、生产构建、Playwright；权限、表单冲突与草稿、通知恢复、多视口、明暗主题、键盘/触控、Axe 自动检查 |
+| 性能 | 部门树 1k/10k 节点虚拟化、过滤与 DOM/长任务预算；属于固定本机环境下的测量 |
+| 集成与部署 | 授权测试 AD 的只读认证/搜索及隔离应用同步，Docker/Nginx SSE 故障与停机，镜像构建和持久化冒烟 |
+| 日志专项 | HTTP→Service→Repository/GORM 请求关联、并发隔离、双数据库敏感哨兵检查、文件轮转及容器输出/停机 |
 
-## 认证部署配置
-`security.trusted_origins` 是可携带凭据的精确 Web 来源列表，同时用于 Cookie 写请求的 Origin/Referer 校验；不得使用 `*`。生产 `session.secure` 强制为 true，建议经 HTTPS 同源部署。`session.max_age` 为空闲有效期，`session.absolute_max_age` 为绝对有效期。登录/Token 获取限流为单进程实现，多实例需另行部署分布式限流。浏览器只使用 Cookie；CLI 使用 `/api/v1/auth/token`、`/api/v1/auth/refresh` 和 Bearer Header。注销只撤销当前会话或令牌族。
+当前完成结论为**代码与测试环境验收**。真实 AD 加密连接、500+ 用户真实目录规模及不同生产网关需在采用环境另验；人工 VoiceOver/NVDA 实测按此前约定豁免，不能算实测通过。日志专项未重新提供 Live AD 凭据，3 项既有目录测试跳过，双数据库/Redis 的日志相关回归已实际执行。当前没有正式部署验收结论。
 
-`security.encryption_key` 用于 AES-GCM 加密 AD/LDAP 绑定密码，production 环境拒绝空值或默认开发密钥（可用 `APP_SECURITY_ENCRYPTION_KEY` 注入），更换密钥后需重新录入绑定密码。`ldap.scheduler.enabled` / `ldap.scheduler.tick_seconds` 控制定时同步调度器；同步任务通过数据库条件更新（CAS）抢占 `sync_status`，多实例共享数据库时同一配置不会并发同步，超过 2 小时未结束的锁视为失效。
+本机规模测试不代表生产吞吐或真实目录/网络延迟。现有登录限流为单进程；需要多实例统一限流时需扩展。运行日志与 LDAP 报告已有实现，完整业务审计和集中日志留存需另行接入。
+
+## 文档索引
+
+| 文档 | 内容 |
+| --- | --- |
+| [需求规格](docs/REQUIREMENTS.md) | 产品能力、技术约束和接口约定 |
+| [架构与实现](docs/ARCHITECTURE_AND_PLAN.md) | 分层、模型、认证、权限与装配设计 |
+| [API 文档](docs/API.md) | 接口、权限、版本控制与实时事件契约 |
+| [开发协作规范](AGENTS.md) | 后端/前端编码、日志记录和验证要求 |
+| [任务清单](docs/TODOLIST.md) | 已完成任务、证据及后续环境门禁 |
+| [Docker 部署](docs/DOCKER.md) | 构建、初始化、持久化及操作命令 |
+| [迁移与升级](docs/MIGRATION_OPERATIONS.md) | 数据库迁移、升级和回退操作 |
+| [日志使用说明](docs/BACKEND_LOGGING.md) | 日志配置、存放、关联和错误记录 |
+| [发布验证记录](docs/RELEASE_VALIDATION.md) | 分阶段实际结果及历史范围说明 |
+| [AD 测试环境验收](docs/R14_AD_VALIDATION.md) | 真实目录验证与未覆盖范围 |
+| [日志专项验收](docs/BACKEND_LOGGING_VALIDATION.md) | 日志回归、运行环境和输出证据 |

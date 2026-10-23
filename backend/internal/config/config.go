@@ -16,6 +16,7 @@ type Config struct {
 	JWT       JWTConfig       `mapstructure:"jwt"`
 	Storage   StorageConfig   `mapstructure:"storage"`
 	Directory DirectoryConfig `mapstructure:"ldap"`
+	Logging   LoggingConfig   `mapstructure:"logging"`
 }
 
 type AppConfig struct {
@@ -123,10 +124,14 @@ func LoadConfig(path ...string) (*Config, error) {
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("failed to read configuration: %w", err)
 	}
+	setLoggingDefaults(v)
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unable to decode into config struct: %w", err)
+	}
+	if err := cfg.Logging.Validate(); err != nil {
+		return nil, err
 	}
 
 	return &cfg, nil

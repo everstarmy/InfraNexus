@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-23",
+  "scope": "isolated local backend logging validation",
+  "go": "1.27.2",
+  "postgres": "17.11",
+  "redis": "8",
+  "sqlite": "temporary files",
+  "race": {
+    "command": "go -C backend test -race -p 1 -json ./... -count=1",
+    "passed_test_events_including_subtests": 200,
+    "passed_top_level_tests": 137,
+    "failed": 0,
+    "skipped_tests": [
+      {
+        "package": "infranexus/internal/bootstrap",
+        "test": "TestLiveADRootDSEAndPagingReadOnly"
+      },
+      {
+        "package": "infranexus/internal/bootstrap",
+        "test": "TestLiveADGatewayReadOnly"
+      },
+      {
+        "package": "infranexus/internal/bootstrap",
+        "test": "TestLiveADIsolatedApplicationLifecycle"
+      }
+    ],
+    "packages": [
+      {
+        "package": "infranexus/internal/bootstrap",
+        "elapsed_seconds": 141.522
+      },
+      {
+        "package": "infranexus/internal/config",
+        "elapsed_seconds": 1.572
+      },
+      {
+        "package": "infranexus/internal/core/errors",
+        "elapsed_seconds": 1.495
+      },
+      {
+        "package": "infranexus/internal/core/logger",
+        "elapsed_seconds": 2.007
+      },
+      {
+        "package": "infranexus/internal/core/secret",
+        "elapsed_seconds": 1.353
+      },
+      {
+        "package": "infranexus/internal/handler",
+        "elapsed_seconds": 1.763
+      },
+      {
+        "package": "infranexus/internal/middleware",
+        "elapsed_seconds": 1.502
+      },
+      {
+        "package": "infranexus/internal/repository",
+        "elapsed_seconds": 4.8870000000000005
+      },
+      {
+        "package": "infranexus/internal/service",
+        "elapsed_seconds": 2.211
+      }
+    ]
+  },
+  "vet": {
+    "command": "go -C backend vet ./...",
+    "exit_code": 0
+  },
+  "docker": {
+    "image_id": "sha256:5d83bdc346c56034fc3b084e2ffaed62288a1458772143b0979a36a56fa5ac41",
+    "platform": "linux/arm64",
+    "compose_health": true,
+    "four_services_logging_driver": "local",
+    "max_size": "20m",
+    "max_file": "5",
+    "json_stdout": true,
+    "request_sql_access_correlation": true,
+    "sentinel_redaction": true,
+    "graceful_sigterm": true,
+    "both_mode_files": true,
+    "directory_mode": "0750",
+    "file_mode": "0640",
+    "uid": 10001,
+    "unwritable_file_startup_exit_code": 1
+  },
+  "limits": [
+    "Three existing Live AD tests skipped; no live credentials supplied",
+    "No production deployment or centralized retention validated",
+    "SQL literal omission is conservative and does not sanitize arbitrary SQL dialects",
+    "Lumberjack history compression and cleanup are asynchronous"
+  ]
+}

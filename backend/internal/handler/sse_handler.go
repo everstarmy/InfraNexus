@@ -55,11 +55,11 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 	if h.events == nil {
 		return fiber.NewError(fiber.StatusServiceUnavailable, "event stream is unavailable")
 	}
-	requestID := requestmeta.RequestID(c.Context())
-	logger := h.logger.With("request_id", requestID, "user_id", principal.UserID)
-	lastID := c.Get("Last-Event-ID")
+	requestID := strings.Clone(requestmeta.RequestID(c.Context()))
+	logger := h.logger.With("component", "sse", "user_id", principal.UserID)
+	lastID := strings.Clone(c.Get("Last-Event-ID"))
 	if lastID == "" {
-		lastID = c.Query("lastEventId")
+		lastID = strings.Clone(c.Query("lastEventId"))
 	}
 	if lastID != "" && !validSSECursor(lastID) {
 		return fiber.ErrBadRequest
@@ -81,7 +81,7 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 	owner := *principal
 	owner.Roles = append([]string(nil), principal.Roles...)
 	connection := c.RequestCtx().Conn()
-	streamCtx, cancelStream := context.WithTimeout(h.life, SSEConnectionMaxLifetime)
+	streamCtx, cancelStream := context.WithTimeout(requestmeta.WithRequestID(h.life, requestID), SSEConnectionMaxLifetime)
 	stopClose := context.AfterFunc(streamCtx, func() {
 		if connection != nil {
 			_ = connection.Close()
@@ -89,13 +89,14 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 	})
 	body := fasthttp.NewStreamReader(func(w *bufio.Writer) {
 		defer cancelStream()
+		defer logger.InfoContext(streamCtx, "SSE stream closed", "event", "sse.closed")
 		defer stopClose()
 		if err := writeSSE(w, lastID, "connected", []byte(`{"status":"connected"}`)); err != nil {
-			logger.Debug("Write SSE connected event failed", "error_type", fmt.Sprintf("%T", err))
+			logger.DebugContext(streamCtx, "Write SSE connected event failed", "event", "sse.write_sse_connected_event_failed", "error_type", fmt.Sprintf("%T", err))
 			return
 		}
 		if err := w.Flush(); err != nil {
-			logger.Debug("Flush SSE connected event failed", "error_type", fmt.Sprintf("%T", err))
+			logger.DebugContext(streamCtx, "Flush SSE connected event failed", "event", "sse.flush_sse_connected_event_failed", "error_type", fmt.Sprintf("%T", err))
 			return
 		}
 
@@ -107,7 +108,7 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 				if err != nil {
 					_ = writeSSE(w, "", "auth.expired", []byte(`{"status":"closed"}`))
 					_ = w.Flush()
-					logger.Info("SSE stream closed after identity validation failed", "error_type", fmt.Sprintf("%T", err))
+					logger.InfoContext(streamCtx, "SSE stream closed after identity validation failed", "event", "sse.sse_stream_closed_after_identity_validation_failed", "error_type", fmt.Sprintf("%T", err))
 					return
 				}
 				current = validated
@@ -121,16 +122,16 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 				if streamCtx.Err() != nil {
 					return
 				}
-				logger.Warn("Read SSE event stream failed", "error_type", fmt.Sprintf("%T", err))
+				logger.WarnContext(streamCtx, "Read SSE event stream failed", "event", "sse.read_sse_event_stream_failed", "error_type", fmt.Sprintf("%T", err))
 				return
 			}
 			if len(events) == 0 {
 				if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
-					logger.Debug("Write SSE heartbeat failed", "error_type", fmt.Sprintf("%T", err))
+					logger.DebugContext(streamCtx, "Write SSE heartbeat failed", "event", "sse.write_sse_heartbeat_failed", "error_type", fmt.Sprintf("%T", err))
 					return
 				}
 				if err := w.Flush(); err != nil {
-					logger.Debug("Flush SSE heartbeat failed", "error_type", fmt.Sprintf("%T", err))
+					logger.DebugContext(streamCtx, "Flush SSE heartbeat failed", "event", "sse.flush_sse_heartbeat_failed", "error_type", fmt.Sprintf("%T", err))
 					return
 				}
 				continue
@@ -141,18 +142,18 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 					if err != nil {
 						_ = writeSSE(w, "", "auth.expired", []byte(`{"status":"closed"}`))
 						_ = w.Flush()
-						logger.Info("SSE stream closed after identity validation failed", "error_type", fmt.Sprintf("%T", err))
+						logger.InfoContext(streamCtx, "SSE stream closed after identity validation failed", "event", "sse.sse_stream_closed_after_identity_validation_failed", "error_type", fmt.Sprintf("%T", err))
 						return
 					}
 					current = validated
 					lastAuthCheck = time.Now()
 				}
 				if err := writeSSE(w, event.ID, event.Name, event.Data); err != nil {
-					logger.Debug("Write SSE event failed", "event", event.Name, "error_type", fmt.Sprintf("%T", err))
+					logger.DebugContext(streamCtx, "Write SSE event failed", "event", "sse.write_sse_event_failed", "event", event.Name, "error_type", fmt.Sprintf("%T", err))
 					return
 				}
 				if err := w.Flush(); err != nil {
-					logger.Debug("Flush SSE event failed", "event", event.Name, "error_type", fmt.Sprintf("%T", err))
+					logger.DebugContext(streamCtx, "Flush SSE event failed", "event", "sse.flush_sse_event_failed", "event", event.Name, "error_type", fmt.Sprintf("%T", err))
 					return
 				}
 				lastID = event.ID

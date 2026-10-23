@@ -2,6 +2,8 @@
 
 本文档详细阐述 **InfraNexus** 全栈企业脚手架的系统架构、模块分层、数据库表结构、安全认证模型、接口定义以及前端组件与状态流转设计。
 
+> 2026-10-23 日志专项：已接入 Context Handler、独立 SQL 适配器、stdout/file/both、轮转与生命周期管理。当前使用契约见 [日志说明](BACKEND_LOGGING.md)，设计见 [实施方案](BACKEND_LOGGING_PLAN.md)，验收状态见 [日志专项看板](TODOLIST.md)。下方旧日志示例以本增量为准。
+
 > 2026-10-22 深度复审修订：M0–M6 后的授权并发、LDAP 回滚、资源回收、SSE 与编辑 CAS 的最新增量契约及发布门禁见 [深度复审整改方案](DEEP_REVIEW_REMEDIATION_PLAN.md)，任务状态见 [当前看板](TODOLIST.md)。原 [问题处理与交互改造方案](REMEDIATION_AND_UX_PLAN.md) 保留为前阶段设计；下方旧实现示例不表示整改已完成，冲突处以最新增量方案为目标契约，当前运行行为以代码与测试证据为准。
 
 ---

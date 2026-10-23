@@ -1,8 +1,14 @@
 name: infranexus
+x-logging: &bounded-logging
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "5"
 services:
   postgres:
     image: postgres:17.11-alpine3.23
     restart: unless-stopped
+    logging: *bounded-logging
     environment:
       POSTGRES_USER: infranexus
       POSTGRES_DB: infranexus
@@ -17,6 +23,7 @@ services:
   redis:
     image: redis:8-alpine
     restart: unless-stopped
+    logging: *bounded-logging
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
@@ -31,10 +38,15 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    logging: *bounded-logging
     stop_grace_period: 15s
     environment:
       APP_APP_ENV: ${APP_ENV:-production}
       APP_APP_DEBUG: "false"
+      APP_LOGGING_FORMAT: json
+      APP_LOGGING_OUTPUT: stdout
+      APP_LOGGING_LEVEL: ${LOG_LEVEL:-info}
+      APP_LOGGING_SQL_LEVEL: ${SQL_LOG_LEVEL:-warn}
       APP_DATABASE_DRIVER: postgres
       APP_DATABASE_POSTGRES_HOST: postgres
       APP_DATABASE_POSTGRES_USER: infranexus
@@ -56,6 +68,7 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
     restart: unless-stopped
+    logging: *bounded-logging
     ports:
       - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
     depends_on:

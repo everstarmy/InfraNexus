@@ -17,10 +17,14 @@ require (
 	github.com/gofiber/storage/sqlite3/v2 v2.3.1
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jimlambrt/gldap v0.1.14
+	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/spf13/viper v1.21.0
+	github.com/valyala/fasthttp v1.75.0
 	golang.org/x/crypto v0.58.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/datatypes v1.2.7
 	gorm.io/driver/postgres v1.6.3
 	gorm.io/driver/sqlite v1.6.0
@@ -69,7 +73,6 @@ require (
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.11.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.3 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
@@ -77,7 +80,6 @@ require (
 	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	github.com/mattn/go-sqlite3 v1.14.52 // indirect
 	github.com/microsoft/go-mssqldb v1.9.5 // indirect
 	github.com/molecule-man/go-brrr v1.3.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -95,7 +97,6 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tinylib/msgp v1.6.5 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.75.0 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect

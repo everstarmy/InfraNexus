@@ -1,5 +1,7 @@
 # InfraNexus 敏捷企业级全栈脚手架需求规格说明书 (Requirements Document)
 
+> 2026-10-23 日志契约增量：运行日志统一使用 slog，应用/访问与 SQL 独立分类、级别与可选文件；Context Handler 自动关联请求/任务，SQL 绑定参数与驱动详情不输出。具体配置、字段与保留边界见 [日志使用说明](BACKEND_LOGGING.md)，设计见 [日志方案](BACKEND_LOGGING_PLAN.md)。本增量优先于下文旧 Logger/SQL 示例。
+
 ## 1. 项目定位与设计目标
 
 **InfraNexus** 是一套面向现代云原生与企业级 SaaS 平台的敏捷开发脚手架。

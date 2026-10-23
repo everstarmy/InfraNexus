@@ -59,3 +59,18 @@ ldap:
   scheduler:
     enabled: true # 是否运行 AD/LDAP 定时同步调度器
     tick_seconds: 60 # 调度器检查到期同步任务的间隔
+
+# 日志缺省随 app.debug 选择开发 text/debug/全 SQL 或 JSON/info/慢与错误 SQL。
+# 以下字段独立于 app.debug；完整字段与文件模式见 docs/BACKEND_LOGGING_PLAN.md。
+logging:
+  output: stdout # stdout | file | both
+  file:
+    directory: ./logs # 相对于进程工作目录；file/both 生效
+    max_size_mb: 100
+    max_backups: 10
+    max_age_days: 14
+    compress: true
+  sql:
+    enabled: true
+    slow_threshold_ms: 200 # 0 关闭慢查询事件
+    max_sql_length: 4096

@@ -9,7 +9,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/recover"
-	"github.com/gofiber/fiber/v3/middleware/requestid"
 	"github.com/gofiber/fiber/v3/middleware/responsetime"
 	"github.com/valyala/fasthttp"
 
@@ -42,8 +41,9 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 	})
 
 	// 1. 全局中间件流水线
-	fiberApp.Use(recover.New())
-	fiberApp.Use(requestid.New())
+	fiberApp.Use(middleware.RequestID())
+	fiberApp.Use(middleware.RequestLogger(app.Logger))
+	fiberApp.Use(recover.New(recover.Config{PanicHandler: func(_ fiber.Ctx, _ any) error { return fiber.ErrInternalServerError }}))
 	fiberApp.Use(responsetime.New())
 	fiberApp.Use(cors.New(cors.Config{
 		AllowOrigins:     app.Config.Security.TrustedOrigins,
@@ -51,7 +51,6 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Request-Id"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
 	}))
-	fiberApp.Use(middleware.RequestLogger(app.Logger))
 
 	// 2. 初始化 Casbin Enforcer
 	enforcer, err := InitCasbin(app.DB, app.Logger)

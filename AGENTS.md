@@ -118,8 +118,8 @@ InfraNexus/
   - 必须挂载 `requestid`，并在日志和响应中输出。
   - 必须挂载统一的 `ErrorHandler`，返回结构体必须符合统一响应模型。
 - **日志记录规则**：
-  - 统一使用标准库 `log/slog`。
-  - 从 `fiber.Ctx` 中提取 `request_id` 作为日志属性传递（`slog.With("request_id", reqID)`）。
+  - 统一使用注入的标准库 `*slog.Logger`，请求相关日志使用 `InfoContext/WarnContext/ErrorContext`；详细约定见下方 2.7。
+  - HTTP 边界使用 `requestid.FromContext(c)`，通过 `requestmeta` 桥接到标准 Context，由日志 Handler 自动提取关联字段。
   - **严禁使用 `fmt.Println` 或 `log.Fatal` 直接输出业务信息**。
 
 ### 2.4 统一响应与业务状态码挂钩规范 (Business-Linked Response)
@@ -180,6 +180,50 @@ return response.Error(c, fiber.StatusNotFound, response.CodeUserNotFound, "用�
 - **Web 端 SaaS 工作台**：采用 **HttpOnly + Secure + SameSite=Lax 的 Session Cookie**。免除前端存储 Token 被 XSS 窃取的风险，支持服务端空闲/绝对有效期及滑动续期；当前只实现单会话退出。
 - **外部 API / OpenAPI / CLI 工具**：采用 **JWT Bearer Token** 鉴权（`Authorization: Bearer <jwt>`），支持跨系统调用，令牌族撤销状态需查询认证存储。
 - **Fiber 统一中间件适配**：认证中间件优先解析 Header 凭证，回退匹配 Cookie 会话，统一输出 `c.Locals("current_user")`。
+
+---
+
+### 2.7 日志记录与请求关联规范
+
+运行配置与完整示例见 [后端日志使用说明](docs/BACKEND_LOGGING.md)，正式回归与证据见 [日志专项验收](docs/BACKEND_LOGGING_VALIDATION.md)。新增或修改日志时必须遵守以下约定。
+
+**Context 与依赖注入**：
+
+- 服务启动统一由 `core/logger.New(cfg)` 创建受管理的 logger，通过构造函数注入 Service；业务模块不得自行创建 stdout/file Handler，避免绕过关联、分类和脱敏。
+- HTTP 入口使用项目的 `middleware.RequestID()` 包装官方中间件，再挂载 `RequestLogger`；超长外部 ID 在官方存储前处理。保持请求日志在 recover、CORS、认证/鉴权外侧，覆盖下游 panic 和提前返回。
+- Handler 传 `c.Context()`，Service/Repository 各操作、事务和重试继续传原 ctx；元数据仅通过 `core/requestmeta` 读写，不新增另一套 request_id Context 键。Service、Repository 和核心日志设施不得为读取请求 ID 依赖 Fiber HTTP 中间件。
+- 请求相关日志必须使用 `InfoContext/DebugContext/WarnContext/ErrorContext` 或 `Log(ctx, ...)`。标准 slog 不会自行提取 Context；项目统一 Handler 已实现该能力，无需每次手工追加 request_id。
+- 不得把带某次请求信息的 logger 赋回共享 Service 字段；不要在请求链路中用 `context.Background()` 替换 ctx。`request_id/task_id/operator_id` 是保留字段，不能伪造或覆盖其来源，也不能用于授权。
+- 后台任务从应用/任务生命周期派生 Context，添加 task_id；用户触发任务从持久化记录恢复可用的 request_id/operator_id。无 HTTP 来源的定时任务不伪造 request_id；异步处理和 SSE 不得持有 fiber.Ctx，复制字符串及关联信息后使用独立生命周期。
+
+**事件与错误处理**：
+
+- 新增业务日志提供稳定的英文 `event`、明确的 `component`，按需追加 `operation`、目标资源 ID；msg 使用固定可读文本，不拼接敏感动态值。耗时统一使用数值毫秒 `duration_ms`。
+- 错误向上返回并导致请求失败时，补充操作语义、保留错误链，通常由请求边界记录结果；禁止 Repository、Service、Handler 逐层重复打印同一个错误。SQL 执行事件与 HTTP 汇总属于不同事件，可用同一请求 ID 关联。
+- 非致命错误被消化、主流程继续时，必须在处理处记录 Warn；后台任务最终失败记录 Error。重试中间失败按需 Debug，不逐次记录 Error；预期的参数错误、资源不存在、业务冲突不额外打印系统 Error。
+- 不输出原始 `err.Error()`、驱动 detail/hint、请求体、配置、密码、Cookie、Token、Authorization 或 DSN。错误诊断使用 `logger.SafeError(err)` 或经审核的稳定安全字段；不能依赖输出层兜底替代调用方脱敏。
+
+非致命辅助操作示例（若原业务要求返回错误，必须保留原返回行为）：
+
+```go
+if err := s.users.UpdateColumns(ctx, user.ID, updates); err != nil {
+    s.logger.WarnContext(ctx, "Update last login timestamp failed",
+        "event", "auth.last_login_update_failed",
+        "operation", "update_last_login",
+        "user_id", user.ID,
+        "error_type", fmt.Sprintf("%T", err),
+    ) // component 在构造 Service 时绑定；request_id 由统一 Handler 自动添加。
+}
+```
+
+**SQL、输出与验证**：
+
+- GORM 必须使用 `core/logger.NewGORM`，最外层适配器保持 `gormlogger.Interface` 和 `gorm.ParamsFilter` 实现；不得另接默认 logger、记录绑定参数或通过 `.Debug()` 绕过 SQL 禁用。Raw/Exec/表达式继续使用绑定参数，SQL 正文省略策略不是通用 SQL 脱敏器。
+- 分类固定为 app/access/sql；应用和访问共用 app.log，SQL 使用 sql.log。默认 stdout，file/both 由 logging 配置启用；业务代码不得自开日志文件、共享多进程活动文件或叠加另一套轮转。
+- 应用与 SQL 级别独立，不可用应用级别提前过滤 SQL。生产默认 JSON，单行事件保持合法、关联字段位于顶层且不重复；保留 16KiB 事件上限和超限关联摘要。
+- 后台轮询如需降噪，只在该轮询查询的派生 Context 上使用 `requestmeta.WithSQLPoll(ctx)`；统一适配器仅过滤无请求来源、成功、非慢查询且返回零行的 INFO SQL。不得以 rows=0、task_id 或 sql_omitted 为通用过滤条件，也不得关闭整个 worker 的错误/慢查询日志；实际处理记录与普通请求 SQL 保留。
+- 停机先停止请求/后台任务、关闭业务资源，记录最终结果，再关闭 logger；不要引入绕过清理的 os.Exit。输出故障的安全 stderr 诊断仅由统一日志设施负责，不能递归记录。
+- 修改 Context、日志 Handler、SQL 适配器或请求中间件时，运行对应正式回归；至少验证真实 HTTP→Service→Repository 的请求 ID 一致、并发不串号、非致命错误仍保持原响应、敏感哨兵不泄露。涉及 SQL 的变更验证 SQLite/PostgreSQL；缺环境登记未覆盖，不以 Skip 代替通过。行为性改造完成后按项目要求运行 race/vet，纯文档变更检查链接和 diff。
 
 ---
 

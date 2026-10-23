@@ -98,32 +98,35 @@ func NewAppContainer(cfg *config.Config, log *slog.Logger) (*AppContainer, error
 		return nil, err
 	}
 
+	container := &AppContainer{Config: cfg, Logger: log, Cipher: cipher}
+	ready := false
+	defer func() {
+		if !ready {
+			container.Close()
+		}
+	}()
+
 	db, err := InitDatabase(cfg, log)
 	if err != nil {
 		return nil, err
 	}
 
+	container.DB = db
 	rdb, err := InitRedis(cfg, log)
 	if err != nil {
 		return nil, err
 	}
 
+	container.Redis = rdb
 	store, err := storage.NewStorage(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	lifecycle, stop := context.WithCancel(context.Background())
-	return &AppContainer{
-		Config:  cfg,
-		Logger:  log,
-		DB:      db,
-		Redis:   rdb,
-		Storage: store,
-		Cipher:  cipher,
-		lifecycle: lifecycle,
-		stop:      stop,
-	}, nil
+	container.Storage = store
+	container.lifecycle, container.stop = context.WithCancel(context.Background())
+	ready = true
+	return container, nil
 }
 
 func (a *AppContainer) Close() {

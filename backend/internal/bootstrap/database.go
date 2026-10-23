@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,68 +10,17 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 
 	"infranexus/internal/config"
-	"infranexus/internal/middleware"
+	"infranexus/internal/core/logger"
 )
-
-type requestAwareGORMLogger struct {
-	base   *slog.Logger
-	config gormlogger.Config
-	level  gormlogger.LogLevel
-}
-
-func (l *requestAwareGORMLogger) LogMode(level gormlogger.LogLevel) gormlogger.Interface {
-	copy := *l
-	copy.level = level
-	return &copy
-}
-
-func (l *requestAwareGORMLogger) logger(ctx context.Context) gormlogger.Interface {
-	requestID := middleware.RequestIDFromContext(ctx)
-	base := l.base
-	if requestID != "" {
-		base = base.With("request_id", requestID)
-	}
-	config := l.config
-	config.LogLevel = l.level
-	return gormlogger.NewSlogLogger(base, config)
-}
-
-func (l *requestAwareGORMLogger) Info(ctx context.Context, message string, data ...interface{}) {
-	l.logger(ctx).Info(ctx, message, data...)
-}
-
-func (l *requestAwareGORMLogger) Warn(ctx context.Context, message string, data ...interface{}) {
-	l.logger(ctx).Warn(ctx, message, data...)
-}
-
-func (l *requestAwareGORMLogger) Error(ctx context.Context, message string, data ...interface{}) {
-	l.logger(ctx).Error(ctx, message, data...)
-}
-
-func (l *requestAwareGORMLogger) Trace(ctx context.Context, begin time.Time, query func() (string, int64), err error) {
-	l.logger(ctx).Trace(ctx, begin, query, err)
-}
 
 // InitDatabase 初始化 GORM 双引擎 (SQLite / PostgreSQL)
 func InitDatabase(cfg *config.Config, log *slog.Logger) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 
-	logMode := gormlogger.Warn
-	if cfg.App.Debug {
-		logMode = gormlogger.Info
-	}
-
 	gormConfig := &gorm.Config{
-		Logger: &requestAwareGORMLogger{base: log, config: gormlogger.Config{
-			SlowThreshold:             200 * time.Millisecond,
-			LogLevel:                  logMode,
-			IgnoreRecordNotFoundError: true,
-			ParameterizedQueries:      true,
-			Colorful:                  cfg.App.Debug,
-		}, level: logMode},
+		Logger:         logger.NewGORM(log, cfg.EffectiveLogging().SQL, cfg.Database.Driver),
 		TranslateError: true,
 	}
 

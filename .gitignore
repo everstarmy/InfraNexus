@@ -26,6 +26,8 @@ backend/data/*.db-journal
 *.sqlite
 
 # Application logs
+logs/
+*.log.gz
 *.log
 
 # Dependencies

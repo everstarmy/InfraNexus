@@ -2,21 +2,31 @@ package middleware
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 
 	coreerrors "infranexus/internal/core/errors"
+	"infranexus/internal/core/logger"
 	"infranexus/internal/core/requestmeta"
 )
 
 func RequestIDFromContext(ctx context.Context) string {
 	return requestmeta.RequestID(ctx)
+}
+
+// RequestID bounds client-supplied IDs before the official Fiber middleware
+// stores them, keeping FromContext(c), response headers and service logs equal.
+func RequestID() fiber.Handler {
+	official := requestid.New()
+	return func(c fiber.Ctx) error {
+		if len(c.Get(fiber.HeaderXRequestID)) > 128 {
+			c.Request().Header.Del(fiber.HeaderXRequestID)
+		}
+		return official(c)
+	}
 }
 
 // RequestLogger 使用标准库 slog 记录结构化 HTTP 请求链路日志
@@ -39,9 +49,12 @@ func RequestLogger(log *slog.Logger) fiber.Handler {
 		attrs := []any{
 			slog.String("request_id", reqID),
 			slog.String("method", c.Method()),
-			slog.String("path", c.Path()),
+			slog.String("route", requestRoute(c)),
+			slog.String("category", "access"),
+			slog.String("component", "http"),
+			slog.String("event", "http.request_completed"),
 			slog.Int("status", status),
-			slog.Duration("latency", latency),
+			slog.Float64("duration_ms", float64(latency)/float64(time.Millisecond)),
 			slog.String("ip", c.IP()),
 		}
 
@@ -49,14 +62,14 @@ func RequestLogger(log *slog.Logger) fiber.Handler {
 			if err != nil {
 				attrs = appendErrorAttrs(attrs, err, classification)
 			}
-			log.Error("HTTP Server Error", attrs...)
+			log.ErrorContext(c.Context(), "HTTP Server Error", attrs...)
 		} else if status >= 400 {
 			if err != nil {
 				attrs = appendErrorAttrs(attrs, err, classification)
 			}
-			log.Warn("HTTP Client Warning", attrs...)
+			log.WarnContext(c.Context(), "HTTP Client Warning", attrs...)
 		} else {
-			log.Info("HTTP Request Handled", attrs...)
+			log.InfoContext(c.Context(), "HTTP Request Handled", attrs...)
 		}
 
 		return err
@@ -64,27 +77,18 @@ func RequestLogger(log *slog.Logger) fiber.Handler {
 }
 
 func appendErrorAttrs(attrs []any, err error, classification coreerrors.Classification) []any {
-	attrs = append(attrs, slog.String("error_type", fmt.Sprintf("%T", err)), slog.Int("business_code", int(classification.BizCode)))
-	if cause := classification.Cause; cause != nil {
-		attrs = append(attrs, slog.String("cause_type", fmt.Sprintf("%T", cause)))
-		// Database driver errors often interpolate key values into their message;
-		// keep those structured by type while logging other internal causes directly.
-		if !isDatabaseCause(cause) {
-			attrs = append(attrs, slog.String("cause", cause.Error()))
-		} else {
-			attrs = append(attrs, slog.String("cause", "database operation failed"))
-		}
+	attrs = append(attrs, "business_code", int(classification.BizCode))
+	if classification.Cause != nil {
+		attrs = append(attrs, logger.SafeError(classification.Cause)...)
+	} else {
+		attrs = append(attrs, logger.SafeError(err)...)
 	}
 	return attrs
 }
 
-func isDatabaseCause(err error) bool {
-	for err != nil {
-		causeType := fmt.Sprintf("%T", err)
-		if strings.Contains(causeType, "gorm") || strings.Contains(causeType, "pgconn") || strings.Contains(causeType, "sqlite") {
-			return true
-		}
-		err = errors.Unwrap(err)
+func requestRoute(c fiber.Ctx) string {
+	if route := c.Route(); route != nil && route.Path != "" && route.Method != "USE" {
+		return route.Path
 	}
-	return false
+	return "<unmatched>"
 }
