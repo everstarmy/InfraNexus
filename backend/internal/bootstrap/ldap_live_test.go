@@ -70,6 +70,12 @@ func liveADConfig(t *testing.T) (*domain.LDAPConfig, string, string) {
 		UserFilter: "(&(objectCategory=person)(objectClass=user)(sAMAccountName=%s))", TimeoutSeconds: 10,
 		AttributeMapping: datatypes.NewJSONType(domain.LDAPAttributeMapping{Username: "sAMAccountName", Email: "mail", Nickname: "displayName", Department: "department", ExternalID: "objectGUID"}),
 	}
+	if value := os.Getenv("INFRANEXUS_LIVE_AD_START_TLS"); value != "" {
+		cfg.StartTLS, err = strconv.ParseBool(value)
+		if err != nil || (cfg.StartTLS && cfg.UseSSL) {
+			t.Fatal("invalid explicit live AD StartTLS configuration")
+		}
+	}
 	return cfg, required("INFRANEXUS_LIVE_AD_PASSWORD"), username
 }
 
@@ -163,6 +169,22 @@ func liveADApplication(t *testing.T) (*AppContainer, string, *liveLogBuffer) {
 		JWT:      config.JWTConfig{Secret: uuid.NewString() + uuid.NewString(), AccessTokenExpire: 900, RefreshTokenExpire: 3600, Issuer: "live-ad-test"},
 		Security: config.SecurityConfig{TrustedOrigins: []string{"http://localhost:5173"}, LoginRateLimit: 100, EncryptionKey: uuid.NewString() + uuid.NewString()},
 		Storage:  config.StorageConfig{Driver: "memory"},
+	}
+	if address := os.Getenv("INFRANEXUS_LIVE_AD_POSTGRES_ADDR"); address != "" {
+		pgHost, pgPort, err := net.SplitHostPort(address)
+		ip := net.ParseIP(pgHost)
+		if err != nil || (pgHost != "localhost" && (ip == nil || !ip.IsLoopback())) {
+			t.Fatal("live AD PostgreSQL must be a disposable loopback service")
+		}
+		portNumber, err := strconv.Atoi(pgPort)
+		if err != nil {
+			t.Fatal("invalid live AD PostgreSQL port")
+		}
+		pgPassword := os.Getenv("INFRANEXUS_LIVE_AD_POSTGRES_PASSWORD")
+		if pgPassword == "" {
+			t.Fatal("missing disposable PostgreSQL password")
+		}
+		cfg.Database = config.DatabaseConfig{Driver: "postgres", Postgres: config.PostgresConfig{Host: pgHost, Port: portNumber, User: "live_ad", Password: pgPassword, DBName: "live_ad", SSLMode: "disable"}, Pool: cfg.Database.Pool}
 	}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	container, err := NewAppContainer(cfg, logger)
@@ -353,7 +375,7 @@ func TestLiveADIsolatedApplicationLifecycle(t *testing.T) {
 	permissionsPath := "/api/v1/roles/" + role.ID.String() + "/permissions"
 	expectCode(t, request("POST", permissionsPath, admin, map[string]any{"permission_ids": []uuid.UUID{permission.ID}, "expected_revision": role.EditRevision}), 200, response.CodeSuccess)
 	configResult := request("POST", "/api/v1/ldap/configs", admin, domain.LDAPConfigRequest{
-		Name: "Live AD acceptance", Type: cfg.Type, Domain: cfg.Domain, ServerHost: cfg.ServerHost, Port: cfg.Port, UseSSL: cfg.UseSSL,
+		Name: "Live AD acceptance", Type: cfg.Type, Domain: cfg.Domain, ServerHost: cfg.ServerHost, Port: cfg.Port, UseSSL: cfg.UseSSL, StartTLS: cfg.StartTLS,
 		BindDN: cfg.BindDN, BindPassword: password, BaseDN: cfg.BaseDN, UserFilter: cfg.UserFilter, AttributeMapping: cfg.AttributeMapping.Data(),
 		Enabled: true, DisableMissingUsers: true, TimeoutSeconds: 10, DefaultRoleID: &role.ID,
 	})
@@ -369,7 +391,7 @@ func TestLiveADIsolatedApplicationLifecycle(t *testing.T) {
 	if !strings.HasPrefix(encrypted.BindPassword, "v1:") || strings.Contains(encrypted.BindPassword, password) {
 		t.Fatal("LDAP secret was not encrypted in isolated DB")
 	}
-	checked := request("POST", "/api/v1/ldap/test", admin, map[string]any{"config_id": storedConfig.ID, "name": "Live AD acceptance", "type": cfg.Type, "domain": cfg.Domain, "server_host": cfg.ServerHost, "port": cfg.Port, "use_ssl": cfg.UseSSL, "bind_dn": cfg.BindDN, "base_dn": cfg.BaseDN, "user_filter": cfg.UserFilter, "timeout_seconds": 10})
+	checked := request("POST", "/api/v1/ldap/test", admin, map[string]any{"config_id": storedConfig.ID, "name": "Live AD acceptance", "type": cfg.Type, "domain": cfg.Domain, "server_host": cfg.ServerHost, "port": cfg.Port, "use_ssl": cfg.UseSSL, "start_tls": cfg.StartTLS, "bind_dn": cfg.BindDN, "base_dn": cfg.BaseDN, "user_filter": cfg.UserFilter, "timeout_seconds": 10})
 	expectCode(t, checked, 200, response.CodeSuccess)
 	if !decode[domain.LDAPTestResult](t, checked.Data).Success {
 		t.Fatal("stored-credential AD connection test failed")
@@ -488,6 +510,7 @@ func TestLiveADIsolatedApplicationLifecycle(t *testing.T) {
 	if incrementalPlan.Summary.Disable != 0 || incrementalPlan.Summary.Create != 0 {
 		t.Fatal("incremental preview proposed unexpected creates or missing-user disables")
 	}
+	auditLiveADSnapshot(t, ctx, container, storedConfig, started.ID)
 	if logs.contains(password) || logs.contains(strings.TrimPrefix(admin, "Bearer ")) {
 		t.Fatal("application logs contain a credential")
 	}
@@ -496,5 +519,5 @@ func TestLiveADIsolatedApplicationLifecycle(t *testing.T) {
 			t.Fatal("application logs contain an AD access token")
 		}
 	}
-	t.Logf("live AD isolated HTTP chain passed: concurrent_jit=%d unique_profiles=1 directory_total=%d enabled=%d sync_created=%d sync_disabled=%d sse_replay=verified authz_revocation=verified logs=redacted", concurrentLogins, len(directory), enabled, report.Created, report.Disabled)
+	t.Logf("live AD isolated HTTP chain passed: db=%s concurrent_jit=%d unique_profiles=1 directory_total=%d enabled=%d sync_created=%d sync_disabled=%d sse_replay=verified authz_revocation=verified logs=redacted", container.DB.Dialector.Name(), concurrentLogins, len(directory), enabled, report.Created, report.Disabled)
 }

@@ -896,6 +896,10 @@ func (s *ldapService) runSync(cfg *domain.LDAPConfig, log *domain.LDAPSyncLog, p
 	finished := s.now()
 	log.FinishedAt = &finished
 	log.DurationMs = finished.Sub(log.StartedAt).Milliseconds()
+	// Terminal snapshots must include work completed since the last throttled write.
+	// On interruption, retain the actual count rather than reporting full completion.
+	log.Processed = processed
+	log.Total = &total
 	log.Report = datatypes.NewJSONType(report)
 	var successAt *time.Time
 	switch {
