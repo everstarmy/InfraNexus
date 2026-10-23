@@ -100,7 +100,7 @@ connect 接收 ctx；TCP 使用 DialContext，LDAPS 握手使用 HandshakeContex
 
 流循环持有独立应用生命周期 ctx 的子 context，不在异步回调中保留/访问复用的 fiber.Ctx。每次读取有界，写入失败和取消关闭时不触发额外重连风暴。计划性换连接必须保留 cursor，因此依赖 R08。
 
-验收：真实 HTTP 连接正常关闭、客户端停止读取、TCP 黑洞/代理中断、Redis 故障和应用停机；记录回收时间、连接数、goroutine 和 Redis 阻塞读取。正常 EOF/可感知断开目标为一个读取周期加余量内退出；黑洞以配置的写入/连接上限验收。停机按服务总 shutdown 预算验收，不用无 deadline 的等待。
+验收：真实 HTTP 连接正常关闭、客户端停止读取、TCP 黑洞/代理中断、Redis 故障和应用停机；记录回收时间、连接数、goroutine 和 Redis 阻塞读取。响应体关闭等已感知断开立即取消待处理 Read；TCP FIN 转为可感知写错误可能需要两次心跳，本地 Docker/Nginx 以 25 秒预算实测（不能把首次 FIN 当作生产者已收到取消）。黑洞以配置的写入/连接上限验收。停机按服务总 shutdown 预算验收，不用无 deadline 的等待。
 
 ## 4. 前端与跨端契约
 

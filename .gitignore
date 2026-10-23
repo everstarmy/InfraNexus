@@ -46,3 +46,6 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Python integration runner bytecode
+deploy/r09/__pycache__/

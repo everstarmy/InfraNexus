@@ -5,16 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/valyala/fasthttp"
 
 	"infranexus/internal/core/requestmeta"
 	"infranexus/internal/domain"
 )
+
+// SSEConnectionMaxLifetime bounds both the response socket and its producer.
+const SSEConnectionMaxLifetime = 2 * time.Minute
 
 const (
 	sseReadBlock       = 10 * time.Second
@@ -76,12 +81,14 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 	owner := *principal
 	owner.Roles = append([]string(nil), principal.Roles...)
 	connection := c.RequestCtx().Conn()
-	stopClose := context.AfterFunc(h.life, func() {
+	streamCtx, cancelStream := context.WithTimeout(h.life, SSEConnectionMaxLifetime)
+	stopClose := context.AfterFunc(streamCtx, func() {
 		if connection != nil {
 			_ = connection.Close()
 		}
 	})
-	err := c.SendStreamWriter(func(w *bufio.Writer) {
+	body := fasthttp.NewStreamReader(func(w *bufio.Writer) {
+		defer cancelStream()
 		defer stopClose()
 		if err := writeSSE(w, lastID, "connected", []byte(`{"status":"connected"}`)); err != nil {
 			logger.Debug("Write SSE connected event failed", "error_type", fmt.Sprintf("%T", err))
@@ -96,7 +103,7 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 		lastAuthCheck := time.Now()
 		for {
 			if time.Since(lastAuthCheck) >= sseAuthCheckPeriod {
-				validated, err := h.validateStreamIdentity(h.life, current)
+				validated, err := h.validateStreamIdentity(streamCtx, current)
 				if err != nil {
 					_ = writeSSE(w, "", "auth.expired", []byte(`{"status":"closed"}`))
 					_ = w.Flush()
@@ -107,11 +114,11 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 				lastAuthCheck = time.Now()
 			}
 
-			ctx, cancel := context.WithTimeout(h.life, sseReadBlock+time.Second)
+			ctx, cancel := context.WithTimeout(streamCtx, sseReadBlock+time.Second)
 			events, _, err := h.events.Read(ctx, lastID, sseReadBlock, sseBatchLimit)
 			cancel()
 			if err != nil {
-				if h.life.Err() != nil {
+				if streamCtx.Err() != nil {
 					return
 				}
 				logger.Warn("Read SSE event stream failed", "error_type", fmt.Sprintf("%T", err))
@@ -130,7 +137,7 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 			}
 			for _, event := range events {
 				if time.Since(lastAuthCheck) >= sseAuthCheckPeriod {
-					validated, err := h.validateStreamIdentity(h.life, current)
+					validated, err := h.validateStreamIdentity(streamCtx, current)
 					if err != nil {
 						_ = writeSSE(w, "", "auth.expired", []byte(`{"status":"closed"}`))
 						_ = w.Flush()
@@ -152,10 +159,25 @@ func (h *SSEHandler) StreamNotifications(c fiber.Ctx) error {
 			}
 		}
 	})
+	// fasthttp closes the body on socket failure. Propagate that close to a
+	// pending Redis read rather than waiting for the next producer write.
+	err := c.SendStream(&sseResponseStream{ReadCloser: body, cancel: cancelStream})
 	if err != nil {
+		_ = body.Close()
+		cancelStream()
 		stopClose()
 	}
 	return err
+}
+
+type sseResponseStream struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (s *sseResponseStream) Close() error {
+	s.cancel()
+	return s.ReadCloser.Close()
 }
 
 func (h *SSEHandler) validateStreamIdentity(parent context.Context, principal *domain.Principal) (*domain.Principal, error) {

@@ -31,7 +31,7 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 		if strings.HasPrefix(string(header.RequestURI()), "/api/v1/sse/notifications") {
 			// SSE connections are deliberately rotated after two minutes. The
 			// client resumes from Last-Event-ID, while a stalled socket is bounded.
-			return fasthttp.RequestConfig{WriteTimeout: 2 * time.Minute}
+			return fasthttp.RequestConfig{WriteTimeout: handler.SSEConnectionMaxLifetime}
 		}
 		return fasthttp.RequestConfig{}
 	}

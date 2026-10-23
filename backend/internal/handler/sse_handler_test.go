@@ -13,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/valyala/fasthttp"
 
 	"infranexus/internal/domain"
 )
@@ -137,5 +138,37 @@ func TestSSEStreamStopsAndClosesSocketOnApplicationCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("SSE client socket remained open after application cancellation")
+	}
+}
+
+// fasthttp closes the response body after a socket write fails. That close must
+// cancel a Redis read immediately, even while the application remains running.
+func TestSSEBodyCloseCancelsPendingRead(t *testing.T) {
+	store := &lifecycleSSEStore{started: make(chan struct{}), cancelled: make(chan struct{})}
+	life, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	app := fiber.New()
+	c := app.AcquireCtx(&fasthttp.RequestCtx{})
+	defer app.ReleaseCtx(c)
+	c.Locals("current_principal", &domain.Principal{UserID: uuid.New()})
+	stream := NewSSEHandler(store, nil, nil, nil, life)
+	if err := stream.StreamNotifications(c); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("stream read did not start")
+	}
+	if err := c.Response().CloseBodyStream(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-store.cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("closing the response body did not cancel its pending Redis read")
+	}
+	if life.Err() != nil {
+		t.Fatal("body close cancelled application lifecycle")
 	}
 }

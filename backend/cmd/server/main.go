@@ -27,6 +27,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer container.Close()
+	stopDiagnostics := bootstrap.StartAuditDiagnostics(container)
+	defer stopDiagnostics()
 
 	// 4. 自动数据库表结构迁移 (兼容 SQLite 与 PostgreSQL)
 	if err := bootstrap.Migrate(container.DB); err != nil {

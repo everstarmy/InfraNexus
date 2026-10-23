@@ -1,0 +1,204 @@
+{
+  "project": "infranexus-r09-72746",
+  "scenario": "all",
+  "started_utc": "2026-10-23T08:19:41.561018+00:00",
+  "cases": [
+    {
+      "name": "deployment",
+      "result": "passed",
+      "baseline": {
+        "goroutines": 17,
+        "fds": 12,
+        "heap_bytes": 11184416,
+        "sse_writers": 0,
+        "redis_readers": 0,
+        "stack_complete": true,
+        "app_tcp_established": 0,
+        "redis_pubsub_active": 1,
+        "redis_pool_total": 1,
+        "redis_pool_idle": 1,
+        "redis_clients": 3,
+        "redis_blocked": 0,
+        "redis_xread": 0,
+        "label": "warmup",
+        "elapsed": 20.304,
+        "redis_unaccounted": 0
+      }
+    },
+    {
+      "name": "client_disconnect_5_cycles",
+      "result": "passed",
+      "recovery_seconds": [
+        20.245,
+        20.236,
+        20.27,
+        20.298,
+        20.218
+      ]
+    },
+    {
+      "name": "cursor_replay",
+      "result": "passed"
+    },
+    {
+      "name": "nginx_3s_upstream_timeout",
+      "result": "passed",
+      "seconds": 3.003
+    },
+    {
+      "name": "gateway_termination",
+      "result": "passed",
+      "seconds": 20.079
+    },
+    {
+      "name": "redis_unresponsive",
+      "result": "passed",
+      "seconds": 11.105
+    },
+    {
+      "name": "pressure_confirmed",
+      "send_queue_max_bytes": 1367464,
+      "published": 1000,
+      "payload_bytes": 32768000,
+      "drop_packets": 27
+    },
+    {
+      "name": "slow_reader_and_tcp_blackhole",
+      "result": "passed",
+      "socket_seconds": 120.32,
+      "writer_seconds": 120.32
+    },
+    {
+      "name": "resource_baseline",
+      "result": "passed",
+      "before": {
+        "goroutines": 17,
+        "fds": 12,
+        "heap_bytes": 11184416,
+        "sse_writers": 0,
+        "redis_readers": 0,
+        "stack_complete": true,
+        "app_tcp_established": 0,
+        "redis_pubsub_active": 1,
+        "redis_pool_total": 1,
+        "redis_pool_idle": 1,
+        "redis_clients": 3,
+        "redis_blocked": 0,
+        "redis_xread": 0,
+        "label": "warmup",
+        "elapsed": 20.304,
+        "redis_unaccounted": 0
+      },
+      "after": {
+        "sse_writers": 0,
+        "redis_readers": 0,
+        "redis_pool_total": 3,
+        "redis_pool_idle": 3,
+        "goroutines": 17,
+        "fds": 14,
+        "stack_complete": true,
+        "app_tcp_established": 0,
+        "redis_pubsub_active": 1,
+        "heap_bytes": 15884496,
+        "redis_clients": 5,
+        "redis_blocked": 0,
+        "redis_xread": 0,
+        "label": "final",
+        "elapsed": 355.749,
+        "redis_unaccounted": 0
+      }
+    },
+    {
+      "name": "sigterm_5_streams",
+      "result": "passed",
+      "exit_code": 0,
+      "seconds": 0.314,
+      "redis_blocking_connections": 0
+    }
+  ],
+  "thresholds": {
+    "socket_lifetime_s": 123,
+    "writer_recovery_s": 133,
+    "proxy_send_timeout_s": 130,
+    "shutdown_s": 10,
+    "goroutine_slack": 6,
+    "fd_slack": 4
+  },
+  "result": "passed",
+  "environment": {
+    "docker": "29.3.1",
+    "compose": "5.1.1",
+    "project": "infranexus-r09-72746",
+    "images": {
+      "app": {
+        "Id": "sha256:e2b56fead3a298a7d2ba099f589e9dbed364519a0c2ac1d204b6b2638a922e84",
+        "Architecture": "arm64",
+        "RepoDigests": [
+          "infranexus-r09-app@sha256:e2b56fead3a298a7d2ba099f589e9dbed364519a0c2ac1d204b6b2638a922e84"
+        ]
+      },
+      "gateway": {
+        "Id": "sha256:f772544a23fd9ad7303a0ee0b3a65de70340d91d2db3c16d64132c90dd2f5c0e",
+        "Architecture": "arm64",
+        "RepoDigests": [
+          "infranexus-r09-72746-gateway@sha256:f772544a23fd9ad7303a0ee0b3a65de70340d91d2db3c16d64132c90dd2f5c0e"
+        ]
+      },
+      "redis": {
+        "Id": "sha256:d146f83b1e0f02fc27c26a50cee39338c736674c5959db84363e6ae3cd9e02d2",
+        "Architecture": "arm64",
+        "RepoDigests": [
+          "redis@sha256:d146f83b1e0f02fc27c26a50cee39338c736674c5959db84363e6ae3cd9e02d2"
+        ]
+      },
+      "postgres": {
+        "Id": "sha256:9ae4e8f8d0284836a505f0b2e825144e32e20499856e7dc5f7b99e19d10eedd6",
+        "Architecture": "arm64",
+        "RepoDigests": [
+          "postgres@sha256:9ae4e8f8d0284836a505f0b2e825144e32e20499856e7dc5f7b99e19d10eedd6"
+        ]
+      },
+      "fault": {
+        "Id": "sha256:213854c5c9d4f024989f108d4eeee60b669a5283c0d5337a6d82f04ec906cc84",
+        "Architecture": "arm64",
+        "RepoDigests": [
+          "infranexus-r09-72746-fault@sha256:213854c5c9d4f024989f108d4eeee60b669a5283c0d5337a6d82f04ec906cc84"
+        ]
+      }
+    }
+  },
+  "normal_image": {
+    "result": "passed",
+    "sqlite_health": 200,
+    "user": "10001:10001",
+    "image": "sha256:827a31a0bcb36bdbd4596494bbc42caf3d351db9fc72bae7b63e5325af29d6a7",
+    "audit_port": "absent despite audit env"
+  },
+  "tcp_backpressure_probe": {
+    "result": "passed",
+    "captured_utc": "2026-10-23T08:25:08.973289+00:00",
+    "send_queue_bytes_by_listener": {
+      "8080": 1367464,
+      "8082": 70952
+    },
+    "active_resources": {
+      "goroutines": 20,
+      "fds": 17,
+      "redis_readers": 0,
+      "stack_complete": true,
+      "app_tcp_established": 2,
+      "redis_pool_idle": 3,
+      "heap_bytes": 16377920,
+      "sse_writers": 2,
+      "redis_pool_total": 3,
+      "redis_pubsub_active": 1
+    }
+  },
+  "sample_count": 918,
+  "sample_csv": "r09-docker-2026-10-23-samples.csv",
+  "sample_csv_sha256": "17953ebd1606614eac67822c54637c3326eff4e624afcfcfb0e522ee614f313b",
+  "base_commit": "bf1279320232f6f28d09d0e52b2cd748f75e5d54",
+  "raw_report_sha256": "779fe94dd67c4489a33f036c38748fe7c0e0c912c2bd07b262410ada56634195",
+  "raw_report_path": "/private/tmp/infranexus-r09-final-2/report.json",
+  "validation_note": "Full sequence passed; during that same run a supplemental assertion checked positive Send-Q on BOTH listeners and two blocked producers. That stronger assertion is also included in the runner for future runs."
+}
