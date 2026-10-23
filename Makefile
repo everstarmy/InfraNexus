@@ -1,4 +1,4 @@
-.PHONY: help dev-backend dev-frontend build-backend build-frontend test tidy install-frontend
+.PHONY: help dev-backend dev-frontend build-backend build-frontend test tidy install-frontend docker-build docker-up docker-down
 
 help:
 	@echo "InfraNexus 开发运维命令一览:"
@@ -30,3 +30,14 @@ test:
 
 tidy:
 	cd backend && go mod tidy
+
+# Both Dockerfiles use the repository root as their build context.
+docker-build:
+	docker build -f backend/Dockerfile -t infranexus/backend:local .
+	docker build -f frontend/Dockerfile -t infranexus/frontend:local .
+
+docker-up:
+	docker compose up -d --build --wait
+
+docker-down:
+	docker compose down

@@ -1,0 +1,66 @@
+name: infranexus
+services:
+  postgres:
+    image: postgres:17.11-alpine3.23
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: infranexus
+      POSTGRES_DB: infranexus
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infranexus -d infranexus"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  app:
+    image: infranexus/backend:local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    stop_grace_period: 15s
+    environment:
+      APP_APP_ENV: ${APP_ENV:-production}
+      APP_APP_DEBUG: "false"
+      APP_DATABASE_DRIVER: postgres
+      APP_DATABASE_POSTGRES_HOST: postgres
+      APP_DATABASE_POSTGRES_USER: infranexus
+      APP_DATABASE_POSTGRES_DBNAME: infranexus
+      APP_DATABASE_POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      APP_REDIS_HOST: redis
+      APP_JWT_SECRET: ${JWT_SECRET:?set a random JWT_SECRET of at least 32 characters}
+      APP_SECURITY_ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set a unique ENCRYPTION_KEY}
+      APP_SECURITY_TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      APP_SESSION_SECURE: ${SESSION_SECURE:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  frontend:
+    image: infranexus/frontend:local
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
+    depends_on:
+      app:
+        condition: service_healthy
+volumes:
+  postgres_data:
+  redis_data:

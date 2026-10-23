@@ -81,7 +81,7 @@
   - [x] 隔离 PostgreSQL、SQLite、真实 Redis 的并发、回滚、取消和跨实例矩阵通过；环境变量已设置，目标用例未被 Skip。
   - [x] 全量 Go race/vet、Vitest、build、E2E、性能门禁通过；环境、命令、结果和限制已写入 RELEASE_VALIDATION。
   - [x] 用户授权的真实 AD 只读绑定/认证/搜索通过；隔离应用验证 3 并发 JIT→1 档案、即时撤权、预览不写、重复任务幂等、全量后增量预览及 Redis SSE 补发，race 通过。
-  - [x] 本地 Docker/Nginx 的真实黑洞、慢读、代理退出/超时、Redis 无响应和进程停机演练完成；镜像身份、采样及复跑脚本已保存。
+  - [x] 本地 Docker/Nginx 的真实黑洞、慢读、代理退出/超时、Redis 无响应和进程停机演练完成；镜像身份与采样已保存；R09 专用工具后续移除，历史复跑脚本见提交 `a8c3d56`，当前部署见 DOCKER.md。
   - [ ] 实际部署网关配置若不同需复验；实际采用的 LDAPS/StartTLS 和大目录跨页尚未在真实 AD 验收。
   - [ ] 只读核查部署数据中的历史策略差异、LDAP 缺角色/部门异常与计数，形成定向修复清单，不自动补权。
   - [x] API 文档同步 revision 与 LDAP timeout 契约；本轮未改 schema，无需新增迁移。

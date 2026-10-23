@@ -2,6 +2,12 @@
 
 > 深度复审更新（2026-10-22）：本文件是 M6 当时的验证记录，保留原始结果供追溯。后续定向审计已复现授权数据竞争、LDAP 原子性/缓存/JIT、订阅释放与 SSE 客户端边界缺陷，当前评级调整为 **Needs Fixes**。本文件的历史通过不能替代新增场景验收；当前改造与发布门禁见 [深度复审整改方案](DEEP_REVIEW_REMEDIATION_PLAN.md)，进度见 [TODOLIST](TODOLIST.md)。
 
+## 2026-10-23 常规 Docker 镜像交付
+
+按要求移除 R09 专用容器编排、故障工具、诊断端点及构建标签，保留 SSE 修复、正式回归和历史验收证据（工具源码归档于 `a8c3d56`）。新增正式前端 Dockerfile/Nginx 配置与根 Compose；后端保留非 root、CGO 双数据库驱动和健康检查。实际 docker build 已产出 `infranexus/backend:local`、`infranexus/frontend:local`，Linux/arm64。
+
+隔离正式 Compose 冒烟通过：四服务健康、SPA/资源/404、Origin 校验和 Cookie 登录、SSE 检查点、后端重建后的账号/会话持久化，以及无诊断入口。生产模式强制 Secure Cookie 的逻辑保留；示例环境明确采用本机 HTTP 开发模式，正式 HTTPS 切换 production。handler race 与 go vet 通过。Docker Scout 因需要 Docker ID 登录未完成扫描。部署步骤见 [Docker 文档](DOCKER.md)，镜像和结果见 [构建证据](evidence/docker-build-2026-10-23.json)。本节不改变 R13/R14 的未完成状态。
+
 ## 2026-10-23 R09 Docker 网关与故障验收
 
 R09 现已达到本地 Docker/Nginx 拓扑的验收标准，详情见 [完整报告](R09_DOCKER_VALIDATION.md)、[镜像/结果证据](evidence/r09-docker-2026-10-23.json) 和 [918 次资源采样](evidence/r09-docker-2026-10-23-samples.csv)。使用 PostgreSQL 17.11、Redis 8.6.3、Nginx 1.29.4，多阶段构建完整前后端；真实容器 iptables DROP 与停止读取均形成背压。未修改现有 Redis 或 AD。

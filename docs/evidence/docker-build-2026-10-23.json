@@ -1,0 +1,29 @@
+{
+  "project": "infranexus-release-smoke-75942",
+  "checks": [
+    "all four services healthy",
+    "SPA routes, assets and missing asset 404",
+    "trusted second Origin, HttpOnly login and cookie profile",
+    "SSE connected/checkpoint through Nginx",
+    "backend replacement preserves account/session and gateway routing",
+    "non-root runtime and no audit diagnostic listener"
+  ],
+  "images": {
+    "infranexus/backend:local": {
+      "Id": "sha256:a7cb833553a3c62fbc7c4794177cfaa9e552328c08685e05604f1899d6be7a84",
+      "Size": 34630645,
+      "Architecture": "arm64"
+    },
+    "infranexus/frontend:local": {
+      "Id": "sha256:22d1d4b3feeb499338ae54769608d204810def3b10c5a5266a68c51284f9b30b",
+      "Size": 23796893,
+      "Architecture": "arm64"
+    }
+  },
+  "result": "passed",
+  "build_commands": [
+    "docker build -f backend/Dockerfile -t infranexus/backend:local .",
+    "docker build -f frontend/Dockerfile -t infranexus/frontend:local ."
+  ],
+  "security_scan": "Docker Scout scan not completed: Docker ID login required; no credentials requested or changed."
+}

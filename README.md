@@ -28,7 +28,7 @@
 - **细粒度 Casbin RBAC**：基于 `(Role, Path, Method)` 动态策略模型与 GORM 适配器，授权变动实时生效；菜单 → 按钮 → API 三级权限点差量同步为策略，`POST /api/v1/permissions/sync` 扫描已注册路由并修复策略漂移。
 - **组织架构与人员调动**：部门树（TreePath 物化路径，最多 15 级）、负责人与排序、子部门/成员删除保护；`POST /api/v1/users/batch-move-department` 事务化批量调岗。
 - **AD / LDAP 目录集成与多源认证**：基于 `go-ldap/v3` 的连接测试、同步预览、手动全量/增量同步与按间隔定时全量同步，OU 自动映射部门树；登录支持本地账号与企业域账号，首次域登录自动建档（JIT），域认证失败统一返回 `401002`。
-- **实时事件推送 (SSE)**：基于 GoFiber v3 `SendStreamWriter` 实现 Server-Sent Events 长连接通知中心。
+- **实时事件推送 (SSE)**：基于 GoFiber v3 流式响应实现 Server-Sent Events 长连接通知中心。
 
 ### 2. 前端工程 (React 19 / Tailwind CSS v4 / Base UI)
 - **SaaS 全宽流式自适应画布 (Full-width Fluid Canvas)**：
@@ -120,6 +120,17 @@ npm run dev
 > 前端默认访问地址为 `http://127.0.0.1:5173`。
 
 管理员用户名为 `admin`，初始化口令由部署者自行设置。
+
+---
+
+## 🐳 Docker 构建与部署
+
+```sh
+docker build -f backend/Dockerfile -t infranexus/backend:local .
+docker build -f frontend/Dockerfile -t infranexus/frontend:local .
+```
+
+复制 `.env.example` 为 `.env` 并设置独立数据库口令、JWT 密钥和加密密钥后，运行 `docker compose up -d --build --wait`。默认入口为 `http://localhost:8080`，管理员需显式初始化。配置、持久化及初始化步骤见 [Docker 部署说明](docs/DOCKER.md)。
 
 ---
 

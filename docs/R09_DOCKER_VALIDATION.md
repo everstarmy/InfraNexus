@@ -2,7 +2,9 @@
 
 本记录针对本机 Docker 内的 Nginx → InfraNexus → PostgreSQL/Redis 拓扑。正式入口/云负载均衡器配置与本例不同时，需按相同场景复验；不据此宣称 R13 人工读屏或 R14 部署数据核查已完成。
 
-## 部署与复跑
+> 验收工具已在后续交付中移除，本文件与证据仅作历史记录。对应源码保留在 Git 提交 `a8c3d56`；当前正式部署方式见 [Docker 部署说明](DOCKER.md)。
+
+## 历史部署与复跑（提交 a8c3d56）
 
 仓库根目录执行：
 
@@ -10,7 +12,7 @@
 python3 deploy/r09/run.py --output /private/tmp/infranexus-r09-evidence
 ```
 
-部署文件和参数见 [运行说明](../deploy/r09/README.md)。Compose project 每次唯一，随机凭据仅在运行时传入；测试后自动删除本次容器、网络和临时卷，保留证据文件。原有 Redis 和其他容器不参与故障注入。
+历史部署文件和参数位于该提交的 `deploy/r09/README.md`。Compose project 每次唯一，随机凭据仅在运行时传入；测试后自动删除本次容器、网络和临时卷，保留证据文件。原有 Redis 和其他容器不参与故障注入。
 
 - Go 1.27.2 多阶段构建，保留 CGO 的 SQLite/PostgreSQL 双驱动；运行用户为 10001。
 - 前端以 Node 24.11.1 构建，由 Nginx 1.29.4 提供页面和 API/SSE 反向代理。
