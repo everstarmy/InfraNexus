@@ -607,16 +607,17 @@ export default function DepartmentsPage() {
           <div className="col-span-12 min-w-0 space-y-4 lg:col-span-8 xl:col-span-9">
             {selected && (
               <Card className="gap-0 py-0">
-                <div className="flex flex-col gap-4 border-b bg-gradient-to-r from-primary/[0.05] to-transparent p-5 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0 space-y-2">
-                    <p className="truncate text-xs text-muted-foreground">
+                <div data-slot="department-summary-header" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b bg-gradient-to-r from-primary/[0.05] to-transparent px-4 py-3">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                    <p className="max-w-full truncate text-xs text-muted-foreground sm:max-w-64" title={path.slice(0, -1).map(p => p.name).join(" / ") || "顶级部门"}>
                       {path
                         .slice(0, -1)
                         .map((p) => p.name)
                         .join(" / ") || "顶级部门"}
                     </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-lg font-semibold tracking-tight">
+                    <span aria-hidden="true" className="text-muted-foreground/50">/</span>
+                    <div className="contents">
+                      <h2 className="max-w-full break-words text-base font-semibold tracking-tight">
                         {selected.name}
                       </h2>
                       <Badge variant="outline" className="font-mono">
@@ -717,6 +718,7 @@ export default function DepartmentsPage() {
             )}
 
             <Card className="min-w-0 gap-3">
+              {(!canListUsers || (membersQuery.isError && (!membersQuery.data || isForbiddenQueryError(membersQuery.error)))) && (
               <CardHeader className="flex flex-row items-center justify-between gap-2">
                 <div>
                   <CardTitle className="text-sm">部门成员</CardTitle>
@@ -739,6 +741,7 @@ export default function DepartmentsPage() {
                   />
                 </div>
               </CardHeader>
+              )}
               <CardContent>
                 {!canListUsers ? (
                   <p className="rounded-lg border border-dashed py-10 text-center text-xs text-muted-foreground">
@@ -767,6 +770,24 @@ export default function DepartmentsPage() {
                       />
                     )}
                     <DataTable
+                      toolbarLeading={<div className="min-w-0">
+                          <CardTitle className="text-sm">部门成员</CardTitle>
+                          <CardDescription className="truncate text-xs">{departmentPathLabel(tree, selectedId)}</CardDescription>
+                        </div>}
+                      toolbarControls={                <div className="flex items-center gap-1.5">
+                  <Label
+                    htmlFor="dept-include-children"
+                    className="text-xs font-normal text-muted-foreground"
+                  >
+                    含下级部门
+                  </Label>
+                  <Switch
+                    id="dept-include-children"
+                    size="sm"
+                    checked={includeChildren}
+                    onCheckedChange={setIncludeChildren}
+                  />
+                </div>}
                       columns={memberColumns}
                       data={membersQuery.data?.items ?? []}
                       loading={membersQuery.isLoading}

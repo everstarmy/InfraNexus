@@ -31,11 +31,14 @@ interface DataTableToolbarProps<TData extends RowData> {
   dateRangeKey?: string
   dateRangeTitle?: string
   columnLabels?: Record<string, string>
+  toolbarLeading?: React.ReactNode
+  toolbarControls?: React.ReactNode
   actions?: React.ReactNode
   batchActions?: (
     selectedRows: TData[],
     resetSelection: () => void
   ) => React.ReactNode
+  onResetLayout?: () => void
   onResetFilters?: () => void
   onRefresh?: () => void
   isRefreshing?: boolean
@@ -52,7 +55,10 @@ export function DataTableToolbar<TData extends RowData>({
   dateRangeTitle = "时间范围",
   columnLabels = {},
   actions,
+  toolbarLeading,
+  toolbarControls,
   batchActions,
+  onResetLayout,
   onResetFilters,
   onRefresh,
   isRefreshing = false,
@@ -66,7 +72,7 @@ export function DataTableToolbar<TData extends RowData>({
       .length
   const isFiltered =
     table.getState().columnFilters.length > 0 ||
-    Boolean(table.getState().globalFilter)
+    Boolean(table.getState().globalFilter) || Boolean(externalSearch?.value) || facetedFilters.some(f => Boolean(f.selectedValues?.length))
   const selectedRows = table
     .getFilteredSelectedRowModel()
     .rows.map((r) => r.original)
@@ -120,7 +126,7 @@ export function DataTableToolbar<TData extends RowData>({
         <div role="region" aria-label="批量操作" className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-50 flex max-h-[45svh] w-[calc(100%-1.5rem)] max-w-3xl -translate-x-1/2 animate-in flex-col items-stretch gap-2 overflow-y-auto rounded-lg border border-primary/30 bg-background/95 px-3.5 py-2.5 text-xs text-primary shadow-xl backdrop-blur-md fade-in-50 slide-in-from-bottom-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <div className="flex items-center justify-between gap-2 sm:justify-start">
             <span role="status" aria-live="polite" className="font-semibold">
-              已勾选 {selectedRows.length} 条（当前页）
+              已勾选 {selectedRows.length} 条（筛选结果内）
             </span>
             <Button
               variant="ghost"
@@ -140,12 +146,14 @@ export function DataTableToolbar<TData extends RowData>({
       {/* Main Filter & Action Bar */}
       <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          {toolbarLeading}
           {/* Search box with keyboard shortcut & quick clear */}
           {!hideSearch && (
             <div className="relative w-48 sm:w-64">
               <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-muted-foreground" />
               <Input
                 ref={searchInputRef}
+                aria-label={searchPlaceholder}
                 placeholder={searchPlaceholder}
                 value={searchValue}
                 onChange={(e) => {
@@ -250,6 +258,7 @@ export function DataTableToolbar<TData extends RowData>({
 
         {/* Right side controls: Refresh + View Options + Custom Actions */}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {toolbarControls}
           {onRefresh && (
             <Button
               variant="outline"
@@ -266,7 +275,7 @@ export function DataTableToolbar<TData extends RowData>({
             </Button>
           )}
 
-          <DataTableViewOptions table={table} columnLabels={columnLabels} />
+          <DataTableViewOptions table={table} columnLabels={columnLabels} onResetLayout={onResetLayout} />
 
           {actions}
         </div>

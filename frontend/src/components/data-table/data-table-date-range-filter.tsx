@@ -2,7 +2,7 @@ import * as React from "react"
 import type { RowData } from "@tanstack/react-table"
 import type { Column } from "./types"
 import { format, subDays, startOfDay, endOfDay } from "date-fns"
-import { Calendar as CalendarIcon, X } from "lucide-react"
+import { Calendar as CalendarIcon } from "lucide-react"
 import type { DateRange } from "react-day-picker"
 
 import { cn } from "@/lib/utils"
@@ -71,7 +71,7 @@ export function DataTableDateRangeFilter<
 
   const setPreset = (days: number) => {
     const end = new Date()
-    const start = days === 0 ? startOfDay(end) : subDays(end, days)
+    const start = days === 0 ? startOfDay(end) : subDays(end, days - 1)
     applyRange({ from: start, to: end })
   }
 
@@ -100,14 +100,7 @@ export function DataTableDateRangeFilter<
               {range?.from ? format(range.from, "yyyy/MM/dd") : ""}
               {range?.to ? ` ~ ${format(range.to, "yyyy/MM/dd")}` : ""}
             </span>
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={clear}
-              className="ml-1 rounded-full p-0.5 text-muted-foreground hover:bg-background/80 hover:text-foreground"
-            >
-              <X className="size-3" />
-            </span>
+
           </>
         ) : null}
       </PopoverTrigger>

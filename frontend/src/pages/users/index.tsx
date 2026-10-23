@@ -281,6 +281,7 @@ export default function UsersPage() {
       },
       {
         id: "auth_type",
+        size: 110, minSize: 90, maxSize: 180,
         accessorKey: "auth_type",
         header: ({ column }) => <DataTableColumnHeader column={column} title="来源" />,
         enableSorting: false,
@@ -288,6 +289,7 @@ export default function UsersPage() {
       },
       {
         id: "department",
+        size: 150, minSize: 120, maxSize: 260,
         accessorFn: (u) => u.department?.name ?? "",
         header: ({ column }) => <DataTableColumnHeader column={column} title="部门" />,
         enableSorting: false,
@@ -308,6 +310,7 @@ export default function UsersPage() {
       },
       {
         id: "roles",
+        size: 180, minSize: 140, maxSize: 320,
         accessorFn: (u) => u.roles?.map((r) => r.name).join(","),
         header: ({ column }) => <DataTableColumnHeader column={column} title="角色" />,
         enableSorting: false,
@@ -336,12 +339,14 @@ export default function UsersPage() {
       },
       {
         id: "status",
+        size: 120, minSize: 110, maxSize: 160,
         accessorKey: "status",
         header: ({ column }) => <DataTableColumnHeader column={column} title="状态" />,
         cell: ({ row }) => <StatusCell user={row.original} meId={me?.id} canToggle={can("users:status")} stale={usersQuery.isPlaceholderData} onToggle={setStatus} />,
       },
       {
         id: "last_login_at",
+        size: 150, minSize: 120, maxSize: 220,
         accessorKey: "last_login_at",
         header: ({ column }) => <DataTableColumnHeader column={column} title="最近登录" />,
         cell: ({ row }) => (
@@ -352,6 +357,7 @@ export default function UsersPage() {
       },
       {
         id: "created_at",
+        size: 170, minSize: 140, maxSize: 240,
         accessorKey: "created_at",
         header: ({ column }) => <DataTableColumnHeader column={column} title="创建时间" />,
         cell: ({ row }) => <span className="text-xs whitespace-nowrap text-muted-foreground">{formatDateTime(row.original.created_at)}</span>,

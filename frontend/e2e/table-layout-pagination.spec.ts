@@ -122,7 +122,8 @@ test("users keep column sizing, visibility and pinned columns usable", async ({ 
   await resize.press("Home")
   await expect(resize).toHaveAttribute("aria-valuenow", "280")
   await page.getByRole("button", { name: "自定义显示列和固定列" }).click()
-  await page.getByRole("menuitem", { name: "最近登录", exact: true }).click()
+  await page.getByRole("checkbox", { name: "显示最近登录", exact: true }).click()
+  await expect(page.getByRole("dialog")).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(page.getByRole("columnheader", { name: "最近登录" })).toHaveCount(0)
   await assertTableFills(page)
@@ -155,14 +156,15 @@ test("compact lists and pagination stay inside the mobile viewport", async ({ pa
   await page.screenshot({ path: "/private/tmp/infranexus-table-mobile.png" })
 })
 
-test("pinning after an expanding column keeps the offsets aligned", async ({ page }) => {
+test("pinning a new column replaces the previous business column", async ({ page }) => {
   await mockLists(page)
   await page.setViewportSize({ width: 2560, height: 1000 })
   await page.goto("/roles")
   await expect(page.getByText("第 1 / 1 页", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "自定义显示列和固定列" }).click()
   // Name is already pinned; the first remaining left-pin action is Code.
-  await page.getByRole("menuitem", { name: "固定到左侧", exact: true }).first().click()
+  await page.getByRole("button", { name: "角色编码固定左侧", exact: true }).click()
+  await expect(page.getByRole("button", { name: "角色不固定", exact: true })).toHaveAttribute("aria-pressed", "true")
   await page.keyboard.press("Escape")
   for (const width of [2560, 900]) {
     await page.setViewportSize({ width, height: 1000 })
@@ -173,7 +175,9 @@ test("pinning after an expanding column keeps the offsets aligned", async ({ pag
       const code = headers.find((head) => head.querySelector('[aria-label="调整code列宽"]'))!
       return { name: name.getBoundingClientRect().right, code: code.getBoundingClientRect().left }
     })
-    expect(Math.abs(edges.code - edges.name)).toBeLessThanOrEqual(1)
+    expect(Number.isFinite(edges.code)).toBe(true)
+    const pinned = await page.locator("thead th").evaluateAll(headers => headers.filter(head => getComputedStyle(head).position === "sticky").map(head => head.textContent))
+    if (width === 2560) { expect(pinned.some(text => text?.includes("角色编码"))).toBe(true); expect(pinned.some(text => text === "角色")).toBe(false) }
   }
 })
 
@@ -188,4 +192,104 @@ test("empty lists preserve the visible column count without a jump control", asy
     await expect(table.locator("tbody td")).toHaveAttribute("colspan", String(await table.locator("thead th").count()))
     await assertTableFills(page)
   }
+})
+
+
+test("column settings support continuous edits, search and reset", async ({ page }) => {
+  await mockLists(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/users")
+  await page.getByRole("button", { name: "自定义显示列和固定列" }).click()
+  const panel = page.getByRole("dialog")
+  await expect(panel).toBeVisible()
+  await page.getByRole("checkbox", { name: "显示最近登录", exact: true }).click()
+  await page.getByRole("checkbox", { name: "显示来源", exact: true }).click()
+  await expect(panel).toBeVisible()
+  await expect(page.getByRole("columnheader", { name: "来源", exact: true })).toHaveCount(0)
+  await page.getByRole("textbox", { name: "搜索列", exact: true }).fill("创建")
+  await expect(panel.getByRole("checkbox")).toHaveCount(1)
+  await page.getByRole("button", { name: "恢复默认", exact: true }).click()
+  await expect(page.getByRole("checkbox", { name: "显示来源", exact: true })).toBeChecked()
+  await expect(page.getByRole("checkbox", { name: "显示创建时间", exact: true })).not.toBeChecked()
+  await page.screenshot({ path: "/private/tmp/infranexus-column-settings-after.png" })
+})
+
+test("external search resets and unsupported server sorting is unavailable", async ({ page }) => {
+  await mockLists(page, 45)
+  await page.goto("/roles")
+  await page.getByPlaceholder("搜索角色名称或编码").fill("测试")
+  await page.getByRole("button", { name: "重置筛选", exact: true }).click()
+  await expect(page.getByPlaceholder("搜索角色名称或编码")).toHaveValue("")
+  await expect(page.getByRole("columnheader", { name: "角色编码", exact: true }).getByRole("button")).toHaveCount(0)
+})
+
+
+test("column panel fits mobile and narrow tables release data pinning", async ({ page }) => {
+  await mockLists(page)
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.goto("/users")
+  const trigger = page.getByRole("button", { name: "自定义显示列和固定列" })
+  await trigger.click()
+  const panel = page.getByRole("dialog")
+  await expect(panel).toBeVisible()
+  const box = await panel.boundingBox()
+  expect(box!.x).toBeGreaterThanOrEqual(0)
+  expect(box!.x + box!.width).toBeLessThanOrEqual(375)
+  await expect(page.getByRole("button", { name: "用户固定左侧", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await page.screenshot({ path: "/private/tmp/infranexus-column-settings-mobile.png" })
+  await page.keyboard.press("Escape")
+  await expect(panel).toBeHidden()
+  const name = page.getByRole("columnheader").filter({ has: page.locator('[aria-label="调整username列宽"]') })
+  await expect(name).not.toHaveCSS("position", "sticky")
+})
+
+
+test("pin icon groups replace either side and allow clearing", async ({ page }) => {
+  await mockLists(page)
+  await page.goto("/users")
+  await page.getByRole("button", { name: "自定义显示列和固定列" }).click()
+  const pin = (name: string) => page.getByRole("button", { name, exact: true })
+  await pin("来源固定左侧").click()
+  await expect(pin("用户不固定")).toHaveAttribute("aria-pressed", "true")
+  await expect(pin("来源固定左侧")).toHaveAttribute("aria-pressed", "true")
+  await pin("部门固定右侧").click()
+  await pin("状态固定右侧").click()
+  await expect(pin("部门不固定")).toHaveAttribute("aria-pressed", "true")
+  await expect(pin("状态固定右侧")).toHaveAttribute("aria-pressed", "true")
+  await pin("来源固定右侧").click()
+  await expect(pin("状态不固定")).toHaveAttribute("aria-pressed", "true")
+  await expect(pin("来源固定右侧")).toHaveAttribute("aria-pressed", "true")
+  await pin("来源不固定").click()
+  await expect(pin("来源不固定")).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("dialog")).toBeVisible()
+  await page.screenshot({ path: "/private/tmp/infranexus-column-pin-icons.png" })
+})
+
+test("department members share one toolbar with title and controls", async ({ page }) => {
+  await mockLists(page)
+  await page.route("**/api/v1/departments/tree", route => route.fulfill({ json: {
+    code: 200000, message: "success", request_id: "department-toolbar",
+    data: { revision: 1, items: [{ id: "dept-1", parent_id: null, name: "总行", code: "head", sort_order: 0, leader_id: null, leader_name: "", phone: "", email: "", status: 1, source: "local", tree_path: "/dept-1/", depth: 0, member_count: 2, total_member_count: 2, children: [] }] },
+  } }))
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.goto("/departments")
+  const summary = page.locator('[data-slot="department-summary-header"]')
+  const parentPath = (await summary.getByText("顶级部门", { exact: true }).boundingBox())!
+  const heading = (await summary.getByRole("heading", { name: "总行", exact: true }).boundingBox())!
+  expect(Math.abs(parentPath.y + parentPath.height / 2 - heading.y - heading.height / 2)).toBeLessThan(2)
+  expect((await summary.boundingBox())!.height).toBeLessThan(70)
+  const table = page.locator('[data-slot="data-table"]')
+  await expect(table.getByText("部门成员", { exact: true })).toBeVisible()
+  const toggle = table.getByRole("switch", { name: "含下级部门" })
+  const refresh = table.getByTitle("刷新列表", { exact: true })
+  await expect(refresh).toBeVisible()
+  const a = (await toggle.boundingBox())!
+  const b = (await refresh.boundingBox())!
+  expect(Math.abs(a.y + a.height / 2 - b.y - b.height / 2)).toBeLessThan(2)
+  await toggle.click()
+  await expect(toggle).not.toBeChecked()
+  await page.screenshot({ path: "/private/tmp/infranexus-department-toolbar.png" })
+  await page.setViewportSize({ width: 375, height: 812 })
+  await expect(refresh).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
 })

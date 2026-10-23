@@ -1,7 +1,7 @@
 import * as React from "react"
 import type { RowData } from "@tanstack/react-table"
 import type { Column } from "./types"
-import { Check, PlusCircle, X } from "lucide-react"
+import { Check, PlusCircle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -122,14 +122,7 @@ export function DataTableFacetedFilter<
                   ))
               )}
             </div>
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={clear}
-              className="ml-1 rounded-full p-0.5 text-muted-foreground hover:bg-background/80 hover:text-foreground"
-            >
-              <X className="size-3" />
-            </span>
+
           </>
         )}
       </PopoverTrigger>

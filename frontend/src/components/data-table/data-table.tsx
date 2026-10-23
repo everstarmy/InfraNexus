@@ -74,6 +74,10 @@ export interface DataTableProps<TData extends RowData, TValue = unknown> {
   dateRangeTitle?: string
   /** Custom friendly labels for columns in the View Options toggle menu */
   columnLabels?: Record<string, string>
+  /** Content before search, such as a table title. */
+  toolbarLeading?: React.ReactNode
+  /** Controls before refresh and column settings. */
+  toolbarControls?: React.ReactNode
   /** Top right custom action buttons (e.g. New Device, Export) */
   actions?: React.ReactNode
   /** Batch action renderer when rows are selected */
@@ -158,11 +162,21 @@ function readColumnPreferences<TData extends RowData>(
   pinning: ColumnPinningState,
 ): ColumnPreferences {
   const validIds = new Set(columns.map(getColumnId).filter((id): id is string => !!id))
+  const dataIds = new Set(columns.filter(column => "accessorKey" in column || "accessorFn" in column).map(getColumnId))
+  const oneDataColumn = (ids: string[]) => {
+    let kept = false
+    return ids.filter(id => {
+      if (!dataIds.has(id)) return true
+      if (kept) return false
+      kept = true
+      return true
+    })
+  }
   const defaults: ColumnPreferences = {
     columnVisibility: { ...visibility },
     columnPinning: {
-      start: pinning.start.filter((id) => validIds.has(id)),
-      end: pinning.end.filter((id) => validIds.has(id)),
+      start: oneDataColumn(pinning.start.filter((id) => validIds.has(id))),
+      end: oneDataColumn(pinning.end.filter((id) => validIds.has(id) && !pinning.start.includes(id))),
     },
     columnSizing: {},
   }
@@ -185,7 +199,7 @@ function readColumnPreferences<TData extends RowData>(
       : []
     const start = pinList(stored.columnPinning?.start ?? defaults.columnPinning.start)
     const end = pinList(stored.columnPinning?.end ?? defaults.columnPinning.end).filter((id) => !start.includes(id))
-    return { columnVisibility, columnSizing, columnPinning: { start, end } }
+    return { columnVisibility, columnSizing, columnPinning: { start: oneDataColumn(start), end: oneDataColumn(end) } }
   } catch {
     return defaults
   }
@@ -361,6 +375,8 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   dateRangeTitle,
   columnLabels,
   actions,
+  toolbarLeading,
+  toolbarControls,
   batchActions,
   onRefresh,
   isRefreshing = false,
@@ -381,7 +397,8 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   initialColumnVisibility = {},
   initialColumnPinning = { start: [], end: [] },
   tablePreference,
-  selectionScopeKey,
+  selectionScopeKey: explicitSelectionScopeKey,
+  persistRowSelection = false,
   selectionDisabled = false,
   serverPagination,
   serverFiltering = false,
@@ -396,10 +413,23 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   saveSelection?: (next: RowSelectionState) => void
   updateUrlState?: (patch: Partial<TableUrlState>) => void
 }) {
+  const rootRef = React.useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = React.useState(0)
+  React.useEffect(() => {
+    const element = rootRef.current
+    if (!element) return
+    const observer = new ResizeObserver(([entry]) => setContainerWidth(Math.round(entry.contentRect.width)))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const allowDataPinning = containerWidth === 0 || containerWidth >= 640
   const storageKey = preferenceStorageKey(tablePreference)
+  const visibilityKey = JSON.stringify(initialColumnVisibility)
+  const pinningKey = JSON.stringify(initialColumnPinning)
+  const schemaKey = JSON.stringify(columns.map(column => ({ id: getColumnId(column as ColumnDef<TData, unknown>), min: column.minSize, max: column.maxSize })))
   const preferenceDefaults = React.useMemo(
     () => readColumnPreferences(storageKey, columns as ColumnDef<TData, unknown>[], initialColumnVisibility, initialColumnPinning),
-    [storageKey, columns, initialColumnVisibility, initialColumnPinning],
+    [storageKey, schemaKey, visibilityKey, pinningKey],
   )
   const [savedColumnPreferences, setSavedColumnPreferences] = React.useState(() => ({
     key: storageKey,
@@ -408,7 +438,6 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   const activeColumnPreferences = savedColumnPreferences.key === storageKey
     ? savedColumnPreferences.value
     : preferenceDefaults
-  const lastSelectionScope = React.useRef({ scope: selectionScopeKey, disabled: selectionDisabled })
 
   React.useLayoutEffect(() => {
     if (savedColumnPreferences.key !== storageKey) {
@@ -461,6 +490,8 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   const sorting = serverSorting?.sorting ?? urlState?.sorting ?? localSorting
   const columnFilters = urlState?.columnFilters ?? localColumnFilters
   const globalFilter = urlState?.globalFilter ?? localGlobalFilter
+  const selectionScopeKey = explicitSelectionScopeKey ?? (persistRowSelection ? undefined : JSON.stringify([currentPagination, sorting, columnFilters, globalFilter, externalSearch?.value, facetedFilters.map(filter => filter.selectedValues)]))
+  const lastSelectionScope = React.useRef({ scope: selectionScopeKey, disabled: selectionDisabled })
   const configuredColumns = React.useMemo(
     () =>
       columns.map((column) => {
@@ -564,6 +595,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
     manualPagination: Boolean(serverPagination),
     manualFiltering: serverFiltering,
     manualSorting: Boolean(serverSorting) || serverFiltering,
+    enableSorting: !serverFiltering || Boolean(serverSorting),
     rowCount: serverPagination?.total,
     getRowId,
   })
@@ -591,8 +623,17 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
     }
   }, [table, onTableInstance])
 
+  React.useEffect(() => {
+    if (loading) return
+    const lastPage = Math.max(0, table.getPageCount() - 1)
+    if (currentPagination.pageIndex > lastPage) table.setPageIndex(lastPage)
+  }, [table, loading, data, currentPagination.pageIndex, currentPagination.pageSize, serverPagination?.total])
+
   // React Router search-param callbacks do not merge consecutive writes in one event.
   const resetFilters = () => {
+    externalSearch?.onChange("")
+    facetedFilters.forEach(filter => filter.onSelectedChange?.([]))
+    if (serverPagination) serverPagination.onChange({ ...currentPagination, pageIndex: 0 })
     if (updateUrlState)
       updateUrlState({
         columnFilters: [],
@@ -604,7 +645,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
       table.setGlobalFilter("")
     }
   }
-  const isFiltered = columnFilters.length > 0 || Boolean(globalFilter) || Boolean(externalSearch?.value)
+  const isFiltered = columnFilters.length > 0 || Boolean(globalFilter) || Boolean(externalSearch?.value) || facetedFilters.some(filter => Boolean(filter.selectedValues?.length))
 
   const hasBatchSelection = !!batchActions && table.getFilteredSelectedRowModel().rows.length > 0
 
@@ -614,7 +655,9 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   const fixedColumns = new Set(visibleColumns
     .filter((column) => column.columnDef.minSize !== undefined && column.columnDef.minSize === column.columnDef.maxSize)
     .map((column) => column.id))
-  const fixedWidth = visibleColumns.reduce((sum, column) => sum + (fixedColumns.has(column.id) ? column.getSize() : 0), 0)
+  const growColumn = visibleColumns.find(column => !fixedColumns.has(column.id) && column.accessorFn !== undefined)
+  const allocationFixedColumns = new Set(visibleColumns.filter(column => column.id !== growColumn?.id).map(column => column.id))
+  const fixedWidth = visibleColumns.reduce((sum, column) => sum + (allocationFixedColumns.has(column.id) ? column.getSize() : 0), 0)
   const totalWidth = visibleColumns.reduce((sum, column) => sum + column.getSize(), 0)
   const flexibleWidth = totalWidth - fixedWidth
   const visibleIds = new Set(visibleColumns.map((column) => column.id))
@@ -622,7 +665,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
     let fixed = 0
     let flexible = 0
     for (const column of columns) {
-      if (fixedColumns.has(column.id)) fixed += column.getSize()
+      if (allocationFixedColumns.has(column.id)) fixed += column.getSize()
       else flexible += column.getSize()
     }
     if (!flexible || !flexibleWidth) return `${fixed}px`
@@ -637,12 +680,12 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   const columnStyle = (column: Column<TData>): React.CSSProperties => {
     const cached = columnStyles.get(column.id)
     if (cached) return cached
-    const pinned = enableColumnPinning && column.getIsPinned()
+    const pinned = enableColumnPinning && allowDataPinning && column.getIsPinned()
     const pinnedColumns = pinned === "start" ? table.getStartVisibleLeafColumns()
       : pinned === "end" ? table.getEndVisibleLeafColumns() : []
     const pinIndex = pinnedColumns.findIndex((item) => item.id === column.id)
     const style: React.CSSProperties = {
-      width: enableColumnResizing ? widthOf(column.getLeafColumns().filter((item) => visibleIds.has(item.id))) : undefined,
+      width: enableColumnResizing ? widthOf((column.columns.length ? column.getLeafColumns() : [column]).filter((item) => visibleIds.has(item.id))) : undefined,
       position: pinned ? "sticky" : undefined,
       insetInlineStart: pinned === "start" ? (enableColumnResizing ? widthOf(pinnedColumns.slice(0, pinIndex), true) : column.getStart("start")) : undefined,
       insetInlineEnd: pinned === "end" ? (enableColumnResizing ? widthOf(pinnedColumns.slice(pinIndex + 1), true) : column.getAfter("end")) : undefined,
@@ -652,7 +695,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   }
 
   return (
-    <div className={cn("w-full min-w-0 space-y-3.5", hasBatchSelection && "pb-20")} data-slot="data-table">
+    <div ref={rootRef} className={cn("w-full min-w-0 space-y-3.5", hasBatchSelection && "pb-20")} data-slot="data-table">
       <DataTableToolbar
         table={table}
         searchKey={searchKey}
@@ -661,27 +704,31 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
         hideSearch={hideSearch}
         facetedFilters={facetedFilters}
         onResetFilters={resetFilters}
+        onResetLayout={() => setSavedColumnPreferences({ key: storageKey, value: readColumnPreferences(null, columns as ColumnDef<TData, unknown>[], initialColumnVisibility, initialColumnPinning) })}
         dateRangeKey={dateRangeKey}
         dateRangeTitle={dateRangeTitle}
         columnLabels={columnLabels}
         actions={actions}
+        toolbarLeading={toolbarLeading}
+        toolbarControls={toolbarControls}
         batchActions={batchActions}
         onRefresh={onRefresh}
         isRefreshing={isRefreshing}
       />
 
       {/* Main Table Content Container */}
-      <div className="w-full min-w-0 overflow-x-auto rounded-lg border bg-card shadow-xs">
+      <div className="w-full min-w-0 rounded-lg border bg-card shadow-xs">
         {loading ? (
           <DataTableSkeleton
-            columnCount={columns.length}
+            columnCount={visibleColumns.filter(column => column.id !== "select").length}
             rowCount={
               currentPagination.pageSize > 10 ? 10 : currentPagination.pageSize
             }
-            showCheckbox={columns.some((c) => c.id === "select")}
+            showCheckbox={visibleColumns.some(column => column.id === "select")}
           />
         ) : (
           <ShadcnTable className={enableColumnResizing ? undefined : "min-w-max"} style={enableColumnResizing ? { width: "100%", minWidth: totalWidth, tableLayout: "fixed" } : undefined}>
+            {enableColumnResizing && <colgroup>{visibleColumns.map(column => <col key={column.id} style={{ width: columnStyle(column).width }} />)}</colgroup>}
             <TableHeader className="bg-muted/40">
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id} className="hover:bg-transparent">
@@ -690,6 +737,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                       <TableHead
                         key={header.id}
                         colSpan={header.colSpan}
+                        aria-sort={header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : undefined}
                         style={columnStyle(header.column)}
                         className={`relative h-10 px-3 text-xs font-semibold ${stickyActionColumn && header.column.id === "actions" ? "sticky right-0 z-20 border-l bg-muted shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.25)]" : ""} ${enableColumnPinning && header.column.getIsPinned() ? "z-20 bg-muted" : ""}`}
                       >
@@ -701,6 +749,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                             type="button"
                             role="separator"
                             aria-orientation="vertical"
+                            title="拖动调整列宽，双击恢复默认"
                             aria-label={`调整${header.column.id}列宽`}
                             aria-valuenow={header.getSize()}
                             aria-valuemin={header.column.columnDef.minSize ?? 72}
@@ -751,7 +800,10 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                   <TableRow
                     key={row.id}
                     data-state={row.getIsSelected() && "selected"}
-                    onClick={() => onRowClick?.(row.original)}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("button, a, input, select, textarea, [role=checkbox], [role=switch], [role=button]")) return
+                      onRowClick?.(row.original)
+                    }}
                     tabIndex={onRowClick ? 0 : undefined}
                     onKeyDown={(event) => {
                       if (
@@ -764,6 +816,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                       }
                     }}
                     className={cn(
+                      "group/row",
                       onRowClick
                         ? "cursor-pointer transition-colors hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-primary data-[state=selected]:bg-muted"
                         : "transition-colors hover:bg-muted/40 data-[state=selected]:bg-muted/60",
@@ -774,7 +827,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                       <TableCell
                         key={cell.id}
                         style={columnStyle(cell.column)}
-                        className={`p-3 text-xs ${stickyActionColumn && cell.column.id === "actions" ? "sticky right-0 z-10 border-l bg-card shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.25)]" : ""} ${enableColumnPinning && cell.column.getIsPinned() ? "z-10 bg-card" : ""}`}
+                        className={`p-3 text-xs ${stickyActionColumn && cell.column.id === "actions" ? "sticky right-0 z-10 border-l bg-card group-hover/row:bg-muted group-data-[state=selected]/row:bg-muted shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.25)]" : ""} ${enableColumnPinning && cell.column.getIsPinned() ? "z-10 bg-card group-hover/row:bg-muted group-data-[state=selected]/row:bg-muted" : ""}`}
                       >
                         <table.FlexRender cell={cell} />
                       </TableCell>
