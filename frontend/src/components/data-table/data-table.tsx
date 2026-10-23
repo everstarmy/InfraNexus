@@ -22,6 +22,7 @@ import {
   appTableFeatures,
   type AppTableFeatures,
   type ColumnDef,
+  type Column,
   type Table,
 } from "./types"
 
@@ -607,6 +608,49 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
 
   const hasBatchSelection = !!batchActions && table.getFilteredSelectedRowModel().rows.length > 0
 
+  // Saved sizes are the narrow-layout baseline. Distribute spare width among
+  // data columns while keeping fixed controls (selection/actions) compact.
+  const visibleColumns = table.getVisibleLeafColumns()
+  const fixedColumns = new Set(visibleColumns
+    .filter((column) => column.columnDef.minSize !== undefined && column.columnDef.minSize === column.columnDef.maxSize)
+    .map((column) => column.id))
+  const fixedWidth = visibleColumns.reduce((sum, column) => sum + (fixedColumns.has(column.id) ? column.getSize() : 0), 0)
+  const totalWidth = visibleColumns.reduce((sum, column) => sum + column.getSize(), 0)
+  const flexibleWidth = totalWidth - fixedWidth
+  const visibleIds = new Set(visibleColumns.map((column) => column.id))
+  const widthOf = (columns: Column<TData>[], stickyOffset = false) => {
+    let fixed = 0
+    let flexible = 0
+    for (const column of columns) {
+      if (fixedColumns.has(column.id)) fixed += column.getSize()
+      else flexible += column.getSize()
+    }
+    if (!flexible || !flexibleWidth) return `${fixed}px`
+    const share = flexible / flexibleWidth
+    const offset = fixed - share * fixedWidth
+    const width = `calc(${share * 100}% ${offset < 0 ? "-" : "+"} ${Math.abs(offset)}px)`
+    // Sticky percentages resolve against the scroll viewport; clamp to the
+    // baseline when the table is wider than that viewport.
+    return stickyOffset ? `max(${fixed + flexible}px, ${width})` : width
+  }
+  const columnStyles = new Map<string, React.CSSProperties>()
+  const columnStyle = (column: Column<TData>): React.CSSProperties => {
+    const cached = columnStyles.get(column.id)
+    if (cached) return cached
+    const pinned = enableColumnPinning && column.getIsPinned()
+    const pinnedColumns = pinned === "start" ? table.getStartVisibleLeafColumns()
+      : pinned === "end" ? table.getEndVisibleLeafColumns() : []
+    const pinIndex = pinnedColumns.findIndex((item) => item.id === column.id)
+    const style: React.CSSProperties = {
+      width: enableColumnResizing ? widthOf(column.getLeafColumns().filter((item) => visibleIds.has(item.id))) : undefined,
+      position: pinned ? "sticky" : undefined,
+      insetInlineStart: pinned === "start" ? (enableColumnResizing ? widthOf(pinnedColumns.slice(0, pinIndex), true) : column.getStart("start")) : undefined,
+      insetInlineEnd: pinned === "end" ? (enableColumnResizing ? widthOf(pinnedColumns.slice(pinIndex + 1), true) : column.getAfter("end")) : undefined,
+    }
+    columnStyles.set(column.id, style)
+    return style
+  }
+
   return (
     <div className={cn("w-full min-w-0 space-y-3.5", hasBatchSelection && "pb-20")} data-slot="data-table">
       <DataTableToolbar
@@ -637,7 +681,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
             showCheckbox={columns.some((c) => c.id === "select")}
           />
         ) : (
-          <ShadcnTable className="min-w-max" style={enableColumnResizing ? { width: table.getTotalSize(), tableLayout: "fixed" } : undefined}>
+          <ShadcnTable className={enableColumnResizing ? undefined : "min-w-max"} style={enableColumnResizing ? { width: "100%", minWidth: totalWidth, tableLayout: "fixed" } : undefined}>
             <TableHeader className="bg-muted/40">
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id} className="hover:bg-transparent">
@@ -646,18 +690,13 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                       <TableHead
                         key={header.id}
                         colSpan={header.colSpan}
-                        style={{
-                          width: enableColumnResizing ? header.getSize() : undefined,
-                          position: enableColumnPinning && header.column.getIsPinned() ? "sticky" : undefined,
-                          insetInlineStart: enableColumnPinning && header.column.getIsPinned() === "start" ? header.column.getStart("start") : undefined,
-                          insetInlineEnd: enableColumnPinning && header.column.getIsPinned() === "end" ? header.column.getAfter("end") : undefined,
-                        }}
+                        style={columnStyle(header.column)}
                         className={`relative h-10 px-3 text-xs font-semibold ${stickyActionColumn && header.column.id === "actions" ? "sticky right-0 z-20 border-l bg-muted shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.25)]" : ""} ${enableColumnPinning && header.column.getIsPinned() ? "z-20 bg-muted" : ""}`}
                       >
                         {header.isPlaceholder ? null : (
                           <table.FlexRender header={header} />
                         )}
-                        {enableColumnResizing && header.column.getCanResize() && (
+                        {enableColumnResizing && header.column.getCanResize() && !fixedColumns.has(header.column.id) && (
                           <button
                             type="button"
                             role="separator"
@@ -734,12 +773,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                     {row.getVisibleCells().map((cell) => (
                       <TableCell
                         key={cell.id}
-                        style={{
-                          width: enableColumnResizing ? cell.column.getSize() : undefined,
-                          position: enableColumnPinning && cell.column.getIsPinned() ? "sticky" : undefined,
-                          insetInlineStart: enableColumnPinning && cell.column.getIsPinned() === "start" ? cell.column.getStart("start") : undefined,
-                          insetInlineEnd: enableColumnPinning && cell.column.getIsPinned() === "end" ? cell.column.getAfter("end") : undefined,
-                        }}
+                        style={columnStyle(cell.column)}
                         className={`p-3 text-xs ${stickyActionColumn && cell.column.id === "actions" ? "sticky right-0 z-10 border-l bg-card shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.25)]" : ""} ${enableColumnPinning && cell.column.getIsPinned() ? "z-10 bg-card" : ""}`}
                       >
                         <table.FlexRender cell={cell} />
@@ -750,7 +784,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
               ) : (
                 <TableRow className="hover:bg-transparent">
                   <TableCell
-                    colSpan={columns.length}
+                    colSpan={visibleColumns.length}
                     className="h-64 text-center"
                   >
                     <DataTableEmpty

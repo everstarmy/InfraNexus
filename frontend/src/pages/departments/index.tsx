@@ -64,6 +64,7 @@ import {
 } from "@/components/common/query-error-state";
 import { StatCard, StatGrid } from "@/components/common/stat-card";
 import { UserAvatar } from "@/components/common/user-avatar";
+import { formatPercent } from "@/lib/format";
 import { notify } from "@/lib/notify";
 import { queryKeys } from "@/lib/query-keys";
 import { collectIds, findNode, findPath, flattenTree } from "@/lib/tree";
@@ -491,12 +492,10 @@ export default function DepartmentsPage() {
           icon={CircleCheck}
           tone="success"
           loading={treeQuery.isLoading}
-          ratio={
+          hint={
             treeUnavailable
-              ? undefined
-              : stats.total
-                ? stats.enabled / stats.total
-                : 0
+              ? "部门数据不可用"
+              : `占全部部门 ${formatPercent(stats.enabled, stats.total)}`
           }
         />
         <StatCard

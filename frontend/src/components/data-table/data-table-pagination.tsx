@@ -100,7 +100,7 @@ export function DataTablePagination<TData extends RowData>({
         </div>
 
         {/* Quick jump to page */}
-        <div className="flex flex-wrap items-center gap-1.5">
+        {pageCount > 1 && <div className="flex flex-wrap items-center gap-1.5">
           <span>跳至</span>
           <Input
             aria-label="跳转页码"
@@ -131,13 +131,13 @@ export function DataTablePagination<TData extends RowData>({
           <span
             id={jumpRangeId}
             className={
-              invalidJump ? "text-destructive" : "text-muted-foreground"
+              invalidJump ? "text-destructive" : "sr-only"
             }
             role={invalidJump ? "alert" : undefined}
           >
-            输入 1–{pageCount} 页
+            请输入 1–{pageCount} 的整数页码
           </span>
-        </div>
+        </div>}
 
         {/* Navigation buttons */}
         <div className="flex items-center gap-1">

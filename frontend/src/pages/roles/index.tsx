@@ -286,6 +286,9 @@ export default function RolesPage() {
       },
       {
         id: "actions",
+        size: 54,
+        minSize: 54,
+        maxSize: 54,
         header: () => <span className="sr-only">操作</span>,
         enableSorting: false,
         enableHiding: false,

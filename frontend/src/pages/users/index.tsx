@@ -493,8 +493,8 @@ export default function UsersPage() {
 
       <StatGrid>
         <StatCard label="用户总数" value={statsUnavailable ? "—" : formatCompact(total)} icon={Users} tone="primary" loading={statsQuery.isLoading} hint={stats ? `本地 ${stats.local} · 目录同步 ${stats.directory} · 未分配部门 ${stats.unassigned}` : undefined} />
-        <StatCard label="启用中" value={statsUnavailable ? "—" : formatCompact(stats?.active ?? 0)} icon={UserCheck} tone="success" loading={statsQuery.isLoading} ratio={total ? (stats?.active ?? 0) / total : 0} hint={stats ? `占全部账号 ${formatPercent(stats.active, total)}` : "等待统计数据"} />
-        <StatCard label="已停用" value={statsUnavailable ? "—" : formatCompact(stats?.disabled ?? 0)} icon={UserX} tone="default" loading={statsQuery.isLoading} ratio={total ? (stats?.disabled ?? 0) / total : 0} hint="停用账号无法登录，会话立即失效" />
+        <StatCard label="启用中" value={statsUnavailable ? "—" : formatCompact(stats?.active ?? 0)} icon={UserCheck} tone="success" loading={statsQuery.isLoading} hint={stats ? `占全部账号 ${formatPercent(stats.active, total)}` : "等待统计数据"} />
+        <StatCard label="已停用" value={statsUnavailable ? "—" : formatCompact(stats?.disabled ?? 0)} icon={UserX} tone="default" loading={statsQuery.isLoading} hint="停用账号无法登录，会话立即失效" />
         <StatCard label="企业域账号" value={statsUnavailable ? "—" : formatCompact(stats?.directory ?? 0)} icon={Building2} tone="info" loading={statsQuery.isLoading} hint={topDomains || "尚未接入企业目录"} />
       </StatGrid>
 
