@@ -74,8 +74,16 @@ export interface DataTableProps<TData extends RowData, TValue = unknown> {
   dateRangeTitle?: string
   /** Custom friendly labels for columns in the View Options toggle menu */
   columnLabels?: Record<string, string>
-  /** Content before search, such as a table title. */
+  /** First row title, description or status. */
+  toolbarTitle?: React.ReactNode
+  /** @deprecated Title alias; use toolbarTitle. */
   toolbarLeading?: React.ReactNode
+  /** Second row slots before search and after built-in filters. */
+  searchLeading?: React.ReactNode
+  searchTrailing?: React.ReactNode
+  /** Hide built-in buttons independently (default: false). */
+  hideRefresh?: boolean
+  hideViewOptions?: boolean
   /** Controls before refresh and column settings. */
   toolbarControls?: React.ReactNode
   /** Top right custom action buttons (e.g. New Device, Export) */
@@ -375,7 +383,12 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   dateRangeTitle,
   columnLabels,
   actions,
+  toolbarTitle,
   toolbarLeading,
+  searchLeading,
+  searchTrailing,
+  hideRefresh,
+  hideViewOptions,
   toolbarControls,
   batchActions,
   onRefresh,
@@ -709,7 +722,12 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
         dateRangeTitle={dateRangeTitle}
         columnLabels={columnLabels}
         actions={actions}
+        toolbarTitle={toolbarTitle}
         toolbarLeading={toolbarLeading}
+        searchLeading={searchLeading}
+        searchTrailing={searchTrailing}
+        hideRefresh={hideRefresh}
+        hideViewOptions={hideViewOptions}
         toolbarControls={toolbarControls}
         batchActions={batchActions}
         onRefresh={onRefresh}
@@ -838,19 +856,25 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                 <TableRow className="hover:bg-transparent">
                   <TableCell
                     colSpan={visibleColumns.length}
-                    className="h-64 text-center"
+                    className="h-64 p-0 text-center"
                   >
-                    <DataTableEmpty
-                      isFiltered={isFiltered}
-                      title={isFiltered ? "未找到符合条件的结果" : emptyTitle}
-                      description={
-                        isFiltered
-                          ? "当前筛选条件下无匹配项，请尝试调整搜索关键字或重置过滤条件"
-                          : emptyDescription
-                      }
-                      action={!isFiltered ? emptyAction : undefined}
-                      onResetFilters={resetFilters}
-                    />
+                    {/* Center within the scroll viewport, not the full horizontal table. */}
+                    <div
+                      className="sticky left-0 flex min-h-64 max-w-full items-center justify-center"
+                      style={{ width: containerWidth > 0 ? Math.max(0, containerWidth - 2) : undefined }}
+                    >
+                      <DataTableEmpty
+                        isFiltered={isFiltered}
+                        title={isFiltered ? "未找到符合条件的结果" : emptyTitle}
+                        description={
+                          isFiltered
+                            ? "当前筛选条件下无匹配项，请尝试调整搜索关键字或重置过滤条件"
+                            : emptyDescription
+                        }
+                        action={!isFiltered ? emptyAction : undefined}
+                        onResetFilters={resetFilters}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               )}

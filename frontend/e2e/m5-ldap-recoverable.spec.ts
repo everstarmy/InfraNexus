@@ -209,7 +209,7 @@ test("LDAP sync uses a reviewed plan and restores persisted progress after reloa
   await page.goto("/ldap");
   expect(new URL(page.url()).pathname).toBe("/ldap");
   await expect(page).toHaveTitle(/InfraNexus/);
-  await expect(page.getByRole("heading", { name: "目录同步" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "身份源集成" })).toBeVisible();
   await page.getByRole("button", { name: "预览同步" }).click();
 
   const preview = page.getByRole("dialog", { name: /同步预览/ });
@@ -242,7 +242,7 @@ test("LDAP sync uses a reviewed plan and restores persisted progress after reloa
   );
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "目录同步" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "身份源集成" })).toBeVisible();
   await expect(page.getByRole("progressbar").first()).toHaveAttribute(
     "aria-valuenow",
     "30",

@@ -272,7 +272,7 @@ if err := s.users.UpdateColumns(ctx, user.ID, updates); err != nil {
   - `DataTable`: 核心表格容器。
   - `DataTableColumnHeader`: 带升降序排序的列标题。
   - `DataTablePagination`: 服务端/客户端分页控件。
-  - `DataTableToolbar`: 搜索过滤与批量操作栏。
+  - `DataTableToolbar`: 第一行标题与操作，第二行搜索筛选；空行不渲染。标题使用 `toolbarTitle`，搜索区通过 `searchLeading` / `searchTrailing` 插入内容，`hideRefresh` / `hideViewOptions` 分别控制内置按钮。接口及移动端规则见 [表格封装说明](docs/DATA_TABLE_IMPLEMENTATION.md)。
   - `DataTableFacetedFilter`: 离散标签/多选过滤器（如角色、状态筛选）。
   - `DataTableDateRangeFilter`: 日期区间选择器。
   - `DataTableViewOptions`: 动态列显隐控制菜单。

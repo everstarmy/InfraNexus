@@ -445,7 +445,7 @@ src/
 │   │   ├── data-table.tsx                 # 核心 Table 容器
 │   │   ├── data-table-column-header.tsx    # 具备升降序切换的列头
 │   │   ├── data-table-pagination.tsx       # 现代化分页工具栏
-│   │   ├── data-table-toolbar.tsx          # 过滤、批量操作和工具栏
+│   │   ├── data-table-toolbar.tsx          # 标题操作行、搜索筛选行与批量操作
 │   │   ├── data-table-faceted-filter.tsx   # 多值筛选标签组
 │   │   ├── data-table-date-range-filter.tsx# 时间范围选择器
 │   │   ├── data-table-view-options.tsx     # 列动态显隐切换菜单

@@ -88,7 +88,7 @@ var permissionSeeds = []permSeed{
 		),
 	),
 	menuPerm("integration", "集成中心", "", "Plug",
-		menuPerm("ldap", "目录同步", "/ldap", "FolderSync",
+		menuPerm("ldap", "身份源集成", "/ldap", "Waypoints",
 			apiPerm("GET", "/ldap/configs", "查询目录配置"),
 			apiPerm("GET", "/ldap/configs/:id", "查看目录配置"),
 			apiPerm("GET", "/ldap/sync-logs", "查看同步日志"),
@@ -139,6 +139,10 @@ func upsertPermissionSeeds(tx *gorm.DB, parentID *uuid.UUID, seeds []permSeed) e
 				"path":      seed.Path,
 				"method":    seed.Method,
 				"built_in":  true,
+			}
+			if seed.Code == "ldap" && perm.Name == "目录同步" {
+				locked["name"] = seed.Name
+				locked["icon"] = seed.Icon
 			}
 			if err := tx.Model(&perm).Updates(locked).Error; err != nil {
 				return fmt.Errorf("refresh permission %s: %w", seed.Code, err)

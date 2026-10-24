@@ -383,7 +383,7 @@ test("records production bundle, large tree and paged LDAP preview baseline", as
   }
 
   await page.goto("/ldap");
-  await expect(page.getByRole("heading", { name: "目录同步" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "身份源集成" })).toBeVisible();
   const previewStart = await page.evaluate(() => performance.now());
   await page.getByRole("button", { name: "预览同步" }).click();
   const preview = page.getByRole("dialog", { name: /同步预览/ });

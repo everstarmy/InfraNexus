@@ -461,7 +461,7 @@ export default function DepartmentsPage() {
             </EmptyMedia>
             <EmptyTitle>还没有任何部门</EmptyTitle>
             <EmptyDescription>
-              从顶级部门开始搭建组织架构，或在「目录同步」中按 OU 自动导入
+              从顶级部门开始搭建组织架构，或在「身份源集成」中按 OU 自动导入
             </EmptyDescription>
           </EmptyHeader>
           {can("departments:create") && (
@@ -686,11 +686,11 @@ export default function DepartmentsPage() {
                       />
                     )}
                     <DataTable
-                      toolbarLeading={<div className="min-w-0">
+                      toolbarTitle={<div className="min-w-0">
                           <CardTitle className="text-sm">部门成员</CardTitle>
                           <CardDescription className="truncate text-xs">{departmentPathLabel(tree, selectedId)}</CardDescription>
                         </div>}
-                      toolbarControls={                <div className="flex items-center gap-1.5">
+                      searchLeading={                <div className="flex items-center gap-1.5">
                   <Label
                     htmlFor="dept-include-children"
                     className="text-xs font-normal text-muted-foreground"

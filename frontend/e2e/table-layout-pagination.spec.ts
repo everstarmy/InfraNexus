@@ -265,7 +265,7 @@ test("pin icon groups replace either side and allow clearing", async ({ page }) 
   await page.screenshot({ path: "/private/tmp/infranexus-column-pin-icons.png" })
 })
 
-test("department members share one toolbar with title and controls", async ({ page }) => {
+test("department members separate title controls from filters", async ({ page }) => {
   await mockLists(page)
   await page.route("**/api/v1/departments/tree", route => route.fulfill({ json: {
     code: 200000, message: "success", request_id: "department-toolbar",
@@ -283,13 +283,42 @@ test("department members share one toolbar with title and controls", async ({ pa
   const toggle = table.getByRole("switch", { name: "含下级部门" })
   const refresh = table.getByTitle("刷新列表", { exact: true })
   await expect(refresh).toBeVisible()
-  const a = (await toggle.boundingBox())!
+  const a = (await table.getByText("部门成员", { exact: true }).boundingBox())!
   const b = (await refresh.boundingBox())!
-  expect(Math.abs(a.y + a.height / 2 - b.y - b.height / 2)).toBeLessThan(2)
+  expect(Math.abs(a.y + a.height / 2 - b.y - b.height / 2)).toBeLessThan(12)
+  expect((await toggle.boundingBox())!.y).toBeGreaterThan(b.y + b.height)
   await toggle.click()
   await expect(toggle).not.toBeChecked()
   await page.screenshot({ path: "/private/tmp/infranexus-department-toolbar.png" })
   await page.setViewportSize({ width: 375, height: 812 })
   await expect(refresh).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
+})
+
+test("users keep scope title and table controls together above filters", async ({ page }) => {
+  const errors: string[] = []
+  page.on("pageerror", error => errors.push(error.message))
+  await mockLists(page)
+  await page.goto("/users")
+  for (const width of [1280, 1920, 390]) {
+    await page.setViewportSize({ width, height: 1000 })
+    const table = page.locator('[data-slot="data-table"]')
+    await expect(table.getByText("table-user-1", { exact: true })).toBeVisible()
+    await page.screenshot({ path: `/tmp/infranexus-users-header-${width}.png`, fullPage: true })
+    const header = table.locator('[data-slot="data-table-header"]')
+    const title = header.getByText("全部人员", { exact: true })
+    await expect(title).toBeVisible()
+    const titleBox = (await title.boundingBox())!
+    const refreshBox = (await header.getByRole("button", { name: "刷新", exact: true }).boundingBox())!
+    expect(Math.abs(titleBox.y + titleBox.height / 2 - refreshBox.y - refreshBox.height / 2)).toBeLessThan(3)
+    const search = table.locator('[data-slot="data-table-search"]')
+    expect((await search.boundingBox())!.y).toBeGreaterThanOrEqual((await header.boundingBox())!.y + (await header.boundingBox())!.height)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+  await page.getByRole("button", { name: "收起组织架构" }).click()
+  const expand = page.locator('[data-slot="data-table-header"]').getByRole("button", { name: "展开组织架构" })
+  await expect(expand).toBeVisible()
+  await expand.click()
+  await expect(page.getByRole("button", { name: "收起组织架构" })).toBeVisible()
+  expect(errors).toEqual([])
 })

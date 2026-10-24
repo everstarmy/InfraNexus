@@ -10,7 +10,12 @@ import { DataTable, type ColumnDef } from "@/components/data-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +38,12 @@ import {
 } from "@/services/ldap";
 import { optionsService } from "@/services/options";
 import { useAuth } from "@/stores/auth-context";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { PaginationState } from "@tanstack/react-table";
 import {
   Building2,
@@ -41,9 +51,9 @@ import {
   ChevronDown,
   Eye,
   FileWarning,
-  FolderSync,
   Hand,
   History,
+  Lock,
   LogIn,
   MoreHorizontal,
   Network,
@@ -54,8 +64,9 @@ import {
   ShieldAlert,
   Timer,
   Trash2,
+  Waypoints,
 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LdapConfigSheet, fromConfig } from "./components/ldap-config-sheet";
 import { LdapPreviewDialog } from "./components/ldap-preview-dialog";
 import { LdapTaskDialog } from "./components/ldap-task-dialog";
@@ -72,7 +83,7 @@ function serverURL(cfg: LDAPConfig) {
 }
 
 export default function LdapPage() {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const canReadPlanItems = can("api:GET:/api/v1/ldap/sync-plans/:id/items");
   const canReadTaskDetails = can("api:GET:/api/v1/ldap/sync-logs/:id");
   const confirm = useConfirm();
@@ -82,6 +93,9 @@ export default function LdapPage() {
   const [previewMode, setPreviewMode] = useState<SyncMode>("full");
   const [errorsLog, setErrorsLog] = useState<SyncLog | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
+  const [selectedConfigId, setSelectedConfigId] = useState<string | undefined>(
+    undefined,
+  );
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: 10,
@@ -101,18 +115,30 @@ export default function LdapPage() {
     () => (configsForbidden ? [] : (configsQuery.data ?? [])),
     [configsQuery.data, configsForbidden],
   );
+  const activeFilterConfigId = selectedConfigId;
+  // A failed source-list refresh is not evidence that the selected source was deleted.
+  const filterRemoved =
+    !!selectedConfigId &&
+    configsQuery.isSuccess &&
+    !configs.some((config) => config.id === selectedConfigId);
+  useEffect(() => {
+    if (!filterRemoved) return;
+    setSelectedConfigId(undefined);
+    setPagination((previous) => ({ ...previous, pageIndex: 0 }));
+  }, [filterRemoved]);
   const running = configs.some((c) => c.sync_status === "running");
 
   const logsQuery = useQuery({
+    enabled: !filterRemoved,
     queryKey: [
-      ...queryKeys.ldapLogs(),
+      ...queryKeys.ldapLogs(activeFilterConfigId),
       pagination.pageIndex,
       pagination.pageSize,
     ],
     queryFn: async ({ signal }) =>
       (
         await ldapService.logs(
-          undefined,
+          activeFilterConfigId,
           pagination.pageIndex + 1,
           pagination.pageSize,
           signal,
@@ -260,6 +286,8 @@ export default function LdapPage() {
     () => [
       {
         id: "started_at",
+        size: 180,
+        minSize: 160,
         accessorKey: "started_at",
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="开始时间" />
@@ -278,6 +306,8 @@ export default function LdapPage() {
       },
       {
         id: "domain",
+        size: 200,
+        minSize: 160,
         accessorKey: "domain",
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="目录域" />
@@ -289,6 +319,8 @@ export default function LdapPage() {
       },
       {
         id: "trigger",
+        size: 130,
+        minSize: 120,
         accessorKey: "trigger",
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="触发 / 模式" />
@@ -308,6 +340,8 @@ export default function LdapPage() {
       },
       {
         id: "status",
+        size: 100,
+        minSize: 88,
         accessorKey: "status",
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="状态" />
@@ -317,6 +351,10 @@ export default function LdapPage() {
       },
       {
         id: "result",
+        accessorFn: (log) => log.report.total,
+        enableSorting: false,
+        size: 240,
+        minSize: 200,
         header: "结果",
         cell: ({ row }) => {
           const r = row.original.report;
@@ -420,6 +458,8 @@ export default function LdapPage() {
       },
       {
         id: "duration",
+        size: 90,
+        minSize: 80,
         accessorKey: "duration_ms",
         header: "耗时",
         cell: ({ row }) => (
@@ -432,6 +472,10 @@ export default function LdapPage() {
       },
       {
         id: "actions",
+        size: 96,
+        minSize: 96,
+        maxSize: 96,
+        enableHiding: false,
         header: () => <span className="sr-only">详情</span>,
         cell: ({ row }) =>
           canReadTaskDetails ? (
@@ -452,31 +496,81 @@ export default function LdapPage() {
     [canReadTaskDetails, logsQuery.isPlaceholderData],
   );
 
-  const lastLog = logsQuery.data?.items[0];
+  const logFilters =
+    configs.length > 1 || selectedConfigId ? (
+      <div
+        className="flex flex-wrap items-center gap-1"
+        role="group"
+        aria-label="按身份源域筛选同步日志"
+      >
+        <Button
+          size="xs"
+          variant={activeFilterConfigId === undefined ? "secondary" : "ghost"}
+          aria-pressed={activeFilterConfigId === undefined}
+          onClick={() => {
+            setSelectedConfigId(undefined);
+            setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+          }}
+        >
+          全部域
+        </Button>
+        {configs.map((cfg) => (
+          <Button
+            key={cfg.id}
+            size="xs"
+            variant={activeFilterConfigId === cfg.id ? "secondary" : "ghost"}
+            aria-pressed={activeFilterConfigId === cfg.id}
+            className="h-auto min-h-7 max-w-full whitespace-normal break-all py-1 font-mono"
+            onClick={() => {
+              setSelectedConfigId(cfg.id);
+              setPagination((prev) => ({
+                ...prev,
+                pageIndex: 0,
+              }));
+            }}
+          >
+            {cfg.domain}
+          </Button>
+        ))}
+      </div>
+    ) : undefined;
+
+  const logHeading = (
+    <div className="min-w-0 space-y-1">
+      <CardTitle className="text-sm">同步日志</CardTitle>
+      <CardDescription className="text-xs">
+        每次同步的报表：新增、更新、停用与失败明细
+      </CardDescription>
+    </div>
+  );
+
+  const lastLog = logsQuery.isPlaceholderData
+    ? undefined
+    : logsQuery.data?.items[0];
 
   return (
     <>
       <PageHeader
-        icon={FolderSync}
-        title="目录同步"
-        description="对接 Windows AD / LDAP：域账号登录、组织架构映射与定时同步"
+        icon={Waypoints}
+        title="身份源集成"
+        description="对接 Windows AD / OpenLDAP 外部身份源，实现企业域账号登录、组织架构映射与定时同步"
         badge={
           configsUnavailable ? (
             <span
               className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-300"
               role="status"
             >
-              目录状态暂不可用
+              身份源状态暂不可用
             </span>
           ) : configs.length > 0 ? (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
               <span className="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-pulse" />
-              已接入 {configs.length} 个目录源
+              已接入 {configs.length} 个身份源
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-300">
               <span className="size-1.5 rounded-full bg-amber-500 motion-safe:animate-pulse" />
-              尚未接入
+              尚未接入身份源
             </span>
           )
         }
@@ -495,9 +589,9 @@ export default function LdapPage() {
 
       <StatGrid>
         <StatCard
-          label="目录配置"
+          label="已接入身份源"
           value={configsUnavailable ? "—" : configs.length}
-          icon={Network}
+          icon={Waypoints}
           tone="primary"
           loading={configsQuery.isLoading}
           hint={
@@ -529,7 +623,7 @@ export default function LdapPage() {
           hint="由后台调度器自动执行全量同步"
         />
         <StatCard
-          label="最近一次同步"
+          label={pagination.pageIndex > 0 ? "当前页最近同步" : "最近一次同步"}
           value={
             logsUnavailable
               ? "—"
@@ -545,7 +639,7 @@ export default function LdapPage() {
                 ? "warning"
                 : "default"
           }
-          loading={logsQuery.isLoading}
+          loading={logsQuery.isLoading || logsQuery.isPlaceholderData}
           hint={
             lastLog
               ? `${lastLog.domain} · ${{ running: "进行中", success: "成功", partial: "部分失败", failed: "失败", idle: "—" }[lastLog.status]}`
@@ -587,304 +681,453 @@ export default function LdapPage() {
         />
       )}
 
-      {configsQuery.isLoading ? (
-        <div className="grid grid-cols-12 gap-4">
-          <Skeleton className="col-span-12 h-44 rounded-xl xl:col-span-6" />
-          <Skeleton className="col-span-12 h-44 rounded-xl xl:col-span-6" />
-        </div>
-      ) : configsUnavailable ? (
-        <QueryErrorState
-          error={configsQuery.error}
-          label="目录配置"
-          onRetry={() => void configsQuery.refetch()}
-          retrying={configsQuery.isFetching}
-        />
-      ) : configs.length === 0 ? (
-        <Card className="col-span-12 overflow-hidden border border-border/80 bg-gradient-to-b from-card via-card to-muted/20 p-8 shadow-xs sm:p-10">
-          <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
-            <div className="flex size-14 items-center justify-center rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/15 via-violet-500/10 to-primary/10 text-sky-600 shadow-sm ring-1 ring-sky-500/20 dark:text-sky-300">
-              <Building2 className="size-7" />
-            </div>
-
-            <h3 className="mt-4 text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-              连接企业身份源 (Active Directory / OpenLDAP)
-            </h3>
-            <p className="mt-2 max-w-lg text-sm text-muted-foreground leading-relaxed">
-              将现有的 Windows AD 或 LDAP 目录服务接入
-              InfraNexus，实现企业员工域账号免注册登录与部门组织树全自动映射。
-            </p>
-
-            <div className="my-8 grid w-full grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4 text-left">
-              <div className="rounded-xl border border-border/70 bg-muted/40 p-4 transition-colors hover:border-primary/30">
-                <div className="flex items-center gap-2 text-xs font-semibold text-primary">
-                  <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-mono">
-                    1
-                  </span>
-                  直连目录服务器
+      <div className="grid grid-cols-12 items-start gap-4">
+        <div className="col-span-12 min-w-0 space-y-4 xl:col-span-5">
+          {configsQuery.isLoading ? (
+            <Skeleton className="h-80 w-full rounded-xl" />
+          ) : configsUnavailable ? (
+            <QueryErrorState
+              error={configsQuery.error}
+              label="目录配置"
+              onRetry={() => void configsQuery.refetch()}
+              retrying={configsQuery.isFetching}
+            />
+          ) : configs.length === 0 ? (
+            <Card className="overflow-hidden border border-border/80 bg-gradient-to-b from-card via-card to-muted/20 p-6 shadow-xs sm:p-7">
+              <div className="flex flex-col items-start">
+                <div className="flex size-12 items-center justify-center rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/15 via-violet-500/10 to-primary/10 text-sky-600 shadow-sm ring-1 ring-sky-500/20 dark:text-sky-300">
+                  <Building2 className="size-6" />
                 </div>
-                <p className="mt-2 text-xs text-muted-foreground leading-normal">
-                  支持 LDAPS (SSL/TLS) 加密连接，自适应各类 Base DN 与过滤规则。
-                </p>
-              </div>
 
-              <div className="rounded-xl border border-border/70 bg-muted/40 p-4 transition-colors hover:border-primary/30">
-                <div className="flex items-center gap-2 text-xs font-semibold text-primary">
-                  <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-mono">
-                    2
-                  </span>
-                  统一账号与组织映射
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground leading-normal">
-                  sAMAccountName、mail 等属性映射，OU 自动生成平台部门层级。
+                <h3 className="mt-4 text-lg font-bold tracking-tight text-foreground sm:text-xl">
+                  连接企业身份源 (Active Directory / OpenLDAP)
+                </h3>
+                <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed sm:text-sm">
+                  将现有的 Windows AD 或 OpenLDAP 身份目录接入
+                  InfraNexus，实现企业员工域账号免注册登录与部门组织树全自动映射。
                 </p>
-              </div>
 
-              <div className="rounded-xl border border-border/70 bg-muted/40 p-4 transition-colors hover:border-primary/30">
-                <div className="flex items-center gap-2 text-xs font-semibold text-primary">
-                  <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-mono">
-                    3
-                  </span>
-                  定时与增量同步
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground leading-normal">
-                  后台调度器按分钟级全量/增量拉取，人员调动离职权限秒级收回。
-                </p>
-              </div>
-            </div>
-
-            {can("ldap:create") && (
-              <Button
-                size="lg"
-                onClick={() => setEditing("new")}
-                className="gap-2 shadow-xs"
-              >
-                <Plus className="size-4" />
-                新建第一个目录配置
-              </Button>
-            )}
-          </div>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-12 gap-4">
-          {configs.map((cfg) => (
-            <Card
-              key={cfg.id}
-              className="col-span-12 gap-0 overflow-hidden py-0 2xl:col-span-6 border border-border/80 shadow-xs hover:border-primary/40 hover:shadow-sm transition-all"
-            >
-              <div className="flex items-start justify-between gap-3 p-5">
-                <div className="flex min-w-0 items-start gap-3">
-                  <div
-                    className={cn(
-                      "flex size-11 shrink-0 items-center justify-center rounded-xl",
-                      cfg.type === "ad"
-                        ? "bg-sky-500/10 text-sky-600 dark:text-sky-300"
-                        : "bg-violet-500/10 text-violet-600 dark:text-violet-300",
-                    )}
-                  >
-                    {cfg.type === "ad" ? (
-                      <Building2 className="size-5" />
-                    ) : (
-                      <Network className="size-5" />
-                    )}
-                  </div>
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="truncate text-base font-semibold tracking-tight">
-                        {cfg.name}
-                      </h3>
-                      <Badge variant="outline" className="font-mono">
-                        {cfg.domain}
-                      </Badge>
+                <div className="my-5 grid w-full grid-cols-1 gap-2.5 text-left">
+                  <div className="rounded-xl border border-border/70 bg-muted/35 p-3.5 transition-colors hover:border-primary/30">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 font-mono text-[11px]">
+                        1
+                      </span>
+                      直连企业域控与目录服务器
                     </div>
-                    <p className="truncate font-mono text-xs text-muted-foreground">
-                      {serverURL(cfg)} · {cfg.base_dn}
+                    <p className="mt-1.5 pl-7 text-xs text-muted-foreground leading-normal">
+                      支持 LDAPS / StartTLS 加密传输，自适应各类 Base DN
+                      与用户过滤规则。
                     </p>
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      <Badge variant="secondary">
-                        {cfg.type === "ad" ? "Active Directory" : "LDAP"}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className={
-                          cfg.enabled
-                            ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
-                            : "text-muted-foreground"
-                        }
-                      >
-                        {cfg.enabled ? "允许域登录" : "域登录已关闭"}
-                      </Badge>
-                      <Badge variant="outline">
-                        {cfg.sync_enabled
-                          ? `每 ${cfg.sync_interval_minutes} 分钟同步`
-                          : "手动同步"}
-                      </Badge>
-                      <Badge variant="outline">
-                        {strategyLabels[cfg.department_sync.strategy] ??
-                          "不同步部门"}
-                      </Badge>
-                      {(cfg.use_ssl || cfg.start_tls) && (
-                        <Badge variant="outline">
-                          {cfg.use_ssl ? "LDAPS" : "StartTLS"}
-                        </Badge>
-                      )}
-                      {cfg.insecure_skip_verify && (
-                        <Badge
-                          variant="outline"
-                          className="gap-1 border-amber-500/30 text-amber-700 dark:text-amber-300"
-                        >
-                          <ShieldAlert />
-                          跳过证书校验
-                        </Badge>
-                      )}
+                  </div>
+
+                  <div className="rounded-xl border border-border/70 bg-muted/35 p-3.5 transition-colors hover:border-primary/30">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 font-mono text-[11px]">
+                        2
+                      </span>
+                      统一账号字段与组织架构映射
                     </div>
+                    <p className="mt-1.5 pl-7 text-xs text-muted-foreground leading-normal">
+                      映射 sAMAccountName、mail 等核心属性，按 OU
+                      路径自动构建平台部门树。
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-border/70 bg-muted/35 p-3.5 transition-colors hover:border-primary/30">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 font-mono text-[11px]">
+                        3
+                      </span>
+                      变更预览演练与定时全量同步
+                    </div>
+                    <p className="mt-1.5 pl-7 text-xs text-muted-foreground leading-normal">
+                      支持只读预览变更计划，后台调度器定时拉取，离职或停用账号自动回收访问权限。
+                    </p>
                   </div>
                 </div>
-                {(can("ldap:update") || can("ldap:delete")) && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`${cfg.name} 的操作`}
-                        />
-                      }
-                    >
-                      <MoreHorizontal />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-40">
-                      {can("ldap:update") && (
-                        <DropdownMenuItem onClick={() => setEditing(cfg)}>
-                          <Pencil />
-                          编辑配置
-                        </DropdownMenuItem>
-                      )}
-                      {can("ldap:delete") && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onClick={() => remove(cfg)}
-                          >
-                            <Trash2 />
-                            删除配置
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+
+                {can("ldap:create") && (
+                  <Button
+                    onClick={() => setEditing("new")}
+                    className="w-full gap-2 shadow-xs sm:w-auto"
+                  >
+                    <Plus className="size-4" />
+                    新建第一个目录配置
+                  </Button>
                 )}
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/30 px-5 py-3">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <SyncStatusBadge status={cfg.sync_status} />
-                  <span>上次同步 {formatRelative(cfg.last_sync_at)}</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {can("ldap:test") && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void testConnection(cfg)}
-                      disabled={testing === cfg.id}
-                    >
-                      {testing === cfg.id ? <Spinner /> : <Plug />}
-                      测试连接
-                    </Button>
+            </Card>
+          ) : (
+            configs.map((cfg) => {
+              const isSelected = activeFilterConfigId === cfg.id;
+              const ouMappingCount =
+                cfg.department_sync.ou_mappings?.length ?? 0;
+              return (
+                <Card
+                  key={cfg.id}
+                  className={cn(
+                    "gap-0 overflow-hidden py-0 border border-border/80 shadow-xs transition-all",
+                    isSelected
+                      ? "border-primary/60 ring-1 ring-primary/20"
+                      : "hover:border-primary/40 hover:shadow-sm",
                   )}
-                  {can("ldap:sync") && (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setPreviewing(cfg)}
+                >
+                  <div className="flex items-start justify-between gap-3 p-4 pb-3.5 sm:p-5 sm:pb-4">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div
+                        className={cn(
+                          "flex size-11 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset",
+                          cfg.type === "ad"
+                            ? "bg-sky-500/10 text-sky-600 ring-sky-500/20 dark:text-sky-300"
+                            : "bg-violet-500/10 text-violet-600 ring-violet-500/20 dark:text-violet-300",
+                        )}
                       >
-                        <Eye />
-                        预览同步
-                      </Button>
+                        {cfg.type === "ad" ? (
+                          <Building2 className="size-5" />
+                        ) : (
+                          <Network className="size-5" />
+                        )}
+                      </div>
+                      <div className="min-w-0 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="truncate text-base font-semibold tracking-tight text-foreground">
+                            {cfg.name}
+                          </h3>
+                          <Badge variant="outline" className="font-mono">
+                            {cfg.domain}
+                          </Badge>
+                          <Badge variant="secondary">
+                            {cfg.type === "ad"
+                              ? "Active Directory"
+                              : "OpenLDAP"}
+                          </Badge>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge
+                            variant="outline"
+                            className={
+                              cfg.enabled
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                                : "text-muted-foreground"
+                            }
+                          >
+                            {cfg.enabled ? "允许域登录" : "域登录已关闭"}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={
+                              cfg.use_ssl || cfg.start_tls
+                                ? "gap-1 border-sky-500/30 text-sky-700 dark:text-sky-300"
+                                : "text-muted-foreground"
+                            }
+                          >
+                            {(cfg.use_ssl || cfg.start_tls) && (
+                              <Lock className="size-3" />
+                            )}
+                            {cfg.use_ssl
+                              ? "LDAPS 加密"
+                              : cfg.start_tls
+                                ? "StartTLS 加密"
+                                : "明文 LDAP"}
+                          </Badge>
+                          {cfg.insecure_skip_verify && (
+                            <Badge
+                              variant="outline"
+                              className="gap-1 border-amber-500/30 text-amber-700 dark:text-amber-300"
+                            >
+                              <ShieldAlert />
+                              跳过证书校验
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {(can("ldap:update") || can("ldap:delete")) && (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
                             <Button
-                              size="sm"
-                              disabled={
-                                cfg.sync_status === "running" ||
-                                startSync.isPending
-                              }
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`${cfg.name} 的操作`}
                             />
                           }
                         >
-                          {cfg.sync_status === "running" ? (
-                            <Spinner />
-                          ) : (
-                            <Play />
-                          )}
-                          立即同步
-                          <ChevronDown />
+                          <MoreHorizontal />
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44">
-                          <DropdownMenuItem
-                            onClick={() => openPreview(cfg, "full")}
-                          >
-                            全量同步
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => openPreview(cfg, "incremental")}
-                            disabled={!cfg.last_success_at}
-                          >
-                            增量同步
-                          </DropdownMenuItem>
+                        <DropdownMenuContent align="end" className="w-40">
+                          {can("ldap:update") && (
+                            <DropdownMenuItem onClick={() => setEditing(cfg)}>
+                              <Pencil />
+                              编辑配置
+                            </DropdownMenuItem>
+                          )}
+                          {can("ldap:delete") && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onClick={() => remove(cfg)}
+                              >
+                                <Trash2 />
+                                删除配置
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    </>
-                  )}
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
+                    )}
+                  </div>
 
-      <Card className="gap-3">
-        <CardHeader>
-          <CardTitle className="text-sm">同步日志</CardTitle>
-          <CardDescription className="text-xs">
-            每次同步的报表：新增、更新、停用与失败明细
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {logsQuery.isPlaceholderData && (
-            <QueryPlaceholderNotice label="同步日志" />
+                  <div className="space-y-2.5 px-4 pb-4 sm:px-5">
+                    <div className="rounded-xl border border-border/70 bg-muted/25 p-3 space-y-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                          <span>服务器端点</span>
+                          <span className="font-mono tabular-nums">
+                            超时 {cfg.timeout_seconds}s
+                          </span>
+                        </div>
+                        <p
+                          className="mt-0.5 truncate font-mono text-xs font-medium text-foreground"
+                          title={serverURL(cfg)}
+                        >
+                          {serverURL(cfg)}
+                        </p>
+                      </div>
+                      <div className="border-t border-border/60 pt-2 min-w-0">
+                        <p className="text-[11px] text-muted-foreground">
+                          搜索基准 (Base DN)
+                        </p>
+                        <p
+                          className="mt-0.5 truncate font-mono text-xs text-foreground"
+                          title={cfg.base_dn}
+                        >
+                          {cfg.base_dn}
+                        </p>
+                      </div>
+                      {cfg.bind_dn && (
+                        <div className="border-t border-border/60 pt-2 min-w-0">
+                          <p className="text-[11px] text-muted-foreground">
+                            服务绑定账号 (Bind DN)
+                          </p>
+                          <p
+                            className="mt-0.5 truncate font-mono text-xs text-muted-foreground"
+                            title={cfg.bind_dn}
+                          >
+                            {cfg.bind_dn}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                      <div className="min-w-0 rounded-xl border border-border/70 bg-card px-3 py-2.5">
+                        <p className="text-[11px] text-muted-foreground">
+                          组织架构映射
+                        </p>
+                        <p className="mt-0.5 truncate text-xs font-semibold text-foreground">
+                          {strategyLabels[cfg.department_sync.strategy] ??
+                            "不同步部门"}
+                        </p>
+                        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                          {cfg.department_sync.strategy === "ou"
+                            ? ouMappingCount > 0
+                              ? `含 ${ouMappingCount} 条显式 OU 映射`
+                              : "按 OU 层级自动生成部门树"
+                            : cfg.department_sync.strategy === "attribute"
+                              ? `按 ${cfg.attribute_mapping.department || "department"} 属性归类`
+                              : "仅同步人员，本地维护部门"}
+                        </p>
+                      </div>
+
+                      <div className="min-w-0 rounded-xl border border-border/70 bg-card px-3 py-2.5">
+                        <p className="text-[11px] text-muted-foreground">
+                          同步调度与回收
+                        </p>
+                        <p className="mt-0.5 truncate text-xs font-semibold text-foreground">
+                          {cfg.sync_enabled
+                            ? `每 ${cfg.sync_interval_minutes} 分钟同步`
+                            : "手动同步"}
+                        </p>
+                        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                          {cfg.disable_missing_users
+                            ? "目录缺失账号自动停用"
+                            : "目录缺失账号保留现状"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-border/60 bg-muted/15 px-3 py-2">
+                      <p className="text-[11px] text-muted-foreground">
+                        属性映射规则
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
+                        <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background px-1.5 py-0.5">
+                          <span className="text-muted-foreground">账号</span>
+                          <code className="truncate font-mono text-foreground">
+                            {cfg.attribute_mapping.username}
+                          </code>
+                        </span>
+                        <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background px-1.5 py-0.5">
+                          <span className="text-muted-foreground">姓名</span>
+                          <code className="truncate font-mono text-foreground">
+                            {cfg.attribute_mapping.nickname}
+                          </code>
+                        </span>
+                        <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background px-1.5 py-0.5">
+                          <span className="text-muted-foreground">邮箱</span>
+                          <code className="truncate font-mono text-foreground">
+                            {cfg.attribute_mapping.email}
+                          </code>
+                        </span>
+                        <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background px-1.5 py-0.5">
+                          <span className="text-muted-foreground">标识</span>
+                          <code className="truncate font-mono text-foreground">
+                            {cfg.attribute_mapping.external_id}
+                          </code>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/30 px-4 py-3 sm:px-5">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <SyncStatusBadge status={cfg.sync_status} />
+                      <span>上次同步 {formatRelative(cfg.last_sync_at)}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {can("ldap:test") && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void testConnection(cfg)}
+                          disabled={testing === cfg.id}
+                        >
+                          {testing === cfg.id ? <Spinner /> : <Plug />}
+                          测试连接
+                        </Button>
+                      )}
+                      {can("ldap:sync") && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setPreviewing(cfg)}
+                          >
+                            <Eye />
+                            预览同步
+                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={
+                                <Button
+                                  size="sm"
+                                  disabled={
+                                    cfg.sync_status === "running" ||
+                                    startSync.isPending
+                                  }
+                                />
+                              }
+                            >
+                              {cfg.sync_status === "running" ? (
+                                <Spinner />
+                              ) : (
+                                <Play />
+                              )}
+                              立即同步
+                              <ChevronDown />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem
+                                onClick={() => openPreview(cfg, "full")}
+                              >
+                                全量同步
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => openPreview(cfg, "incremental")}
+                                disabled={!cfg.last_success_at}
+                              >
+                                增量同步
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })
           )}
-          {logsUnavailable ? (
-            <QueryErrorState
-              error={logsQuery.error}
-              label="同步日志"
-              onRetry={() => void logsQuery.refetch()}
-              retrying={logsQuery.isFetching}
-            />
-          ) : (
-            <DataTable
-              columns={logColumns}
-              data={logsQuery.data?.items ?? []}
-              loading={logsQuery.isLoading}
-              getRowId={(l) => l.id}
-              serverFiltering
-              hideSearch
-              serverPagination={{
-                pageIndex: pagination.pageIndex,
-                pageSize: pagination.pageSize,
-                total: logsQuery.data?.total ?? 0,
-                onChange: setPagination,
-              }}
-              onRefresh={() => void logsQuery.refetch()}
-              isRefreshing={logsQuery.isFetching}
-              emptyTitle="暂无同步记录"
-              emptyDescription="执行一次手动同步或开启定时同步后，报表会出现在这里"
-            />
-          )}
-        </CardContent>
-      </Card>
+        </div>
+
+        <Card className="col-span-12 min-w-0 border border-border/80 py-4 shadow-xs xl:col-span-7">
+          <CardContent className="min-w-0 space-y-3">
+            {logsQuery.isPlaceholderData && (
+              <QueryPlaceholderNotice label="同步日志" />
+            )}
+            {logsUnavailable ? (
+              <>
+                {logHeading}
+                {logFilters}
+                <QueryErrorState
+                  error={logsQuery.error}
+                  label="同步日志"
+                  onRetry={() => void logsQuery.refetch()}
+                  retrying={logsQuery.isFetching}
+                />
+              </>
+            ) : (
+              <DataTable
+                toolbarTitle={logHeading}
+                searchLeading={logFilters}
+                columnLabels={{
+                  started_at: "开始时间",
+                  domain: "目录域",
+                  trigger: "触发 / 模式",
+                  status: "状态",
+                  result: "结果",
+                  duration: "耗时",
+                }}
+                columns={logColumns}
+                data={logsQuery.data?.items ?? []}
+                loading={logsQuery.isLoading}
+                getRowId={(l) => l.id}
+                serverFiltering
+                enableColumnPinning
+                enableColumnResizing
+                initialColumnPinning={{
+                  start: ["started_at"],
+                  end: ["actions"],
+                }}
+                tablePreference={
+                  user?.id
+                    ? {
+                        userId: user.id,
+                        tableId: "ldap-sync-logs",
+                        schemaVersion: 1,
+                      }
+                    : undefined
+                }
+                hideSearch
+                serverPagination={{
+                  pageIndex: pagination.pageIndex,
+                  pageSize: pagination.pageSize,
+                  total: logsQuery.data?.total ?? 0,
+                  onChange: setPagination,
+                }}
+                onRefresh={() => void logsQuery.refetch()}
+                isRefreshing={logsQuery.isFetching}
+                emptyTitle="暂无同步记录"
+                emptyDescription="执行一次手动同步或开启定时同步后，报表会出现在这里"
+              />
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       <LdapConfigSheet
         open={editing !== null}
@@ -907,8 +1150,14 @@ export default function LdapPage() {
         onOpenChange={(open) => !open && setPreviewing(null)}
         onRun={executePlan}
       />
-      <LdapTaskDialog key={errorsLog?.id ?? "closed"} log={errorsLog} configs={configs} canReadPlanItems={canReadPlanItems}
-        onClose={() => setErrorsLog(null)} onRetry={openPreview} />
+      <LdapTaskDialog
+        key={errorsLog?.id ?? "closed"}
+        log={errorsLog}
+        configs={configs}
+        canReadPlanItems={canReadPlanItems}
+        onClose={() => setErrorsLog(null)}
+        onRetry={openPreview}
+      />
     </>
   );
 }

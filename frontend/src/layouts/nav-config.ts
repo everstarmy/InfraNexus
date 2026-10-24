@@ -1,11 +1,11 @@
 import {
   Building2,
-  FolderSync,
   KeyRound,
   LayoutDashboard,
   Network,
   ShieldCheck,
   Users,
+  Waypoints,
   type LucideIcon,
 } from "lucide-react"
 
@@ -91,11 +91,11 @@ export const navGroups: NavGroup[] = [
     label: "系统配置",
     items: [
       {
-        title: "目录同步",
+        title: "身份源集成",
         url: "/ldap",
-        icon: FolderSync,
+        icon: Waypoints,
         permission: "ldap",
-        description: "AD / LDAP 域配置与同步",
+        description: "AD / LDAP 企业身份源与组织同步",
       },
     ],
   },

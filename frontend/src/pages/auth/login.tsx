@@ -186,7 +186,7 @@ export default function LoginPage() {
             {domainMode && noDomains && (
               <Alert>
                 <Info />
-                <AlertDescription>尚未配置可用的企业域，请联系管理员在「集成中心 · 目录同步」中启用域登录。</AlertDescription>
+                <AlertDescription>尚未配置可用的企业域，请联系管理员在「系统配置 · 身份源集成」中启用域登录。</AlertDescription>
               </Alert>
             )}
 

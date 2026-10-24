@@ -7,7 +7,7 @@ const modules = [
   { path: "/departments", errorLabel: "部门树", heading: "部门管理" },
   { path: "/roles", errorLabel: "角色列表", heading: "角色管理" },
   { path: "/permissions", errorLabel: "权限树", heading: "权限清单" },
-  { path: "/ldap", errorLabel: "目录配置", heading: "目录同步" },
+  { path: "/ldap", errorLabel: "目录配置", heading: "身份源集成" },
 ] as const;
 
 const viewports = [

@@ -6,13 +6,13 @@ import {
   Building2,
   CircleCheck,
   CircleSlash,
-  FolderSync,
   KeyRound,
   LayoutDashboard,
   Network,
   ShieldCheck,
   UserPlus,
   Users,
+  Waypoints,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -155,8 +155,8 @@ export default function DashboardPage() {
           )}
           {can("ldap") && (
             <Button nativeButton={false} render={<Link to="/ldap" />}>
-              <FolderSync />
-              目录同步
+              <Waypoints />
+              身份源集成
             </Button>
           )}
         </div>
@@ -236,7 +236,7 @@ export default function DashboardPage() {
               <CardDescription className="text-xs">AD / LDAP 接入与同步状态</CardDescription>
             </div>
             {can("ldap") && (
-              <Button variant="ghost" size="icon-sm" nativeButton={false} render={<Link to="/ldap" aria-label="前往目录同步" />}>
+              <Button variant="ghost" size="icon-sm" nativeButton={false} render={<Link to="/ldap" aria-label="前往身份源集成" />}>
                 <ArrowUpRight />
               </Button>
             )}

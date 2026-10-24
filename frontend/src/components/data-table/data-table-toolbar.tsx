@@ -6,10 +6,7 @@ import { Search, X, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
-import {
-  DataTableFacetedFilter,
-  type FacetedOption,
-} from "./data-table-faceted-filter"
+import { DataTableFacetedFilter, type FacetedOption } from "./data-table-faceted-filter"
 import { DataTableDateRangeFilter } from "./data-table-date-range-filter"
 import { DataTableViewOptions } from "./data-table-view-options"
 
@@ -31,13 +28,16 @@ interface DataTableToolbarProps<TData extends RowData> {
   dateRangeKey?: string
   dateRangeTitle?: string
   columnLabels?: Record<string, string>
+  toolbarTitle?: React.ReactNode
+  /** @deprecated Use toolbarTitle. */
   toolbarLeading?: React.ReactNode
+  searchLeading?: React.ReactNode
+  searchTrailing?: React.ReactNode
+  hideRefresh?: boolean
+  hideViewOptions?: boolean
   toolbarControls?: React.ReactNode
   actions?: React.ReactNode
-  batchActions?: (
-    selectedRows: TData[],
-    resetSelection: () => void
-  ) => React.ReactNode
+  batchActions?: (selectedRows: TData[], resetSelection: () => void) => React.ReactNode
   onResetLayout?: () => void
   onResetFilters?: () => void
   onRefresh?: () => void
@@ -55,7 +55,12 @@ export function DataTableToolbar<TData extends RowData>({
   dateRangeTitle = "时间范围",
   columnLabels = {},
   actions,
+  toolbarTitle,
   toolbarLeading,
+  searchLeading,
+  searchTrailing,
+  hideRefresh = false,
+  hideViewOptions = false,
   toolbarControls,
   batchActions,
   onResetLayout,
@@ -65,17 +70,20 @@ export function DataTableToolbar<TData extends RowData>({
 }: DataTableToolbarProps<TData>) {
   const [filtersOpen, setFiltersOpen] = React.useState(false)
   const filtersId = React.useId()
-  const hasFilters = facetedFilters.length > 0 || Boolean(dateRangeKey)
+  const availableFilters = facetedFilters.filter(
+    (f) => f.onSelectedChange || table.getColumn(f.columnId),
+  )
+  const hasFilters =
+    availableFilters.length > 0 || Boolean(dateRangeKey && table.getColumn(dateRangeKey))
   const selectedFilterCount =
     table.getState().columnFilters.length +
-    facetedFilters.filter((f) => f.onSelectedChange && f.selectedValues?.length)
-      .length
+    facetedFilters.filter((f) => f.onSelectedChange && f.selectedValues?.length).length
   const isFiltered =
     table.getState().columnFilters.length > 0 ||
-    Boolean(table.getState().globalFilter) || Boolean(externalSearch?.value) || facetedFilters.some(f => Boolean(f.selectedValues?.length))
-  const selectedRows = table
-    .getFilteredSelectedRowModel()
-    .rows.map((r) => r.original)
+    Boolean(table.getState().globalFilter) ||
+    Boolean(externalSearch?.value) ||
+    facetedFilters.some((f) => Boolean(f.selectedValues?.length))
+  const selectedRows = table.getFilteredSelectedRowModel().rows.map((r) => r.original)
   const hasSelection = selectedRows.length > 0
 
   const searchColumn = searchKey ? table.getColumn(searchKey) : undefined
@@ -94,9 +102,7 @@ export function DataTableToolbar<TData extends RowData>({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
         e.key === "/" &&
-        !["INPUT", "TEXTAREA", "SELECT"].includes(
-          (e.target as HTMLElement)?.tagName
-        ) &&
+        !["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement)?.tagName) &&
         !(e.target as HTMLElement)?.isContentEditable
       ) {
         e.preventDefault()
@@ -119,11 +125,33 @@ export function DataTableToolbar<TData extends RowData>({
     searchInputRef.current?.focus()
   }
 
+  const heading = toolbarTitle ?? toolbarLeading
+  const hasContent = (node: React.ReactNode) =>
+    React.Children.toArray(node).some((child) => child !== "")
+  const hasControls =
+    hasContent(toolbarControls) ||
+    (!hideRefresh && Boolean(onRefresh)) ||
+    !hideViewOptions ||
+    hasContent(actions)
+  const hasHeader = hasContent(heading) || hasControls
+  const hasSearchRow =
+    !hideSearch ||
+    hasFilters ||
+    isFiltered ||
+    hasContent(searchLeading) ||
+    hasContent(searchTrailing)
+
+  if (!hasHeader && !hasSearchRow && !(hasSelection && batchActions)) return null
+
   return (
     <div className="flex w-full min-w-0 flex-col gap-2.5">
       {/* Batch Selection Action Bar (Appears when rows are selected) */}
       {hasSelection && batchActions && (
-        <div role="region" aria-label="批量操作" className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-50 flex max-h-[45svh] w-[calc(100%-1.5rem)] max-w-3xl -translate-x-1/2 animate-in flex-col items-stretch gap-2 overflow-y-auto rounded-lg border border-primary/30 bg-background/95 px-3.5 py-2.5 text-xs text-primary shadow-xl backdrop-blur-md fade-in-50 slide-in-from-bottom-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div
+          role="region"
+          aria-label="批量操作"
+          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-50 flex max-h-[45svh] w-[calc(100%-1.5rem)] max-w-3xl -translate-x-1/2 animate-in flex-col items-stretch gap-2 overflow-y-auto rounded-lg border border-primary/30 bg-background/95 px-3.5 py-2.5 text-xs text-primary shadow-xl backdrop-blur-md fade-in-50 slide-in-from-bottom-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+        >
           <div className="flex items-center justify-between gap-2 sm:justify-start">
             <span role="status" aria-live="polite" className="font-semibold">
               已勾选 {selectedRows.length} 条（筛选结果内）
@@ -143,13 +171,53 @@ export function DataTableToolbar<TData extends RowData>({
         </div>
       )}
 
-      {/* Main Filter & Action Bar */}
-      <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          {toolbarLeading}
+      {hasHeader && (
+        <div
+          data-slot="data-table-header"
+          className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2"
+        >
+          {hasContent(heading) && <div className="min-w-0 flex-auto">{heading}</div>}
+          {/* Right side controls: Refresh + View Options + Custom Actions */}
+          {hasControls && (
+            <div className="ml-auto flex min-w-0 max-w-full shrink-0 flex-wrap items-center gap-2">
+              {toolbarControls}
+              {!hideRefresh && onRefresh && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onRefresh}
+                  disabled={isRefreshing}
+                  className="h-8 gap-1.5 px-2.5 text-xs font-normal"
+                  title="刷新列表"
+                  aria-label="刷新"
+                >
+                  <RotateCcw className={`size-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+                  <span className="hidden sm:inline">刷新</span>
+                </Button>
+              )}
+
+              {!hideViewOptions && (
+                <DataTableViewOptions
+                  table={table}
+                  columnLabels={columnLabels}
+                  onResetLayout={onResetLayout}
+                />
+              )}
+
+              {actions}
+            </div>
+          )}
+        </div>
+      )}
+      {hasSearchRow && (
+        <div
+          data-slot="data-table-search"
+          className="flex w-full min-w-0 flex-wrap items-center gap-2 [&>*]:max-w-full"
+        >
+          {searchLeading}
           {/* Search box with keyboard shortcut & quick clear */}
           {!hideSearch && (
-            <div className="relative w-48 sm:w-64">
+            <div className="relative w-full min-w-0 sm:w-64">
               <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-muted-foreground" />
               <Input
                 ref={searchInputRef}
@@ -204,82 +272,58 @@ export function DataTableToolbar<TData extends RowData>({
               筛选{selectedFilterCount > 0 ? `（${selectedFilterCount}）` : ""}
             </Button>
           )}
-          <div
-            id={filtersId}
-            className={cn(
-              "w-full flex-wrap items-center gap-2 sm:flex sm:w-auto",
-              filtersOpen ? "flex" : "hidden"
-            )}
-          >
-            {/* Faceted Filters */}
-            {facetedFilters.map((cfg) => {
-              const col = table.getColumn(cfg.columnId)
-              if (!col && !cfg.onSelectedChange) return null
-              return (
-                <DataTableFacetedFilter
-                  key={cfg.columnId}
-                  column={col}
-                  title={cfg.title}
-                  options={cfg.options}
-                  selectedValues={cfg.selectedValues}
-                  onSelectedChange={cfg.onSelectedChange}
-                />
-              )
-            })}
-
-            {/* Date Range Filter */}
-            {dateColumn && (
-              <DataTableDateRangeFilter
-                column={dateColumn}
-                title={dateRangeTitle}
-              />
-            )}
-
-            {/* Reset Filters button */}
-            {isFiltered && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  if (onResetFilters) onResetFilters()
-                  else {
-                    table.resetColumnFilters()
-                    table.setGlobalFilter("")
-                  }
-                }}
-                className="h-8 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
-              >
-                <X className="size-3.5" />
-                重置筛选
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {/* Right side controls: Refresh + View Options + Custom Actions */}
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {toolbarControls}
-          {onRefresh && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRefresh}
-              disabled={isRefreshing}
-              className="h-8 gap-1.5 px-2.5 text-xs font-normal"
-              title="刷新列表"
+          {(hasFilters || isFiltered) && (
+            <div
+              id={filtersId}
+              className={cn(
+                "w-full flex-wrap items-center gap-2 sm:flex sm:w-auto",
+                filtersOpen || !hasFilters ? "flex" : "hidden",
+              )}
             >
-              <RotateCcw
-                className={`size-3.5 ${isRefreshing ? "animate-spin" : ""}`}
-              />
-              <span className="hidden sm:inline">刷新</span>
-            </Button>
+              {/* Faceted Filters */}
+              {availableFilters.map((cfg) => {
+                const col = table.getColumn(cfg.columnId)
+                if (!col && !cfg.onSelectedChange) return null
+                return (
+                  <DataTableFacetedFilter
+                    key={cfg.columnId}
+                    column={col}
+                    title={cfg.title}
+                    options={cfg.options}
+                    selectedValues={cfg.selectedValues}
+                    onSelectedChange={cfg.onSelectedChange}
+                  />
+                )
+              })}
+
+              {/* Date Range Filter */}
+              {dateColumn && (
+                <DataTableDateRangeFilter column={dateColumn} title={dateRangeTitle} />
+              )}
+
+              {/* Reset Filters button */}
+              {isFiltered && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (onResetFilters) onResetFilters()
+                    else {
+                      table.resetColumnFilters()
+                      table.setGlobalFilter("")
+                    }
+                  }}
+                  className="h-8 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                  重置筛选
+                </Button>
+              )}
+            </div>
           )}
-
-          <DataTableViewOptions table={table} columnLabels={columnLabels} onResetLayout={onResetLayout} />
-
-          {actions}
+          {searchTrailing}
         </div>
-      </div>
+      )}
     </div>
   )
 }

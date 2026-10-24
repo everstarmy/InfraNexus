@@ -475,6 +475,22 @@ export default function UsersPage() {
   const total = stats?.total ?? 0
   const statsUnavailable = statsQuery.isError && !stats
   const usersForbidden = isForbiddenQueryError(usersQuery.error)
+  const tableHeading = (
+    <div className="flex min-w-0 items-center gap-2">
+      {!treeOpen && (
+        <Button variant="ghost" size="icon-xs" onClick={() => setTreeOpen(true)} aria-label="展开组织架构">
+          <PanelLeftOpen />
+        </Button>
+      )}
+      <CardTitle className="truncate text-sm">{scopeLabel}</CardTitle>
+      <Badge variant="secondary" className="font-mono">
+        {page?.total ?? 0}
+      </Badge>
+      {deptKey !== ALL_KEY && deptKey !== UNASSIGNED_KEY && (
+        <span className="hidden text-xs text-muted-foreground sm:inline">{includeChildren ? "含下级部门" : "仅直属成员"}</span>
+      )}
+    </div>
+  )
 
   return (
     <>
@@ -542,27 +558,15 @@ export default function UsersPage() {
         )}
 
         <Card className={cn("col-span-12 min-w-0 gap-3 border border-border/80 bg-card shadow-xs rounded-xl", treeOpen && "lg:col-span-8 xl:col-span-9")}>
-          <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              {!treeOpen && (
-                <Button variant="ghost" size="icon-xs" onClick={() => setTreeOpen(true)} aria-label="展开组织架构">
-                  <PanelLeftOpen />
-                </Button>
-              )}
-              <CardTitle className="truncate text-sm">{scopeLabel}</CardTitle>
-              <Badge variant="secondary" className="font-mono">
-                {page?.total ?? 0}
-              </Badge>
-              {deptKey !== ALL_KEY && deptKey !== UNASSIGNED_KEY && (
-                <span className="hidden text-xs text-muted-foreground sm:inline">{includeChildren ? "含下级部门" : "仅直属成员"}</span>
-              )}
-            </div>
-          </CardHeader>
           <CardContent>
             {usersQuery.isPlaceholderData && <QueryPlaceholderNotice label="用户列表" />}
             {usersQuery.isError && (!usersQuery.data || usersForbidden) ? (
-              <QueryErrorState error={usersQuery.error} label="用户列表" onRetry={() => void usersQuery.refetch()} retrying={usersQuery.isFetching} />
+              <div className="space-y-3.5">
+                {tableHeading}
+                <QueryErrorState error={usersQuery.error} label="用户列表" onRetry={() => void usersQuery.refetch()} retrying={usersQuery.isFetching} />
+              </div>
             ) : <DataTable
+              toolbarTitle={tableHeading}
               columns={columns}
               data={page?.items ?? []}
               loading={usersQuery.isLoading}
@@ -602,7 +606,7 @@ export default function UsersPage() {
                 ) : null
               : undefined}
               emptyTitle={filtersActive ? "没有符合条件的人员" : "还没有用户"}
-              emptyDescription={filtersActive ? "调整筛选条件或切换左侧部门后再试" : "新建第一位成员，或在「目录同步」中从 AD / LDAP 自动导入"}
+              emptyDescription={filtersActive ? "调整筛选条件或切换左侧部门后再试" : "新建第一位成员，或在「身份源集成」中从 AD / LDAP 自动导入"}
               emptyAction={
                 filtersActive ? (
                   <Button variant="outline" size="sm" onClick={resetFilters}>
