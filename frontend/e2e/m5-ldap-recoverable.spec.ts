@@ -202,7 +202,7 @@ async function installMocks(page: Page) {
 
 test("LDAP sync uses a reviewed plan and restores persisted progress after reload", async ({
   page,
-}) => {
+}, testInfo) => {
   const mocks = await installMocks(page);
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -220,7 +220,7 @@ test("LDAP sync uses a reviewed plan and restores persisted progress after reloa
   await expect(preview.getByText(/影响总数 10，明细按页读取/)).toBeVisible();
   if (process.env.M5_CAPTURE === "1") {
     await page.screenshot({
-      path: "/private/tmp/infranexus-m5-ldap-preview.png",
+      path: testInfo.outputPath("infranexus-m5-ldap-preview.png"),
       fullPage: false,
     });
   }
@@ -257,7 +257,7 @@ test("LDAP sync uses a reviewed plan and restores persisted progress after reloa
   expect(pageErrors).toEqual([]);
   if (process.env.M5_CAPTURE === "1") {
     await page.screenshot({
-      path: "/private/tmp/infranexus-m5-ldap-restored-task.png",
+      path: testInfo.outputPath("infranexus-m5-ldap-restored-task.png"),
       fullPage: false,
     });
   }
