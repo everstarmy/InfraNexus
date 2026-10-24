@@ -230,3 +230,21 @@ func TestDepartmentDeleteIsBlockedByChildrenAndMembers(t *testing.T) {
 	expectCode(t, call(t, app, "GET", "/api/v1/departments/"+rd.ID.String(), bearer, nil), 404, response.CodeDepartmentNotFound)
 	createDept(t, app, bearer, "研发中心", "rd", nil)
 }
+
+func TestDeletingDepartmentLeaderClearsLeaderReference(t *testing.T) {
+	_, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	leader := createLocalUser(t, app, bearer, "leader-to-remove", nil)
+	dept := createDept(t, app, bearer, "负责人清理", "leader-clean", nil)
+	update := map[string]any{"name": dept.Name, "code": dept.Code, "status": 1, "leader_id": leader.ID, "expected_revision": deptRevision(t, app, bearer)}
+	expectCode(t, call(t, app, "PUT", "/api/v1/departments/"+dept.ID.String(), bearer, update), 200, response.CodeSuccess)
+
+	expectCode(t, call(t, app, "DELETE", "/api/v1/users/"+leader.ID.String(), bearer, nil), 200, response.CodeSuccess)
+	node := findDept(deptTree(t, app, bearer), dept.ID)
+	if node == nil || node.LeaderID != nil || node.LeaderName != "" {
+		t.Fatalf("deleted leader still referenced: %+v", node)
+	}
+	update = map[string]any{"name": "负责人清理-改名", "code": dept.Code, "status": 1, "expected_revision": deptRevision(t, app, bearer)}
+	expectCode(t, call(t, app, "PUT", "/api/v1/departments/"+dept.ID.String(), bearer, update), 200, response.CodeSuccess)
+}

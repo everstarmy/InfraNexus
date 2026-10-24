@@ -102,8 +102,8 @@ func (r *userRepository) Search(ctx context.Context, f domain.UserFilter) ([]dom
 	query := r.DB(ctx).Model(&domain.User{})
 
 	if f.Keyword != "" {
-		likePattern := "%" + f.Keyword + "%"
-		query = query.Where("users.username LIKE ? OR users.email LIKE ? OR users.nickname LIKE ?", likePattern, likePattern, likePattern)
+		like := containsPattern(f.Keyword)
+		query = query.Where(`LOWER(users.username) LIKE LOWER(?) ESCAPE '\' OR LOWER(users.email) LIKE LOWER(?) ESCAPE '\' OR LOWER(users.nickname) LIKE LOWER(?) ESCAPE '\'`, like, like, like)
 	}
 	if len(f.Statuses) > 0 {
 		query = query.Where("users.status IN ?", f.Statuses)

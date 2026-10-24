@@ -258,7 +258,7 @@ export default function PermissionsPage() {
         description="维护菜单、操作按钮与接口三级权限点；接口权限由服务端在每次请求时强制鉴权"
         badge={
           <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300">
-            <span className="size-1.5 rounded-full bg-violet-500 animate-pulse" />
+            <span className="size-1.5 rounded-full bg-violet-500" />
             RBAC 细粒度权限模型
           </span>
         }
@@ -294,6 +294,12 @@ export default function PermissionsPage() {
           {queryUnavailable ? (
             <QueryErrorState error={query.error} label="权限树" onRetry={() => void query.refetch()} retrying={query.isFetching} />
           ) : <DataTable
+            toolbarTitle={
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="truncate text-sm font-medium">权限树</h2>
+                <Badge variant="secondary" className="font-mono">{flat.length}</Badge>
+              </div>
+            }
             columns={columns}
             data={tree}
             loading={query.isLoading}

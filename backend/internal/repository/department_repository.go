@@ -104,3 +104,9 @@ func (r *departmentRepository) Reorder(ctx context.Context, items []domain.Depar
 	}
 	return nil
 }
+
+func (r *departmentRepository) ClearLeader(ctx context.Context, userID uuid.UUID) error {
+	return r.DB(ctx).Model(&domain.Department{}).
+		Where("leader_id = ?", userID).
+		Updates(map[string]any{"leader_id": nil, "edit_revision": gorm.Expr("edit_revision + 1")}).Error
+}

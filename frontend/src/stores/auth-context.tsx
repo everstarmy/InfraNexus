@@ -3,6 +3,7 @@ import { authService, type CurrentUser } from "@/services/auth"
 import type { UserPreferences } from "@/services/types"
 import { getErrorStatus } from "@/lib/api-error"
 import { hasPermission } from "@/lib/permissions"
+import { notify } from "@/lib/notify"
 import { useQueryClient } from "@tanstack/react-query"
 
 interface AuthContextType {
@@ -74,8 +75,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [checkAuth])
 
   useEffect(() => {
-    window.addEventListener("infranexus:unauthorized", clearSensitiveState)
-    return () => window.removeEventListener("infranexus:unauthorized", clearSensitiveState)
+    const onUnauthorized = () => {
+      // Explain the redirect only when an active session was lost, not for the
+      // initial anonymous profile probe.
+      if (userRef.current) notify.warning("登录已失效", "会话已过期或已在其他位置退出，请重新登录")
+      clearSensitiveState()
+    }
+    window.addEventListener("infranexus:unauthorized", onUnauthorized)
+    return () => window.removeEventListener("infranexus:unauthorized", onUnauthorized)
   }, [clearSensitiveState])
 
   // Revalidate permissions without switching ProtectedRoute to its loading screen.

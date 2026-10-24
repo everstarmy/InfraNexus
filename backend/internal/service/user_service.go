@@ -245,9 +245,8 @@ func (s *userService) DeleteUser(ctx context.Context, actorID, id uuid.UUID) err
 	if user.BuiltIn {
 		return coreerrors.ErrBuiltinProtected
 	}
-	if user.DepartmentID == nil {
-		return s.userRepo.Delete(ctx, id)
-	}
+	// Departments may reference the user as leader regardless of membership, so
+	// the deletion and leader cleanup share one organization write.
 	_, err = s.organization.Write(ctx, nil, func(txctx context.Context) error {
 		current, err := s.userRepo.GetByID(txctx, id)
 		if err != nil {
@@ -258,6 +257,9 @@ func (s *userService) DeleteUser(ctx context.Context, actorID, id uuid.UUID) err
 		}
 		if current.BuiltIn {
 			return coreerrors.ErrBuiltinProtected
+		}
+		if err := s.deptRepo.ClearLeader(txctx, id); err != nil {
+			return err
 		}
 		return s.userRepo.Delete(txctx, id)
 	})

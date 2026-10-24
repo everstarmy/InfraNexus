@@ -48,6 +48,8 @@ export function RoleFormDialog({ open, role, onOpenChange }: { open: boolean; ro
       notify.success(editing ? "角色已更新" : "角色已创建", res.data.name)
       void queryClient.invalidateQueries({ queryKey: ["roles"] })
       void queryClient.invalidateQueries({ queryKey: ["options"] })
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      if (editing) void queryClient.invalidateQueries({ queryKey: ["users"] })
       onOpenChange(false)
     },
     onError: (err) => setError(getErrorMessage(err, editing ? "更新角色失败" : "创建角色失败")),

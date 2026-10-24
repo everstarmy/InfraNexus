@@ -30,7 +30,8 @@ func doAuth(t *testing.T, app *fiber.App, method, path, body, origin, bearer str
 	if cookie != nil {
 		req.AddCookie(cookie)
 	}
-	res, err := app.Test(req)
+	// Real password hashing under -race can exceed Fiber's one-second default on CI.
+	res, err := app.Test(req, fiber.TestConfig{Timeout: 5 * time.Second, FailOnTimeout: true})
 	if err != nil {
 		t.Fatal(err)
 	}

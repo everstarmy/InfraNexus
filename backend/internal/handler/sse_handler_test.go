@@ -65,6 +65,17 @@ func TestWriteSSERejectsMetadataAndPayloadInjection(t *testing.T) {
 	if !strings.Contains(output.String(), "id: 123-0\nevent: ldap.sync.progress\ndata: {\"completed\":1}") {
 		t.Fatalf("valid event encoding = %q", output.String())
 	}
+
+	output.Reset()
+	if err := writeSSE(writer, "124-0", "ldap.sync.progress", []byte("{\n  \"completed\": 2\n}")); err != nil {
+		t.Fatalf("writeSSE() rejected indented JSON: %v", err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); got != "id: 124-0\nevent: ldap.sync.progress\ndata: {\"completed\":2}\n\n" {
+		t.Fatalf("indented payload was not compacted onto one data line: %q", got)
+	}
 }
 
 func TestSSEStreamStopsAndClosesSocketOnApplicationCancellation(t *testing.T) {

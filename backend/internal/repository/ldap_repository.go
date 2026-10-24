@@ -56,8 +56,20 @@ func (r *ldapRepository) SaveConfig(ctx context.Context, cfg *domain.LDAPConfig)
 	).Updates(cfg).Error
 }
 
-func (r *ldapRepository) DeleteConfig(ctx context.Context, id uuid.UUID) error {
-	return r.DB(ctx).Delete(&domain.LDAPConfig{}, "id = ?", id).Error
+func (r *ldapRepository) DeleteConfig(ctx context.Context, id uuid.UUID, now time.Time) error {
+	result := r.DB(ctx).
+		Where("id = ? AND NOT (sync_status = ? AND sync_lease_expires_at IS NOT NULL AND sync_lease_expires_at > ?)", id, domain.SyncStatusRunning, now).
+		Delete(&domain.LDAPConfig{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		if _, err := r.GetConfig(ctx, id); err != nil {
+			return err
+		}
+		return domain.ErrDirectorySyncActive
+	}
+	return nil
 }
 
 func (r *ldapRepository) TryAcquireSync(ctx context.Context, id, taskID uuid.UUID, configRevision, now, leaseExpiresAt time.Time) (bool, error) {

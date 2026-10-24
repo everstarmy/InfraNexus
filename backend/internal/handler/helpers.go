@@ -35,10 +35,17 @@ func currentPrincipal(c fiber.Ctx) (*domain.Principal, error) {
 	return p, nil
 }
 
+const maxPage = 1_000_000
+
 func pageParams(c fiber.Ctx, defaultSize int) (int, int) {
 	page, err := strconv.Atoi(c.Query("page", "1"))
 	if err != nil || page < 1 {
 		page = 1
+	}
+	// Keep (page-1)*size far from integer overflow, which would otherwise turn
+	// into a negative offset and silently return the first page.
+	if page > maxPage {
+		page = maxPage
 	}
 	size, err := strconv.Atoi(c.Query("page_size", strconv.Itoa(defaultSize)))
 	if err != nil || size < 1 {

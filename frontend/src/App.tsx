@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { routePages } from "@/routing/pages"
+import { RouteError } from "@/routing/route-error"
 import { RoutePage, RoutePageSkeleton } from "@/routing/route-page"
 import ForbiddenPage from "@/pages/errors/forbidden"
 
@@ -17,7 +18,7 @@ const LoginPage = lazy(() => import("@/pages/auth/login"))
 
 function PageLoader() {
   return (
-    <div className="flex h-64 w-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+    <div className="flex min-h-svh w-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
       <Spinner className="size-5 text-primary" />
       正在加载模块…
     </div>
@@ -91,9 +92,10 @@ export default function App() {
 }
 
 const router = createBrowserRouter([
-  { path: "/login", element: <Suspense fallback={<PageLoader />}><LoginPage /></Suspense> },
+  { path: "/login", element: <Suspense fallback={<PageLoader />}><LoginPage /></Suspense>, errorElement: <RouteError fullscreen /> },
   {
     path: "/",
+    errorElement: <RouteError fullscreen />,
     element: (
       <ProtectedRoute>
         <AdminLayout />
@@ -105,6 +107,7 @@ const router = createBrowserRouter([
         const { Page } = routePages[item.url as keyof typeof routePages]
         return {
           path: item.url.replace(/^\//, ""),
+          errorElement: <RouteError />,
           element: (
             <RequirePermission code={item.permission}>
               <Suspense fallback={<RoutePageSkeleton />}>

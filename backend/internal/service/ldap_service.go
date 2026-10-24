@@ -264,7 +264,16 @@ func (s *ldapService) DeleteConfig(ctx context.Context, id uuid.UUID) error {
 	if _, err := s.GetConfig(ctx, id); err != nil {
 		return err
 	}
-	return s.Repo.DeleteConfig(ctx, id)
+	// A running task keeps writing accounts into this domain; deleting the
+	// configuration underneath it would orphan them.
+	err := s.Repo.DeleteConfig(ctx, id, s.now())
+	switch {
+	case errors.Is(err, domain.ErrDirectorySyncActive):
+		return coreerrors.ErrSyncInProgress.WithMessage("该目录正在同步，请等待同步结束后再删除配置")
+	case err != nil:
+		return notFoundAs(err, coreerrors.ErrDirectoryConfigNotFound)
+	}
+	return nil
 }
 
 func (s *ldapService) bindPassword(cfg *domain.LDAPConfig) (string, error) {

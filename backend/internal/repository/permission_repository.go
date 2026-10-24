@@ -43,16 +43,30 @@ func BuildPermissionTree(ordered []domain.Permission) []domain.Permission {
 		}
 		children[*p.ParentID] = append(children[*p.ParentID], p)
 	}
+	visited := make(map[uuid.UUID]bool, len(ordered))
 	var attach func(nodes []domain.Permission) []domain.Permission
 	attach = func(nodes []domain.Permission) []domain.Permission {
-		out := make([]domain.Permission, len(nodes))
-		for i, node := range nodes {
+		out := make([]domain.Permission, 0, len(nodes))
+		for _, node := range nodes {
+			if visited[node.ID] {
+				continue
+			}
+			visited[node.ID] = true
 			node.Children = attach(children[node.ID])
-			out[i] = node
+			out = append(out, node)
 		}
 		return out
 	}
-	return attach(roots)
+	tree := attach(roots)
+	// Concurrent re-parenting can leave a parent cycle that no root reaches.
+	// Surface those nodes as roots instead of silently dropping them.
+	for _, p := range ordered {
+		if !visited[p.ID] {
+			p.ParentID = nil
+			tree = append(tree, attach([]domain.Permission{p})...)
+		}
+	}
+	return tree
 }
 
 func (r *permissionRepository) GetByRoleID(ctx context.Context, roleID uuid.UUID) ([]domain.Permission, error) {

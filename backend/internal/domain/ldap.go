@@ -138,6 +138,7 @@ var (
 	ErrDirectoryUnavailable        = errors.New("directory: server unavailable")
 	ErrDirectoryBindFailed         = errors.New("directory: service account bind failed")
 	ErrDirectoryInvalidCredentials = errors.New("directory: invalid user credentials")
+	ErrDirectorySyncActive         = errors.New("directory: sync lease is active")
 	ErrDirectoryAccountDisabled    = errors.New("directory: account disabled")
 )
 
@@ -271,7 +272,9 @@ type LDAPRepository interface {
 	GetConfigByDomain(ctx context.Context, domainName string) (*LDAPConfig, error)
 	CreateConfig(ctx context.Context, cfg *LDAPConfig) error
 	SaveConfig(ctx context.Context, cfg *LDAPConfig) error
-	DeleteConfig(ctx context.Context, id uuid.UUID) error
+	// DeleteConfig removes the configuration unless a sync lease is still active
+	// at now; it returns ErrDirectorySyncActive in that case.
+	DeleteConfig(ctx context.Context, id uuid.UUID, now time.Time) error
 	TryAcquireSync(ctx context.Context, id, taskID uuid.UUID, configRevision, now, leaseExpiresAt time.Time) (bool, error)
 	CreateSyncTask(ctx context.Context, configID uuid.UUID, configRevision, now, leaseExpiresAt time.Time, log *LDAPSyncLog) (bool, error)
 	RenewSyncLease(ctx context.Context, id, taskID uuid.UUID, now, leaseExpiresAt time.Time) (bool, error)

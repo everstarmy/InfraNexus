@@ -55,7 +55,7 @@ async function mountTable(
 }
 
 for (const width of [390, 1440]) {
-  test(`toolbar separates header and search slots at ${width}px`, async ({ page }) => {
+  test(`toolbar separates header and search slots at ${width}px`, async ({ page }, testInfo) => {
     const errors: string[] = []
     page.on("pageerror", (error) => errors.push(error.message))
     await page.setViewportSize({ width, height: 900 })
@@ -86,7 +86,7 @@ for (const width of [390, 1440]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await expect(page.locator("vite-error-overlay")).toHaveCount(0)
     expect(errors).toEqual([])
-    await page.screenshot({ path: `/tmp/infranexus-toolbar-v2-${width}.png` })
+    await page.screenshot({ path: testInfo.outputPath(`infranexus-toolbar-v2-${width}.png`) })
   })
 }
 

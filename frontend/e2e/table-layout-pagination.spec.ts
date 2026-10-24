@@ -62,7 +62,7 @@ async function assertTableFills(page: Page) {
 }
 
 for (const path of ["/roles", "/users"]) {
-  test(`${path} fills wide canvases and hides one-page jump`, async ({ page }) => {
+  test(`${path} fills wide canvases and hides one-page jump`, async ({ page }, testInfo) => {
     const errors: string[] = []
     page.on("pageerror", (error) => errors.push(error.message))
     page.on("console", (message) => { if (message.type() === "error" || message.type() === "warning") errors.push(message.text()) })
@@ -77,7 +77,7 @@ for (const path of ["/roles", "/users"]) {
       await expect(page.getByText("第 1 / 1 页", { exact: true })).toBeVisible()
       await expect(page.getByRole("spinbutton", { name: "跳转页码" })).toHaveCount(0)
       await assertTableFills(page)
-      if (width === 2560) await page.screenshot({ path: `/private/tmp/infranexus-table-${path.slice(1)}-wide.png` })
+      if (width === 2560) await page.screenshot({ path: testInfo.outputPath(`infranexus-table-${path.slice(1)}-wide.png`) })
     }
     expect(errors).toEqual([])
   })
@@ -143,7 +143,7 @@ test("users keep column sizing, visibility and pinned columns usable", async ({ 
   expect(Math.abs(geometry.action - geometry.right)).toBeLessThanOrEqual(1)
 })
 
-test("compact lists and pagination stay inside the mobile viewport", async ({ page }) => {
+test("compact lists and pagination stay inside the mobile viewport", async ({ page }, testInfo) => {
   await mockLists(page, 45)
   await page.setViewportSize({ width: 375, height: 812 })
   for (const path of ["/roles", "/users"]) {
@@ -153,7 +153,7 @@ test("compact lists and pagination stay inside the mobile viewport", async ({ pa
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
   }
   await page.getByRole("spinbutton", { name: "跳转页码" }).scrollIntoViewIfNeeded()
-  await page.screenshot({ path: "/private/tmp/infranexus-table-mobile.png" })
+  await page.screenshot({ path: testInfo.outputPath("infranexus-table-mobile.png") })
 })
 
 test("pinning a new column replaces the previous business column", async ({ page }) => {
@@ -195,7 +195,7 @@ test("empty lists preserve the visible column count without a jump control", asy
 })
 
 
-test("column settings support continuous edits, search and reset", async ({ page }) => {
+test("column settings support continuous edits, search and reset", async ({ page }, testInfo) => {
   await mockLists(page)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto("/users")
@@ -211,7 +211,7 @@ test("column settings support continuous edits, search and reset", async ({ page
   await page.getByRole("button", { name: "恢复默认", exact: true }).click()
   await expect(page.getByRole("checkbox", { name: "显示来源", exact: true })).toBeChecked()
   await expect(page.getByRole("checkbox", { name: "显示创建时间", exact: true })).not.toBeChecked()
-  await page.screenshot({ path: "/private/tmp/infranexus-column-settings-after.png" })
+  await page.screenshot({ path: testInfo.outputPath("infranexus-column-settings-after.png") })
 })
 
 test("external search resets and unsupported server sorting is unavailable", async ({ page }) => {
@@ -224,7 +224,7 @@ test("external search resets and unsupported server sorting is unavailable", asy
 })
 
 
-test("column panel fits mobile and narrow tables release data pinning", async ({ page }) => {
+test("column panel fits mobile and narrow tables release data pinning", async ({ page }, testInfo) => {
   await mockLists(page)
   await page.setViewportSize({ width: 375, height: 812 })
   await page.goto("/users")
@@ -236,7 +236,7 @@ test("column panel fits mobile and narrow tables release data pinning", async ({
   expect(box!.x).toBeGreaterThanOrEqual(0)
   expect(box!.x + box!.width).toBeLessThanOrEqual(375)
   await expect(page.getByRole("button", { name: "用户固定左侧", exact: true })).toHaveAttribute("aria-pressed", "true")
-  await page.screenshot({ path: "/private/tmp/infranexus-column-settings-mobile.png" })
+  await page.screenshot({ path: testInfo.outputPath("infranexus-column-settings-mobile.png") })
   await page.keyboard.press("Escape")
   await expect(panel).toBeHidden()
   const name = page.getByRole("columnheader").filter({ has: page.locator('[aria-label="调整username列宽"]') })
@@ -244,7 +244,7 @@ test("column panel fits mobile and narrow tables release data pinning", async ({
 })
 
 
-test("pin icon groups replace either side and allow clearing", async ({ page }) => {
+test("pin icon groups replace either side and allow clearing", async ({ page }, testInfo) => {
   await mockLists(page)
   await page.goto("/users")
   await page.getByRole("button", { name: "自定义显示列和固定列" }).click()
@@ -262,10 +262,10 @@ test("pin icon groups replace either side and allow clearing", async ({ page }) 
   await pin("来源不固定").click()
   await expect(pin("来源不固定")).toHaveAttribute("aria-pressed", "true")
   await expect(page.getByRole("dialog")).toBeVisible()
-  await page.screenshot({ path: "/private/tmp/infranexus-column-pin-icons.png" })
+  await page.screenshot({ path: testInfo.outputPath("infranexus-column-pin-icons.png") })
 })
 
-test("department members separate title controls from filters", async ({ page }) => {
+test("department members separate title controls from filters", async ({ page }, testInfo) => {
   await mockLists(page)
   await page.route("**/api/v1/departments/tree", route => route.fulfill({ json: {
     code: 200000, message: "success", request_id: "department-toolbar",
@@ -289,13 +289,13 @@ test("department members separate title controls from filters", async ({ page })
   expect((await toggle.boundingBox())!.y).toBeGreaterThan(b.y + b.height)
   await toggle.click()
   await expect(toggle).not.toBeChecked()
-  await page.screenshot({ path: "/private/tmp/infranexus-department-toolbar.png" })
+  await page.screenshot({ path: testInfo.outputPath("infranexus-department-toolbar.png") })
   await page.setViewportSize({ width: 375, height: 812 })
   await expect(refresh).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
 })
 
-test("users keep scope title and table controls together above filters", async ({ page }) => {
+test("users keep scope title and table controls together above filters", async ({ page }, testInfo) => {
   const errors: string[] = []
   page.on("pageerror", error => errors.push(error.message))
   await mockLists(page)
@@ -304,7 +304,7 @@ test("users keep scope title and table controls together above filters", async (
     await page.setViewportSize({ width, height: 1000 })
     const table = page.locator('[data-slot="data-table"]')
     await expect(table.getByText("table-user-1", { exact: true })).toBeVisible()
-    await page.screenshot({ path: `/tmp/infranexus-users-header-${width}.png`, fullPage: true })
+    await page.screenshot({ path: testInfo.outputPath(`infranexus-users-header-${width}.png`), fullPage: true })
     const header = table.locator('[data-slot="data-table-header"]')
     const title = header.getByText("全部人员", { exact: true })
     await expect(title).toBeVisible()

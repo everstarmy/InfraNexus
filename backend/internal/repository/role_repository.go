@@ -43,8 +43,8 @@ func (r *roleRepository) Search(ctx context.Context, keyword string, page, pageS
 	var total int64
 	query := r.DB(ctx).Model(&domain.Role{})
 	if keyword != "" {
-		like := "%" + keyword + "%"
-		query = query.Where("roles.code LIKE ? OR roles.name LIKE ?", like, like)
+		like := containsPattern(keyword)
+		query = query.Where(`LOWER(roles.code) LIKE LOWER(?) ESCAPE '\' OR LOWER(roles.name) LIKE LOWER(?) ESCAPE '\'`, like, like)
 	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
