@@ -1,5 +1,45 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { AuthSourceBadge, BuiltinBadge } from "@/components/common/badges"
+import { useConfirm } from "@/components/common/confirm-dialog"
+import { departmentPathLabel } from "@/components/common/department-select"
+import { ALL_KEY, DepartmentTree, UNASSIGNED_KEY } from "@/components/common/department-tree"
+import { PageHeader } from "@/components/common/page-header"
+import {
+  QueryErrorState,
+  QueryPlaceholderNotice,
+  isForbiddenQueryError,
+} from "@/components/common/query-error-state"
+import { StatCard, StatGrid } from "@/components/common/stat-card"
+import { UserAvatar } from "@/components/common/user-avatar"
+import {
+  DataTable,
+  createSelectColumn,
+  type ColumnDef,
+  type FacetedFilterConfig,
+} from "@/components/data-table"
+import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { toast } from "@/components/ui/toast"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useDebouncedValue } from "@/hooks/use-debounced-value"
+import { formatCompact, formatDateTime, formatPercent, formatRelative } from "@/lib/format"
+import { notify } from "@/lib/notify"
+import { queryKeys } from "@/lib/query-keys"
+import { cn } from "@/lib/utils"
+import { optionsService } from "@/services/options"
+import type { PageData, UserDTO } from "@/services/types"
+import { usersService, type UserListParams } from "@/services/users"
+import { useAuth } from "@/stores/auth-context"
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PaginationState, SortingState } from "@tanstack/react-table"
 import {
@@ -18,48 +58,18 @@ import {
   UserCheck,
   UserPlus,
   UserRoundPen,
-  Users,
   UserX,
+  Users,
 } from "lucide-react"
-import { DataTable, createSelectColumn, type ColumnDef, type FacetedFilterConfig } from "@/components/data-table"
-import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import { toast } from "@/components/ui/toast"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { AuthSourceBadge, BuiltinBadge, StatusDot } from "@/components/common/badges"
-import { useConfirm } from "@/components/common/confirm-dialog"
-import { departmentPathLabel } from "@/components/common/department-select"
-import { ALL_KEY, DepartmentTree, UNASSIGNED_KEY } from "@/components/common/department-tree"
-import { PageHeader } from "@/components/common/page-header"
-import { QueryErrorState, QueryPlaceholderNotice, isForbiddenQueryError } from "@/components/common/query-error-state"
-import { StatCard, StatGrid } from "@/components/common/stat-card"
-import { UserAvatar } from "@/components/common/user-avatar"
-import { InlineUserNickname } from "./components/inline-user-nickname"
-import { useDebouncedValue } from "@/hooks/use-debounced-value"
-import { formatCompact, formatDateTime, formatPercent, formatRelative } from "@/lib/format"
-import { notify } from "@/lib/notify"
-import { queryKeys } from "@/lib/query-keys"
-import { cn } from "@/lib/utils"
-import { optionsService } from "@/services/options"
-import type { PageData, UserDTO } from "@/services/types"
-import { usersService, type UserListParams } from "@/services/users"
-import { useAuth } from "@/stores/auth-context"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { AssignRolesDialog } from "./components/assign-roles-dialog"
+import { InlineUserNickname } from "./components/inline-user-nickname"
 import { MoveDepartmentDialog } from "./components/move-department-dialog"
 import { ResetPasswordDialog } from "./components/reset-password-dialog"
 import { UserDetailSheet } from "./components/user-detail-sheet"
 import { UserFormDialog } from "./components/user-form-dialog"
+import { StatusCell } from "./components/user-status-cell"
 
 const columnLabels = {
   username: "用户",
@@ -661,48 +671,5 @@ export default function UsersPage() {
         onDelete={handleDelete}
       />
     </>
-  )
-}
-
-function StatusCell({
-  user,
-  meId,
-  canToggle,
-  stale,
-  onToggle,
-}: {
-  user: UserDTO
-  meId?: string
-  canToggle: boolean
-  stale: boolean
-  onToggle: (user: UserDTO, enabled: boolean) => Promise<void>
-}) {
-  const [pending, setPending] = useState(false)
-  const reason = user.id === meId ? "不能停用当前登录账号" : user.built_in ? "内置管理员账号不可停用" : !canToggle ? "没有启停账号的权限" : ""
-  const active = user.status === 1
-  const control = (
-    <div className="flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
-      <Switch
-        checked={active}
-        disabled={pending || !!reason || stale}
-        aria-label={active ? "停用账号" : "启用账号"}
-        onCheckedChange={async (checked) => {
-          setPending(true)
-          try {
-            await onToggle(user, checked)
-          } finally {
-            setPending(false)
-          }
-        }}
-      />
-      <StatusDot active={active} />
-    </div>
-  )
-  if (!reason || user.status !== 1) return control
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<div className="inline-flex" />}>{control}</TooltipTrigger>
-      <TooltipContent>{reason}</TooltipContent>
-    </Tooltip>
   )
 }

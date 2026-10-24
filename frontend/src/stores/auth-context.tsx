@@ -26,6 +26,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [authError, setAuthError] = useState<string | null>(null)
   const userRef = React.useRef<CurrentUser | null>(null)
   const generation = React.useRef(0)
+  const backgroundRefresh = React.useRef(false)
+  const lastRefresh = React.useRef(0)
   userRef.current = user
 
   const clearSensitiveState = useCallback(() => {
@@ -53,6 +55,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       userRef.current = res.data
       setUser(res.data)
       setAuthError(null)
+      lastRefresh.current = Date.now()
       return true
     } catch (error) {
       if (currentGeneration !== generation.current) return false
@@ -75,9 +78,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => window.removeEventListener("infranexus:unauthorized", clearSensitiveState)
   }, [clearSensitiveState])
 
+  // Revalidate permissions without switching ProtectedRoute to its loading screen.
+  useEffect(() => {
+    const refresh = async () => {
+      if (!userRef.current || document.visibilityState === "hidden" || backgroundRefresh.current || Date.now() - lastRefresh.current < 5000) return
+      const currentGeneration = generation.current
+      lastRefresh.current = Date.now()
+      backgroundRefresh.current = true
+      try {
+        const res = await authService.getProfile()
+        if (currentGeneration !== generation.current) return
+        if (res.data.id !== userRef.current?.id) {
+          clearSensitiveState()
+          return
+        }
+        userRef.current = res.data
+        setUser(res.data)
+      } catch (error) {
+        if (currentGeneration === generation.current && getErrorStatus(error) === 401) clearSensitiveState()
+      } finally {
+        backgroundRefresh.current = false
+      }
+    }
+    const onVisible = () => { if (document.visibilityState === "visible") void refresh() }
+    const onRefresh = () => { void refresh() }
+    window.addEventListener("focus", onRefresh)
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("infranexus:permissions-stale", onRefresh)
+    return () => {
+      window.removeEventListener("focus", onRefresh)
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("infranexus:permissions-stale", onRefresh)
+    }
+  }, [clearSensitiveState])
+
   const login = useCallback((value: CurrentUser) => {
     if (userRef.current && userRef.current.id !== value.id) queryClient.clear()
     generation.current += 1
+    lastRefresh.current = Date.now()
     userRef.current = value
     setUser(value)
     setAuthError(null)

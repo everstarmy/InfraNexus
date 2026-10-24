@@ -166,7 +166,7 @@ func (r *ldapRepository) ListPlanItems(ctx context.Context, id uuid.UUID, page, 
 }
 
 func (r *ldapRepository) DeleteExpiredPlans(ctx context.Context, now time.Time) (int64, error) {
-	result := r.DB(ctx).Where("expires_at <= ?", now).Delete(&domain.LDAPSyncPlanSnapshot{})
+	result := r.DB(ctx).Unscoped().Where("expires_at <= ?", now).Delete(&domain.LDAPSyncPlanSnapshot{})
 	return result.RowsAffected, result.Error
 }
 

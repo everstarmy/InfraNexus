@@ -90,6 +90,9 @@ func NewCipher(cfg *config.Config, log *slog.Logger) (*secret.Cipher, error) {
 }
 
 func NewAppContainer(cfg *config.Config, log *slog.Logger) (*AppContainer, error) {
+	if err := cfg.ValidateRuntime(); err != nil {
+		return nil, err
+	}
 	if err := validateSecurityConfig(cfg); err != nil {
 		return nil, err
 	}

@@ -259,3 +259,19 @@ npm --prefix frontend run test:perf
 | [发布验证记录](docs/RELEASE_VALIDATION.md) | 分阶段实际结果及历史范围说明 |
 | [AD 测试环境验收](docs/R14_AD_VALIDATION.md) | 真实目录验证与未覆盖范围 |
 | [日志专项验收](docs/BACKEND_LOGGING_VALIDATION.md) | 日志回归、运行环境和输出证据 |
+
+## 脚手架稳定性检查
+
+本轮修复范围和执行状态见 [稳定性方案](docs/SCAFFOLD_STABILIZATION_PLAN.md)、[任务清单](docs/TODOLIST.md)。功能范围冻结，后续以缺陷修复和维护为主。
+
+```sh
+make check
+# 浏览器依赖只需首次安装或升级 Playwright 后安装
+npm --prefix frontend exec -- playwright install chromium
+# 真实前后端 + 代理 + 浏览器；自动创建并回收临时 SQLite，不使用开发数据库
+npm --prefix frontend run test:integration
+```
+
+`make check` 包含后端 race/vet/Go 格式检查、前端 ESLint/类型/单测/构建。完整 `make check-integration` 还要求独立可丢弃的 PostgreSQL/Redis 环境变量，并执行浏览器交互与真实链路；数据库变量与隔离要求见上方测试说明。已有本机 Chrome 可使用 `PW_CHROME_CHANNEL=chrome`。真实链路默认占用 18081（临时后端）和 4175（Vite 代理），不复用已有服务，失败时也清理临时目录。`INFRANEXUS_SMOKE_BASE_URL` 仅用于显式指定独立、可丢弃的测试栈，会创建测试用户并执行退出，不能指向正式环境。CI 定义位于 `.github/workflows/check.yml`，使用独立服务和安装的 Chromium。
+
+就绪探针、可信代理和数据留存策略见 [Docker 部署说明](docs/DOCKER.md)。

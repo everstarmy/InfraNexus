@@ -1,10 +1,39 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useConfirm } from "@/components/common/confirm-dialog";
+import { PageHeader } from "@/components/common/page-header";
 import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+  QueryErrorState,
+  QueryPlaceholderNotice,
+  isForbiddenQueryError,
+} from "@/components/common/query-error-state";
+import { StatCard, StatGrid } from "@/components/common/stat-card";
+import { DataTable, type ColumnDef } from "@/components/data-table";
+import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { formatDateTime, formatRelative } from "@/lib/format";
+import { notify } from "@/lib/notify";
+import { queryKeys } from "@/lib/query-keys";
+import { cn } from "@/lib/utils";
+import {
+  ldapService,
+  type LDAPConfig,
+  type SyncLog,
+  type SyncMode,
+  type SyncPlan,
+} from "@/services/ldap";
+import { optionsService } from "@/services/options";
+import { useAuth } from "@/stores/auth-context";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PaginationState } from "@tanstack/react-table";
 import {
   Building2,
@@ -26,65 +55,10 @@ import {
   Timer,
   Trash2,
 } from "lucide-react";
-import { DataTable, type ColumnDef } from "@/components/data-table";
-import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
-import { useConfirm } from "@/components/common/confirm-dialog";
-import { PageHeader } from "@/components/common/page-header";
-import {
-  QueryErrorState,
-  QueryPlaceholderNotice,
-  isForbiddenQueryError,
-} from "@/components/common/query-error-state";
-import { StatCard, StatGrid } from "@/components/common/stat-card";
-import { formatDateTime, formatRelative } from "@/lib/format";
-import { notify } from "@/lib/notify";
-import { queryKeys } from "@/lib/query-keys";
-import { cn } from "@/lib/utils";
-import {
-  ldapService,
-  type LDAPConfig,
-  type SyncLog,
-  type SyncMode,
-  type SyncPlan,
-} from "@/services/ldap";
-import { optionsService } from "@/services/options";
-import { useAuth } from "@/stores/auth-context";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { LdapConfigSheet, fromConfig } from "./components/ldap-config-sheet";
 import { LdapPreviewDialog } from "./components/ldap-preview-dialog";
+import { LdapTaskDialog } from "./components/ldap-task-dialog";
 import { SyncStatusBadge } from "./components/sync-status";
 
 const strategyLabels = {
@@ -107,7 +81,6 @@ export default function LdapPage() {
   const [previewing, setPreviewing] = useState<LDAPConfig | null>(null);
   const [previewMode, setPreviewMode] = useState<SyncMode>("full");
   const [errorsLog, setErrorsLog] = useState<SyncLog | null>(null);
-  const [errorFilter, setErrorFilter] = useState("");
   const [testing, setTesting] = useState<string | null>(null);
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -160,25 +133,6 @@ export default function LdapPage() {
   const logsForbidden = isForbiddenQueryError(logsQuery.error);
   const logsUnavailable =
     logsQuery.isError && (!logsQuery.data || logsForbidden);
-  const logDetailQuery = useQuery({
-    queryKey: ["ldap", "sync-log", errorsLog?.id],
-    queryFn: async ({ signal }) =>
-      (await ldapService.syncLog(errorsLog!.id, signal)).data,
-    enabled: !!errorsLog,
-    refetchInterval: errorsLog?.status === "running" ? 1500 : false,
-    retry: false,
-  });
-  const detailedLog = logDetailQuery.data;
-  const filteredTaskErrors = useMemo(() => {
-    const errors = detailedLog?.report.errors ?? [];
-    const keyword = errorFilter.trim().toLocaleLowerCase();
-    if (!keyword) return errors;
-    return errors.filter((item) =>
-      `${item.username} ${item.dn} ${item.reason}`
-        .toLocaleLowerCase()
-        .includes(keyword),
-    );
-  }, [detailedLog?.report.errors, errorFilter]);
 
   const invalidate = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["ldap"] });
@@ -486,7 +440,6 @@ export default function LdapPage() {
               size="xs"
               disabled={logsQuery.isPlaceholderData}
               onClick={() => {
-                setErrorFilter("");
                 setErrorsLog(row.original);
               }}
             >
@@ -954,126 +907,8 @@ export default function LdapPage() {
         onOpenChange={(open) => !open && setPreviewing(null)}
         onRun={executePlan}
       />
-      <Dialog
-        open={!!errorsLog}
-        onOpenChange={(open) => !open && setErrorsLog(null)}
-      >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
-              同步任务 · {detailedLog?.domain ?? errorsLog?.domain}
-            </DialogTitle>
-            <DialogDescription>
-              {detailedLog
-                ? `${formatDateTime(detailedLog.started_at, "yyyy-MM-dd HH:mm:ss")} · ${detailedLog.phase}`
-                : errorsLog
-                  ? formatDateTime(errorsLog.started_at, "yyyy-MM-dd HH:mm:ss")
-                  : ""}
-            </DialogDescription>
-          </DialogHeader>
-          {logDetailQuery.isError ? (
-            <QueryErrorState
-              error={logDetailQuery.error}
-              label="同步任务详情"
-              onRetry={() => void logDetailQuery.refetch()}
-              retrying={logDetailQuery.isFetching}
-            />
-          ) : logDetailQuery.isLoading ? (
-            <Skeleton className="h-24 rounded-xl" />
-          ) : (
-            detailedLog && (
-              <>
-                {detailedLog.status === "running" && (
-                  <div
-                    className="rounded-lg border bg-muted/30 px-3 py-2 text-xs"
-                    role="status"
-                  >
-                    已恢复任务快照：
-                    {detailedLog.total === null
-                      ? "正在计算计划规模"
-                      : `已处理 ${detailedLog.processed} / ${detailedLog.total}`}{" "}
-                    · 新增 {detailedLog.report.created} · 更新{" "}
-                    {detailedLog.report.updated} · 停用{" "}
-                    {detailedLog.report.disabled} · 失败{" "}
-                    {detailedLog.report.failed}
-                  </div>
-                )}
-                {detailedLog.message && (
-                  <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                    {detailedLog.message}
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  共处理 {detailedLog.report.total} 条 · 新增{" "}
-                  {detailedLog.report.created} · 更新{" "}
-                  {detailedLog.report.updated} · 不变{" "}
-                  {detailedLog.report.unchanged} · 停用{" "}
-                  {detailedLog.report.disabled} · 跳过{" "}
-                  {detailedLog.report.skipped} · 失败{" "}
-                  {detailedLog.report.failed}
-                </p>
-                {(detailedLog.status === "partial" ||
-                  detailedLog.status === "failed") &&
-                  can("ldap:sync") &&
-                  canReadPlanItems && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      title="重新读取目录与本地版本生成新计划；核对计划后再执行，不会重放旧写入。"
-                      onClick={() => {
-                        const cfg = configs.find(
-                          (item) => item.id === detailedLog.config_id,
-                        );
-                        if (!cfg) return;
-                        setErrorsLog(null);
-                        openPreview(cfg, detailedLog.mode);
-                      }}
-                    >
-                      <Eye />
-                      重新预览并重试
-                    </Button>
-                  )}
-                {(detailedLog.report.errors?.length ?? 0) > 0 && (
-                  <Input
-                    aria-label="筛选失败明细"
-                    placeholder="按账号、DN 或错误原因筛选"
-                    value={errorFilter}
-                    onChange={(event) => setErrorFilter(event.target.value)}
-                  />
-                )}
-                {detailedLog.report.errors_truncated && (
-                  <p className="text-xs text-muted-foreground">
-                    诊断明细仅保留前 200 条；失败总数按完整计划统计。
-                  </p>
-                )}
-              </>
-            )
-          )}
-          <ul className="max-h-80 space-y-1.5 overflow-y-auto">
-            {filteredTaskErrors.map((e, i) => (
-              <li key={i} className="rounded-lg border px-3 py-2">
-                <p className="font-mono text-xs font-medium">
-                  {e.username || "（无用户名）"}
-                </p>
-                <p
-                  className="truncate font-mono text-[11px] text-muted-foreground"
-                  title={e.dn}
-                >
-                  {e.dn}
-                </p>
-                <p className="mt-0.5 text-xs text-destructive">{e.reason}</p>
-              </li>
-            ))}
-            {detailedLog &&
-              (detailedLog.report.errors?.length ?? 0) > 0 &&
-              filteredTaskErrors.length === 0 && (
-                <li className="py-6 text-center text-xs text-muted-foreground">
-                  没有匹配的失败明细
-                </li>
-              )}
-          </ul>
-        </DialogContent>
-      </Dialog>
+      <LdapTaskDialog key={errorsLog?.id ?? "closed"} log={errorsLog} configs={configs} canReadPlanItems={canReadPlanItems}
+        onClose={() => setErrorsLog(null)} onRetry={openPreview} />
     </>
   );
 }

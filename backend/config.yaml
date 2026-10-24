@@ -51,6 +51,7 @@ storage:
     secret_key: ""
 
 security:
+  trusted_proxies: [] # 仅填写受控反向代理 IP/CIDR；直连不信任转发头
   trusted_origins: ["http://localhost:5173", "http://127.0.0.1:5173"]
   login_rate_limit: 10 # 每 IP 每分钟（单进程）
   encryption_key: "infranexus-dev-encryption-key-change-me" # 目录绑定密码 AES-GCM 加密密钥；production 必须替换（APP_SECURITY_ENCRYPTION_KEY）
@@ -74,3 +75,9 @@ logging:
     enabled: true
     slow_threshold_ms: 200 # 0 关闭慢查询事件
     max_sql_length: 4096
+
+# Terminal reports and their idempotency keys remain available for this window.
+retention:
+  enabled: true
+  outbox_days: 30
+  sync_log_days: 90

@@ -518,3 +518,10 @@ RBAC 表示经 Casbin 校验 `(role, 路由模板, Method)`，对应权限编码
 | **SSE** | GET | `/api/v1/sse/notifications` | Session/JWT + 日志读取权限 | Redis Stream 实时事件；支持 `Last-Event-ID`、断档快照恢复与会话/权限复核 |
 
 LDAP 请求字段、冲突语义、敏感明细权限和 SSE 事件负载见 [API 行为与实时事件契约](API.md)。发布验证矩阵与当前可量化限制见 [M6 发布验证记录](RELEASE_VALIDATION.md)。
+
+## 2026-10-24 稳定性维护边界
+
+- 探针遵循 HealthHandler → HealthService → HealthRepository；Repository 持有连接，Service 统一设置时间预算和领域错误，HTTP 边界不直接访问数据库。
+- RetentionRepository 在事务中按主键选择有界批次，Retention worker 属于应用生命周期，关闭时取消。删除只涉及到期的已处理/终态数据，不修改授权 revision，不影响 pending 事件的收敛协议。
+- `bootstrap/directory.go` 集中拥有 LDAP Repository、Service、事件存储与调度器装配/关闭；认证只通过 DirectoryAuthenticator，仪表盘通过 LDAPRepository 读取。当前保持所有路由与种子权限；裁剪模块仍须同步检查认证注入、仪表盘目录摘要、SSE 路由与权限种子、前端导航及目录入口，不能只关闭 scheduler 就视为完成模块移除。
+- LDAP 任务诊断查询与筛选由 `ldap-task-dialog` 管理；部门成员列为独立静态定义；用户单行 pending 状态由 `user-status-cell` 管理。保持既有请求、缓存键、权限与并发编辑协议，不以文件长度为目标追加无关重构。

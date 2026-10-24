@@ -1,39 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { StatusDot } from "@/components/common/badges";
+import { useConfirm } from "@/components/common/confirm-dialog";
+import { departmentPathLabel } from "@/components/common/department-select";
+import { DepartmentTree } from "@/components/common/department-tree";
+import { PageHeader } from "@/components/common/page-header";
 import {
-  keepPreviousData,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
-import type { PaginationState } from "@tanstack/react-table";
-import {
-  ArrowDown,
-  ArrowUp,
-  CircleCheck,
-  CircleSlash,
-  FolderInput,
-  FolderPen,
-  FolderPlus,
-  Mail,
-  MoreHorizontal,
-  Network,
-  Phone,
-  Plus,
-  Trash2,
-  UserRound,
-  Users,
-} from "lucide-react";
-import { DataTable, type ColumnDef } from "@/components/data-table";
-import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
+  QueryErrorState,
+  QueryPlaceholderNotice,
+  isForbiddenQueryError,
+} from "@/components/common/query-error-state";
+import { StatCard, StatGrid } from "@/components/common/stat-card";
+import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,31 +31,37 @@ import {
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { AuthSourceBadge, StatusDot } from "@/components/common/badges";
-import { useConfirm } from "@/components/common/confirm-dialog";
-import { departmentPathLabel } from "@/components/common/department-select";
-import { DepartmentTree } from "@/components/common/department-tree";
-import { PageHeader } from "@/components/common/page-header";
-import {
-  QueryErrorState,
-  QueryPlaceholderNotice,
-  isForbiddenQueryError,
-} from "@/components/common/query-error-state";
-import { StatCard, StatGrid } from "@/components/common/stat-card";
-import { UserAvatar } from "@/components/common/user-avatar";
 import { formatPercent } from "@/lib/format";
 import { notify } from "@/lib/notify";
 import { queryKeys } from "@/lib/query-keys";
 import { collectIds, findNode, findPath, flattenTree } from "@/lib/tree";
-import {
-  departmentsService,
-  type DepartmentNode,
-} from "@/services/departments";
-import type { UserDTO } from "@/services/types";
+import { departmentsService, type DepartmentNode } from "@/services/departments";
 import { usersService } from "@/services/users";
 import { useAuth } from "@/stores/auth-context";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { PaginationState } from "@tanstack/react-table";
+import {
+  ArrowDown,
+  ArrowUp,
+  CircleCheck,
+  CircleSlash,
+  FolderInput,
+  FolderPen,
+  FolderPlus,
+  Mail,
+  MoreHorizontal,
+  Network,
+  Phone,
+  Plus,
+  Trash2,
+  UserRound,
+  Users,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DepartmentFormDialog } from "./components/department-form-dialog";
 import { DepartmentMoveDialog } from "./components/department-move-dialog";
+import { memberColumns } from "./components/member-columns";
 
 type FormState =
   | { mode: "create"; parentId: string | null }
@@ -366,75 +351,6 @@ export default function DepartmentsPage() {
     );
   };
 
-  const memberColumns = useMemo<ColumnDef<UserDTO>[]>(
-    () => [
-      {
-        id: "username",
-        accessorKey: "username",
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="成员" />
-        ),
-        enableSorting: false,
-        cell: ({ row }) => {
-          const u = row.original;
-          return (
-            <div className="flex items-center gap-2.5">
-              <UserAvatar
-                name={u.nickname || u.username}
-                seed={u.username}
-                size="sm"
-              />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">
-                  {u.nickname || u.username}
-                </p>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">
-                  {u.username}
-                </p>
-              </div>
-            </div>
-          );
-        },
-      },
-      {
-        id: "department",
-        accessorFn: (u) => u.department?.name ?? "",
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="所在部门" />
-        ),
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="text-sm">
-            {row.original.department?.name ?? "—"}
-          </span>
-        ),
-      },
-      {
-        id: "auth_type",
-        accessorKey: "auth_type",
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="来源" />
-        ),
-        enableSorting: false,
-        cell: ({ row }) => (
-          <AuthSourceBadge
-            authType={row.original.auth_type}
-            domain={row.original.domain}
-          />
-        ),
-      },
-      {
-        id: "status",
-        accessorKey: "status",
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="状态" />
-        ),
-        enableSorting: false,
-        cell: ({ row }) => <StatusDot active={row.original.status === 1} />,
-      },
-    ],
-    [],
-  );
 
   const stats = useMemo(
     () => ({

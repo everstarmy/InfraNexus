@@ -39,6 +39,7 @@ const (
 	CodeDatabaseError            BusinessCode = 500001 // 数据库异常
 	CodeInternalError            BusinessCode = 500002 // 系统未知故障
 	CodeAuthorizationUnavailable BusinessCode = 503001 // 授权状态暂不可用
+	CodeNotReady                 BusinessCode = 503002 // 运行依赖未就绪
 	CodeDirectoryUnavailable     BusinessCode = 502001 // 目录服务不可用
 )
 

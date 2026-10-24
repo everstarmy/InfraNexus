@@ -41,3 +41,24 @@ docker-up:
 
 docker-down:
 	docker compose down
+
+.PHONY: check check-backend check-frontend check-integration
+check: check-backend check-frontend
+
+check-backend:
+	go -C backend test -race -count=1 -p=1 ./...
+	go -C backend vet ./...
+	@test -z "$$(gofmt -l $$(git ls-files 'backend/*.go' 'backend/**/*.go'))"
+
+check-frontend:
+	npm --prefix frontend run lint
+	npm --prefix frontend run typecheck
+	npm --prefix frontend test
+	npm --prefix frontend run build
+
+check-integration:
+	@test -n "$$INFRANEXUS_TEST_POSTGRES_DSN" || (echo 'Set an isolated disposable PostgreSQL DSN'; exit 1)
+	@test -n "$$INFRANEXUS_TEST_REDIS_ADDR" || (echo 'Set an isolated disposable Redis address'; exit 1)
+	go -C backend test -race -count=1 -p=1 ./...
+	npm --prefix frontend run test:e2e
+	npm --prefix frontend run test:integration

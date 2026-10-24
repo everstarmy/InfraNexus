@@ -22,9 +22,13 @@ import (
 
 func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 	fiberApp := fiber.New(fiber.Config{
-		AppName:      app.Config.App.Name,
-		ErrorHandler: errors.GlobalErrorHandler,
-		WriteTimeout: 30 * time.Second,
+		AppName:            app.Config.App.Name,
+		ErrorHandler:       errors.GlobalErrorHandler,
+		WriteTimeout:       30 * time.Second,
+		TrustProxy:         true,
+		ProxyHeader:        "X-Real-IP",
+		EnableIPValidation: true,
+		TrustProxyConfig:   fiber.TrustProxyConfig{Proxies: app.Config.Security.TrustedProxies},
 	})
 	fiberApp.Server().HeaderReceived = func(header *fasthttp.RequestHeader) fasthttp.RequestConfig {
 		if strings.HasPrefix(string(header.RequestURI()), "/api/v1/sse/notifications") {
@@ -58,6 +62,12 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 		return nil, err
 	}
 
+	if app.Config.Retention.Enabled {
+		app.AddBackground(func(ctx context.Context) {
+			service.RunRetention(ctx, repository.NewRetentionRepository(app.DB), app.Config.Retention, app.Logger)
+		})
+	}
+
 	// 3. 数据访问层与业务逻辑层组装 (Dependency Injection)
 	userRepo := repository.NewUserRepository(app.DB)
 	roleRepo := repository.NewRoleRepository(app.DB)
@@ -66,42 +76,25 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 	deptRepo := repository.NewDepartmentRepository(app.DB)
 	organization := repository.NewOrganizationUnitOfWork(app.DB)
 
-	ldapRepo := repository.NewLDAPRepository(app.DB)
-
 	authRepo := repository.NewAuthRepository(app.Redis)
 	authzState := repository.NewAuthorizationStateRepository(app.DB)
 	authzNotifier := repository.NewRedisAuthorizationNotifier(app.Redis)
 	authzSvc := service.NewAuthorizationService(enforcer, roleRepo, permRepo, authzState, authzNotifier, app.Logger)
 	app.AddBackground(authzSvc.Run)
-	eventStore := repository.NewRedisEventStore(app.Redis)
-	ldapSvc := service.NewLDAPService(service.LDAPServiceDeps{
-		Repo:         ldapRepo,
-		Users:        userRepo,
-		Roles:        roleRepo,
-		Departments:  deptRepo,
-		Organization: organization,
-		Gateway:      repository.NewLDAPGateway(),
-		Cipher:       app.Cipher,
-		Events:       eventStore,
-		Logger:       app.Logger,
-	})
-	app.OnClose(ldapSvc.Close)
-	if scheduler := app.Config.Directory.Scheduler; scheduler.Enabled {
-		tick := time.Duration(scheduler.TickSeconds) * time.Second
-		if tick <= 0 {
-			tick = time.Minute
-		}
-		app.AddBackground(func(ctx context.Context) {
-			service.RunDirectoryScheduler(ctx, ldapSvc, tick, app.Logger)
-		})
-	}
+	directory := assembleDirectory(app, userRepo, roleRepo, deptRepo, organization)
+	ldapRepo, ldapSvc, eventStore := directory.repo, directory.service, directory.events
 	authSvc := service.NewAuthService(app.Config, userRepo, authRepo, authzSvc, ldapSvc, app.Logger)
 	userSvc := service.NewUserService(userRepo, roleRepo, deptRepo, organization, authzSvc)
 	roleSvc := service.NewRoleService(roleRepo, permRepo, authzSvc)
 	permSvc := service.NewPermissionService(permRepo, authzSvc, func() ([]domain.RouteInfo, error) { return discoverAPIRoutes(fiberApp) })
 	deptSvc := service.NewDepartmentService(deptRepo, userRepo, organization)
 
+	sqlDB, err := app.DB.DB()
+	if err != nil {
+		return nil, err
+	}
 	registerRoutes(fiberApp, routeDeps{
+		health:  handler.NewHealthHandler(service.NewHealthService(repository.NewHealthRepository(sqlDB, app.Redis, app.Config.App.Env == "production"))),
 		cfg:     app.Config,
 		authSvc: authSvc,
 		casbin: middleware.NewCasbin(middleware.CasbinConfig{

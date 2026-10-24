@@ -212,7 +212,7 @@ test("user tables keep Shift selection page-scoped, expose keyboard sizing, and 
   const rowChecks = page.getByRole("checkbox", { name: "勾选该行；按住 Shift 可连续选择" })
   await rowChecks.nth(0).click()
   await rowChecks.nth(2).click({ modifiers: ["Shift"] })
-  await expect(page.getByRole("region", { name: "批量操作" })).toContainText("已勾选 3 条（当前页）")
+  await expect(page.getByRole("region", { name: "批量操作" })).toContainText("已勾选 3 条")
   await page.getByTitle("下一页").click()
   await expect(page.getByText("第 2 / 2 页")).toBeVisible()
   await expect(page.getByRole("region", { name: "批量操作" })).toHaveCount(0)
@@ -225,7 +225,7 @@ test("user tables keep Shift selection page-scoped, expose keyboard sizing, and 
   await expect(resizeHandle).toHaveAttribute("aria-valuenow", "280")
 
   await page.getByRole("button", { name: "自定义显示列和固定列" }).click()
-  await page.getByRole("menuitem", { name: "最近登录" }).click()
+  await page.getByRole("checkbox", { name: "显示最近登录", exact: true }).click()
   await expect(page.getByRole("columnheader", { name: "最近登录" })).toHaveCount(0)
   const preferenceKey = `infranexus:table:${uuid(900)}:users:v1`
   const savedPreference = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null"), preferenceKey)

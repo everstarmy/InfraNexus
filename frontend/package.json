@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:perf": "npm run build && playwright test --config playwright.perf.config.ts"
+    "test:perf": "npm run build && playwright test --config playwright.perf.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test:integration": "playwright test --config playwright.integration.config.ts",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write src e2e integration"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -53,6 +57,7 @@
     "eslint": "^10",
     "prettier": "^3.9.6",
     "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.0",
     "vite": "^8",
     "vitest": "^5.0.5"
   }

@@ -14,6 +14,8 @@ api.interceptors.response.use(
     const path = error.config?.url || "";
     if (error.response?.status === 401 && !path.includes("/auth/login"))
       window.dispatchEvent(new Event("infranexus:unauthorized"));
+    if (error.response?.status === 403 && !path.startsWith("/auth/"))
+      window.dispatchEvent(new Event("infranexus:permissions-stale"));
     return Promise.reject(error);
   },
 );

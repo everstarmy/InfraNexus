@@ -67,4 +67,3 @@ func NewStorage(cfg *config.Config) (fiber.Storage, error) {
 		return memory.New(), nil
 	}
 }
-

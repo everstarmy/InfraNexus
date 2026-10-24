@@ -160,7 +160,7 @@ async function openPermissionDialog(page: Page, roleName = "审计员 A") {
   await expect(page.getByRole("heading", { name: "角色管理" })).toBeVisible()
   const row = page.getByRole("row").filter({ hasText: roleName })
   await expect(row).toBeVisible()
-  await row.click()
+  await row.getByText(roleName, { exact: true }).click()
   await expect(page.getByRole("dialog")).toBeVisible()
   await expect(page.getByRole("button", { name: "保存授权" })).toBeVisible()
 }
@@ -193,7 +193,7 @@ test("switching roles initializes from the new role's saved permissions", async 
   await expect(page.getByText("已选").locator("..", {}).getByText("1", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "取消" }).click()
 
-  await page.getByRole("row").filter({ hasText: "审计员 B" }).click()
+  await page.getByRole("row").filter({ hasText: "审计员 B" }).getByText("审计员 B", { exact: true }).click()
   await expect(page.getByRole("dialog")).toBeVisible()
   await expect(page.getByText("更新用户", { exact: true })).toBeVisible()
   const readUserCheckbox = page.locator("label").filter({ hasText: "读取用户" }).locator('[role="checkbox"]', {})
@@ -264,7 +264,7 @@ test("dirty permission draft blocks browser back until the user confirms leaving
   await expect(page.getByRole("heading", { name: "角色管理" })).toBeVisible()
   const roleRow = page.getByRole("row").filter({ hasText: "审计员 A" })
   await expect(roleRow).toBeVisible()
-  await roleRow.click()
+  await roleRow.getByText("审计员 A", { exact: true }).click()
   await expect(page.getByRole("dialog", { name: "为「审计员 A」分配权限" })).toBeVisible()
   await page.getByText("更新用户", { exact: true }).click()
   await expect(page.getByText("新增 1 · 移除 0")).toBeVisible()

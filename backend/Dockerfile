@@ -17,5 +17,5 @@ COPY --chown=app:app backend/config.yaml /app/config.yaml
 USER 10001:10001
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget -q -T 2 -O /dev/null "http://127.0.0.1:${APP_APP_PORT:-8080}/api/v1/health" || exit 1
+    CMD wget -q -T 2 -O /dev/null "http://127.0.0.1:${APP_APP_PORT:-8080}/api/v1/ready" || exit 1
 ENTRYPOINT ["/app/server"]

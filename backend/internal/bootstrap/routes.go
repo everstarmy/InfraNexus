@@ -15,6 +15,7 @@ import (
 )
 
 type routeDeps struct {
+	health      *handler.HealthHandler
 	cfg         *config.Config
 	authSvc     domain.AuthService
 	casbin      *middleware.Casbin
@@ -30,6 +31,7 @@ type routeDeps struct {
 }
 
 var publicRoutes = map[string]struct{}{
+	"GET /api/v1/ready":         {},
 	"GET /api/v1/health":        {},
 	"POST /api/v1/auth/login":   {},
 	"POST /api/v1/auth/token":   {},
@@ -113,6 +115,8 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 			"storage": d.cfg.Storage.Driver,
 		})
 	})
+
+	api.Get("/ready", d.health.Ready)
 
 	authPublic := api.Group("/auth")
 	authPublic.Post("/login", middleware.TrustedOrigin(d.cfg.Security.TrustedOrigins), middleware.LoginRateLimit(d.cfg.Security.LoginRateLimit), d.auth.Login)

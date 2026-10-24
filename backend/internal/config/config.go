@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -16,7 +17,14 @@ type Config struct {
 	JWT       JWTConfig       `mapstructure:"jwt"`
 	Storage   StorageConfig   `mapstructure:"storage"`
 	Directory DirectoryConfig `mapstructure:"ldap"`
+	Retention RetentionConfig `mapstructure:"retention"`
 	Logging   LoggingConfig   `mapstructure:"logging"`
+}
+
+type RetentionConfig struct {
+	Enabled     bool `mapstructure:"enabled"`
+	OutboxDays  int  `mapstructure:"outbox_days"`
+	SyncLogDays int  `mapstructure:"sync_log_days"`
 }
 
 type AppConfig struct {
@@ -70,6 +78,7 @@ type SessionConfig struct {
 }
 
 type SecurityConfig struct {
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 	TrustedOrigins []string `mapstructure:"trusted_origins"`
 	LoginRateLimit int      `mapstructure:"login_rate_limit"`
 	EncryptionKey  string   `mapstructure:"encryption_key"`
@@ -125,10 +134,31 @@ func LoadConfig(path ...string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read configuration: %w", err)
 	}
 	setLoggingDefaults(v)
+	v.SetDefault("retention.enabled", true)
+	v.SetDefault("retention.outbox_days", 30)
+	v.SetDefault("retention.sync_log_days", 90)
+	v.SetDefault("app.env", "development")
+	v.SetDefault("session.max_age", 1800)
+	v.SetDefault("session.absolute_max_age", 604800)
+	v.SetDefault("jwt.access_token_expire", 900)
+	v.SetDefault("jwt.refresh_token_expire", 604800)
+	v.SetDefault("security.trusted_proxies", []string{})
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unable to decode into config struct: %w", err)
+	}
+	if err := cfg.ValidateRuntime(); err != nil {
+		return nil, err
+	}
+	if cfg.Retention.OutboxDays < 1 || cfg.Retention.SyncLogDays < 1 {
+		return nil, fmt.Errorf("retention periods must be positive days")
+	}
+	if cfg.Session.MaxAge <= 0 || cfg.Session.AbsoluteMaxAge < cfg.Session.MaxAge {
+		return nil, fmt.Errorf("session lifetimes must be positive and absolute_max_age must be at least max_age")
+	}
+	if cfg.JWT.AccessTokenExpire <= 0 || cfg.JWT.RefreshTokenExpire < cfg.JWT.AccessTokenExpire {
+		return nil, fmt.Errorf("JWT lifetimes must be positive and refresh lifetime must be at least access lifetime")
 	}
 	if err := cfg.Logging.Validate(); err != nil {
 		return nil, err
@@ -143,4 +173,21 @@ func MustLoad(path ...string) *Config {
 		panic(fmt.Sprintf("Failed to load application config: %v", err))
 	}
 	return cfg
+}
+
+// ValidateRuntime rejects unsafe environment names and malformed proxy allowlists.
+func (c *Config) ValidateRuntime() error {
+	switch c.App.Env {
+	case "development", "test", "production":
+	default:
+		return fmt.Errorf("app.env must be development, test or production")
+	}
+	for _, proxy := range c.Security.TrustedProxies {
+		if _, err := netip.ParseAddr(proxy); err != nil {
+			if _, err := netip.ParsePrefix(proxy); err != nil {
+				return fmt.Errorf("security.trusted_proxies must contain IP addresses or CIDRs")
+			}
+		}
+	}
+	return nil
 }
