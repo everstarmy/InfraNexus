@@ -62,6 +62,7 @@ export function DepartmentMoveDialog({
       notify.success("部门已移动", `${department?.name} 及其下级部门已整体迁移`)
       void queryClient.invalidateQueries({ queryKey: ["departments"] })
       void queryClient.invalidateQueries({ queryKey: ["options"] })
+      void queryClient.invalidateQueries({ queryKey: ["users"] })
       if (department) onMoved?.(department.id)
       onOpenChange(false)
     },

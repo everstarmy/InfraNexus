@@ -90,7 +90,9 @@ export default function UsersPage() {
 
   const [deptKey, setDeptKey] = useState<string>(ALL_KEY)
   const [includeChildren, setIncludeChildren] = useState(true)
-  const [treeOpen, setTreeOpen] = useState(true)
+  // Below the lg breakpoint the tree stacks above the list; start collapsed so
+  // the members are visible first. The toggle in the table header reopens it.
+  const [treeOpen, setTreeOpen] = useState(() => typeof window === "undefined" || window.matchMedia("(min-width: 1024px)").matches)
   const [keyword, setKeyword] = useState(() => searchParams.get("keyword") ?? "")
   const debouncedKeyword = useDebouncedValue(keyword.trim(), 300)
   const [statuses, setStatuses] = useState<string[]>([])
@@ -166,6 +168,10 @@ export default function UsersPage() {
     void queryClient.invalidateQueries({ queryKey: ["users"] })
     void queryClient.invalidateQueries({ queryKey: ["options"] })
     void queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+    // Membership counts, leaders and the organization revision live in the
+    // department tree; role member counts live in the role list.
+    void queryClient.invalidateQueries({ queryKey: ["departments"] })
+    void queryClient.invalidateQueries({ queryKey: ["roles"] })
   }, [queryClient])
 
   const setStatus = useCallback(
@@ -499,8 +505,8 @@ export default function UsersPage() {
         title="用户管理"
         description="管理平台人员档案、所属部门、角色授权与账号状态"
         badge={
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-            <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium", statsUnavailable ? "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300")}>
+            <span className={cn("size-1.5 rounded-full", statsUnavailable ? "bg-amber-500" : "bg-emerald-500")} />
             {statsUnavailable ? "用户统计暂不可用" : `共 ${total} 名成员 · ${stats?.active ?? 0} 人正常`}
           </span>
         }

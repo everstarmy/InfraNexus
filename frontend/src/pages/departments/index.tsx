@@ -59,6 +59,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { cn } from "@/lib/utils";
 import { DepartmentFormDialog } from "./components/department-form-dialog";
 import { DepartmentMoveDialog } from "./components/department-move-dialog";
 import { memberColumns } from "./components/member-columns";
@@ -156,6 +157,7 @@ export default function DepartmentsPage() {
     void queryClient.invalidateQueries({ queryKey: ["departments"] });
     void queryClient.invalidateQueries({ queryKey: ["options"] });
     void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    void queryClient.invalidateQueries({ queryKey: ["users"] });
   }, [queryClient]);
 
   const moveByDrop = useCallback(
@@ -371,8 +373,8 @@ export default function DepartmentsPage() {
         title="部门管理"
         description="维护企业组织架构树，支持多级部门、负责人与排序调整"
         badge={
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary dark:text-violet-300">
-            <span className="size-1.5 rounded-full bg-primary animate-pulse" />
+          <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium", treeQuery.isError && !treeQuery.data ? "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300" : "border-primary/30 bg-primary/10 text-primary dark:text-violet-300")}>
+            <span className={cn("size-1.5 rounded-full", treeQuery.isError && !treeQuery.data ? "bg-amber-500" : "bg-primary")} />
             {treeQuery.isError && !treeQuery.data
               ? "部门统计暂不可用"
               : `共 ${stats.total} 个部门 · ${stats.members} 名成员`}

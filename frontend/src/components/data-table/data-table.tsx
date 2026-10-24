@@ -26,7 +26,6 @@ import {
   type Table,
 } from "./types"
 
-export type { ColumnDef, Table, AppTableFeatures }
 
 import {
   Table as ShadcnTable,
@@ -44,6 +43,14 @@ import {
 import { DataTablePagination } from "./data-table-pagination"
 import { DataTableSkeleton } from "./data-table-skeleton"
 import { DataTableEmpty } from "./data-table-empty"
+
+// Sticky cells need opaque fills; mix the same translucent muted tints the
+// header and rows use so pinned and scrolling columns read as one surface.
+const pinnedHeadSurface = "bg-[color-mix(in_oklab,var(--muted)_40%,var(--card))]"
+const pinnedCellSurface =
+  "bg-card group-hover/row:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))] group-has-aria-expanded/row:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))] group-data-[state=selected]/row:bg-[color-mix(in_oklab,var(--muted)_70%,var(--card))]"
+
+export type { ColumnDef, Table, AppTableFeatures }
 
 export interface DataTableProps<TData extends RowData, TValue = unknown> {
   /** Filtering and sorting are performed by the server across the complete dataset. */
@@ -757,7 +764,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                         colSpan={header.colSpan}
                         aria-sort={header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : undefined}
                         style={columnStyle(header.column)}
-                        className={`relative h-10 px-3 text-xs font-semibold ${stickyActionColumn && header.column.id === "actions" ? "sticky right-0 z-20 border-l bg-muted shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.25)]" : ""} ${enableColumnPinning && header.column.getIsPinned() ? "z-20 bg-muted" : ""}`}
+                        className={`relative h-10 px-3 text-xs font-semibold ${stickyActionColumn && header.column.id === "actions" ? `sticky right-0 z-20 border-l ${pinnedHeadSurface} shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.25)]` : ""} ${enableColumnPinning && header.column.getIsPinned() ? `z-20 ${pinnedHeadSurface}` : ""}`}
                       >
                         {header.isPlaceholder ? null : (
                           <table.FlexRender header={header} />
@@ -835,9 +842,8 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                     }}
                     className={cn(
                       "group/row",
-                      onRowClick
-                        ? "cursor-pointer transition-colors hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-primary data-[state=selected]:bg-muted"
-                        : "transition-colors hover:bg-muted/40 data-[state=selected]:bg-muted/60",
+                      "transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted/70",
+                      onRowClick && "cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
                       rowClassName?.(row.original)
                     )}
                   >
@@ -845,7 +851,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
                       <TableCell
                         key={cell.id}
                         style={columnStyle(cell.column)}
-                        className={`p-3 text-xs ${stickyActionColumn && cell.column.id === "actions" ? "sticky right-0 z-10 border-l bg-card group-hover/row:bg-muted group-data-[state=selected]/row:bg-muted shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.25)]" : ""} ${enableColumnPinning && cell.column.getIsPinned() ? "z-10 bg-card group-hover/row:bg-muted group-data-[state=selected]/row:bg-muted" : ""}`}
+                        className={`p-3 text-xs ${stickyActionColumn && cell.column.id === "actions" ? `sticky right-0 z-10 border-l ${pinnedCellSurface} shadow-[-6px_0_10px_-8px_rgba(0,0,0,0.25)]` : ""} ${enableColumnPinning && cell.column.getIsPinned() ? `z-10 ${pinnedCellSurface}` : ""}`}
                       >
                         <table.FlexRender cell={cell} />
                       </TableCell>

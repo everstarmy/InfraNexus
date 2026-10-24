@@ -137,7 +137,7 @@ export default function DashboardPage() {
                 "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
                 query.isError ? "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
               )} role="status" aria-live="polite">
-                <span className={cn("size-1.5 rounded-full", query.isError ? "bg-amber-500" : "bg-emerald-500", !query.isError && "motion-safe:animate-pulse")} />
+                <span className={cn("size-1.5 rounded-full", query.isError ? "bg-amber-500" : "bg-emerald-500", query.isFetching && !query.isError && "motion-safe:animate-pulse")} />
                 {dashboardStatus}
               </span>
             </div>

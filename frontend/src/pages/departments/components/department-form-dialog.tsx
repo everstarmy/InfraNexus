@@ -91,6 +91,7 @@ export function DepartmentFormDialog({
       void queryClient.invalidateQueries({ queryKey: ["departments"] })
       void queryClient.invalidateQueries({ queryKey: ["options"] })
       void queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      if (editing) void queryClient.invalidateQueries({ queryKey: ["users"] })
       onSaved?.(res.data.id)
       onOpenChange(false)
     },

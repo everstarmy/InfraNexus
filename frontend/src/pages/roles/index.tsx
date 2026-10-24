@@ -77,6 +77,7 @@ export default function RolesPage() {
     void queryClient.invalidateQueries({ queryKey: ["roles"] })
     void queryClient.invalidateQueries({ queryKey: ["options"] })
     void queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+    void queryClient.invalidateQueries({ queryKey: ["users"] })
   }, [queryClient])
 
   const toggleStatus = useCallback(
@@ -351,7 +352,7 @@ export default function RolesPage() {
         description="定义角色与授权范围，策略实时生效至服务端鉴权引擎"
         badge={
           <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-300">
-            <span className="size-1.5 rounded-full bg-sky-500 animate-pulse" />
+            <span className="size-1.5 rounded-full bg-sky-500" />
             访问控制策略实时生效中
           </span>
         }
@@ -380,6 +381,12 @@ export default function RolesPage() {
           {listUnavailable ? (
             <QueryErrorState error={query.error} label="角色列表" onRetry={() => void query.refetch()} retrying={query.isFetching} />
           ) : <DataTable
+            toolbarTitle={
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="truncate text-sm font-medium">{search ? "搜索结果" : "全部角色"}</h2>
+                <Badge variant="secondary" className="font-mono">{total}</Badge>
+              </div>
+            }
             columns={columns}
             data={roles}
             loading={query.isLoading}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Info,
+  Copy,
   RefreshCw,
   ShieldCheck,
   UserPlus,
@@ -179,6 +180,10 @@ export function UserFormDialog({
       void queryClient.invalidateQueries({ queryKey: ["users"] });
       void queryClient.invalidateQueries({ queryKey: ["options"] });
       void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      if (!editing) {
+        void queryClient.invalidateQueries({ queryKey: ["departments"] });
+        void queryClient.invalidateQueries({ queryKey: ["roles"] });
+      }
       setBaseline({
         username: res.data.username,
         email: res.data.email,
@@ -204,7 +209,24 @@ export function UserFormDialog({
   const directoryManaged = editing && user?.auth_type !== "local";
   const canSubmit = editing
     ? editRevision > 0 && !!email.trim() && isDirty && !mutation.isPending
-    : !!username.trim() && !!email.trim() && meetsPolicy(password);
+    : true;
+  const clearFieldError = (field: string) =>
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  // Creation keeps the submit button available and explains what is missing,
+  // instead of a silently disabled button.
+  const validateCreate = () => {
+    const errors: Record<string, string> = {};
+    const name = username.trim();
+    if (name.length < 3 || name.length > 32) errors.username = "invalid";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) errors.email = "invalid";
+    if (!meetsPolicy(password)) errors.password = "weak";
+    return errors;
+  };
   const requestClose = async () => {
     if (mutation.isPending) return;
     if (isDirty) {
@@ -245,6 +267,15 @@ export function UserFormDialog({
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
+            if (!editing) {
+              const errors = validateCreate();
+              const first = (["username", "email", "password"] as const).find((field) => errors[field]);
+              if (first) {
+                setFieldErrors(errors);
+                document.getElementById(`user-${first}`)?.focus();
+                return;
+              }
+            }
             if (canSubmit) mutation.mutate();
           }}
         >
@@ -309,7 +340,10 @@ export function UserFormDialog({
                 <Input
                   id="user-username"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    clearFieldError("username");
+                  }}
                   placeholder="如 zhangsan"
                   disabled={editing}
                   autoComplete="off"
@@ -340,7 +374,10 @@ export function UserFormDialog({
                 id="user-email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  clearFieldError("email");
+                }}
                 placeholder="name@company.com"
                 aria-invalid={!!fieldErrors.email || undefined}
                 aria-describedby={
@@ -369,32 +406,60 @@ export function UserFormDialog({
 
             {!editing && (
               <>
-                {can("users:assign-roles") && (
-                  <Field>
-                    <FieldLabel htmlFor="user-password">初始密码</FieldLabel>
-                    <InputGroup>
-                      <InputGroupInput
-                        id="user-password"
-                        type="text"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="至少 8 位，含 3 类字符"
-                        autoComplete="new-password"
-                        className="font-mono"
-                      />
-                      <InputGroupAddon align="inline-end">
+                <Field data-invalid={!!fieldErrors.password || undefined}>
+                  <FieldLabel htmlFor="user-password">初始密码</FieldLabel>
+                  <InputGroup>
+                    <InputGroupInput
+                      id="user-password"
+                      type="text"
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        clearFieldError("password");
+                      }}
+                      placeholder="至少 8 位，含 3 类字符"
+                      autoComplete="new-password"
+                      spellCheck={false}
+                      className="font-mono placeholder:font-sans"
+                      aria-invalid={!!fieldErrors.password || undefined}
+                      aria-describedby={fieldErrors.password ? "user-password-error" : undefined}
+                    />
+                    <InputGroupAddon align="inline-end">
+                      {password && (
                         <InputGroupButton
-                          size="xs"
-                          onClick={() => setPassword(generatePassword())}
+                          size="icon-xs"
+                          aria-label="复制密码"
+                          title="复制密码"
+                          onClick={() => {
+                            void navigator.clipboard
+                              ?.writeText(password)
+                              .then(() => notify.success("初始密码已复制"))
+                              .catch(() => notify.error("复制失败", "请手动选择密码文本复制"));
+                          }}
                         >
-                          <RefreshCw />
-                          随机生成
+                          <Copy />
                         </InputGroupButton>
-                      </InputGroupAddon>
-                    </InputGroup>
-                    <PasswordStrength password={password} />
-                  </Field>
-                )}
+                      )}
+                      <InputGroupButton
+                        size="xs"
+                        onClick={() => {
+                          setPassword(generatePassword());
+                          clearFieldError("password");
+                        }}
+                      >
+                        <RefreshCw />
+                        随机生成
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  </InputGroup>
+                  <PasswordStrength password={password} />
+                  {fieldErrors.password && (
+                    <FieldError id="user-password-error">
+                      密码强度不足，请按上方规则调整或使用随机生成
+                    </FieldError>
+                  )}
+                </Field>
+                {can("users:assign-roles") && (
                 <Field>
                   <FieldLabel>初始角色</FieldLabel>
                   <FieldDescription>可多选，角色的权限取并集</FieldDescription>
@@ -431,6 +496,7 @@ export function UserFormDialog({
                     })}
                   </div>
                 </Field>
+                )}
               </>
             )}
           </FieldGroup>

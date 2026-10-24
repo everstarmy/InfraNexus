@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -44,8 +44,11 @@ export default function LoginPage() {
   const { isAuthenticated, login } = useAuth()
   const [mode, setMode] = useState<Mode>(() => (localStorage.getItem(MODE_KEY) === "domain" ? "domain" : "local"))
   const [domain, setDomain] = useState("")
-  const [username, setUsername] = useState(import.meta.env.DEV && mode === "local" ? "admin" : "")
-  const [password, setPassword] = useState(import.meta.env.DEV && mode === "local" ? "admin123456" : "")
+  const [username, setUsername] = useState("")
+  const [password, setPassword] = useState("")
+  const [capsLock, setCapsLock] = useState(false)
+  const usernameRef = useRef<HTMLInputElement>(null)
+  const passwordRef = useRef<HTMLInputElement>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
@@ -74,7 +77,11 @@ export default function LoginPage() {
     setPassword("")
     setError("")
     setTouched(false)
+    setCapsLock(false)
+    requestAnimationFrame(() => usernameRef.current?.focus())
   }
+
+  const trackCapsLock = (e: React.KeyboardEvent<HTMLInputElement>) => setCapsLock(e.getModifierState("CapsLock"))
 
   const domainMode = mode === "domain"
   const noDomains = domainMode && !domainsQuery.isLoading && domains.length === 0
@@ -84,7 +91,15 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setTouched(true)
-    if (!username.trim() || !password || noDomains) return
+    if (!username.trim()) {
+      usernameRef.current?.focus()
+      return
+    }
+    if (!password) {
+      passwordRef.current?.focus()
+      return
+    }
+    if (noDomains) return
     setSubmitting(true)
     setError("")
     try {
@@ -99,9 +114,16 @@ export default function LoginPage() {
       const code = getErrorCode(err)
       if (code === BizCode.DirectoryUnavailable) setError("企业目录服务暂时不可用，请稍后重试或改用本地账号登录")
       else setError(getErrorMessage(err, "登录失败，请检查账号和密码"))
-    } finally {
+      // Keep the account but ask for the password again, like most sign-in forms.
+      if (code === BizCode.InvalidCredentials) {
+        setPassword("")
+        setTouched(false)
+      }
       setSubmitting(false)
+      requestAnimationFrame(() => passwordRef.current?.select())
+      return
     }
+    setSubmitting(false)
   }
 
   return (
@@ -166,7 +188,7 @@ export default function LoginPage() {
             <TabsList className="grid h-9 w-full grid-cols-2">
               <TabsTrigger value="local" className="gap-1.5">
                 <KeyRound />
-                本地管理员账号
+                本地账号
               </TabsTrigger>
               <TabsTrigger value="domain" className="gap-1.5">
                 <Building2 />
@@ -223,8 +245,12 @@ export default function LoginPage() {
                   id="login-username"
                   autoComplete="username"
                   autoFocus
+                  ref={usernameRef}
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => {
+                    setUsername(e.target.value)
+                    if (error) setError("")
+                  }}
                   placeholder={domainMode ? "工号 / 统一通行证账号，如 zhangsan" : "请输入用户名"}
                   aria-invalid={usernameMissing || undefined}
                   aria-describedby={usernameMissing ? "login-username-error" : error ? "login-form-error" : undefined}
@@ -250,8 +276,15 @@ export default function LoginPage() {
                   id="login-password"
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
+                  ref={passwordRef}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                    if (error) setError("")
+                  }}
+                  onKeyDown={trackCapsLock}
+                  onKeyUp={trackCapsLock}
+                  onBlur={() => setCapsLock(false)}
                   placeholder={domainMode ? "请输入域账号密码" : "请输入登录密码"}
                   aria-invalid={passwordMissing || undefined}
                   aria-describedby={passwordMissing ? "login-password-error" : error ? "login-form-error" : undefined}
@@ -268,6 +301,12 @@ export default function LoginPage() {
                 </InputGroupAddon>
               </InputGroup>
               {passwordMissing && <FieldError id="login-password-error">请输入密码</FieldError>}
+              {capsLock && !passwordMissing && (
+                <p role="status" className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                  <Info className="size-3.5" />
+                  大写锁定已开启
+                </p>
+              )}
             </Field>
 
             <Button type="submit" size="lg" className="h-10 w-full" disabled={submitting || noDomains}>
@@ -285,11 +324,6 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          {import.meta.env.DEV && !domainMode && (
-            <p className="rounded-lg border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              开发环境演示账号：<code className="font-mono text-foreground">admin</code> / <code className="font-mono text-foreground">admin123456</code>
-            </p>
-          )}
         </div>
       </section>
     </div>
