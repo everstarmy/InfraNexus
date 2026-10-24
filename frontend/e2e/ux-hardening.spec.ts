@@ -90,6 +90,10 @@ test("user creation without role-grant permission keeps the password field and e
 });
 
 test("failed sign-in keeps the account, clears only the password and has no stale demo hint", async ({ page }) => {
+  test.slow();
+  // Slow React commits expose focus attempts made while the password is disabled.
+  const session = await page.context().newCDPSession(page);
+  await session.send("Emulation.setCPUThrottlingRate", { rate: 20 });
   const mocks = await installMocks(page, { permissions: ["*"], loggedIn: false });
   await page.goto("/login");
   const username = page.getByLabel("用户名", { exact: true });

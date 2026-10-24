@@ -54,6 +54,14 @@ export default function LoginPage() {
   const [error, setError] = useState("")
   const [touched, setTouched] = useState(false)
 
+  useEffect(() => {
+    if (error && !submitting) {
+      // Wait for React to commit the input's enabled state before focusing it.
+      passwordRef.current?.focus()
+      passwordRef.current?.select()
+    }
+  }, [error, submitting])
+
   const redirect = new URLSearchParams(location.search).get("redirect") || "/"
   const domainsQuery = useQuery({
     queryKey: queryKeys.loginDomains,
@@ -120,10 +128,6 @@ export default function LoginPage() {
         setTouched(false)
       }
       setSubmitting(false)
-      requestAnimationFrame(() => {
-        passwordRef.current?.focus()
-        passwordRef.current?.select()
-      })
       return
     }
     setSubmitting(false)
