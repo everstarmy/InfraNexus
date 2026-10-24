@@ -227,8 +227,12 @@ func (s *departmentService) Update(ctx context.Context, id uuid.UUID, req domain
 		if err != nil {
 			return err
 		}
-		if err := s.checkLeader(txctx, req.LeaderID); err != nil {
-			return err
+		// Only validate a newly chosen leader so departments carrying a legacy
+		// reference to a removed account remain editable.
+		if !sameParent(dept.LeaderID, req.LeaderID) {
+			if err := s.checkLeader(txctx, req.LeaderID); err != nil {
+				return err
+			}
 		}
 		name := strings.TrimSpace(req.Name)
 		if err := s.checkUnique(txctx, dept.ID, dept.ParentID, name, req.Code); err != nil {

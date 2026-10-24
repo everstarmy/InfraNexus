@@ -477,3 +477,20 @@ func TestSelfServiceAndOptionsNeedOnlyAuthentication(t *testing.T) {
 	expectCode(t, call(t, app, "PUT", "/api/v1/users/me/preferences", plain, map[string]any{"theme": "dark", "session_timeout": 3600}), 200, response.CodeSuccess)
 	expectCode(t, call(t, app, "PUT", "/api/v1/users/me/preferences", plain, map[string]any{"session_timeout": -1}), 400, response.CodeParamInvalid)
 }
+
+func TestUserKeywordSearchIsLiteralAndCaseInsensitive(t *testing.T) {
+	_, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	createLocalUser(t, app, bearer, "Alpha_One", nil)
+	createLocalUser(t, app, bearer, "alphaxone", nil)
+	if page := listUsers(t, app, bearer, "keyword=alpha_"); page.Total != 1 || page.Items[0].Username != "Alpha_One" {
+		t.Fatalf("underscore must match literally and ignore case: %+v", page)
+	}
+	if page := listUsers(t, app, bearer, "keyword=ALPHA"); page.Total != 2 {
+		t.Fatalf("keyword search must ignore case: total=%d", page.Total)
+	}
+	if page := listUsers(t, app, bearer, "keyword=%25"); page.Total != 0 {
+		t.Fatalf("percent must not act as a wildcard: total=%d", page.Total)
+	}
+}

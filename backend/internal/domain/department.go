@@ -116,6 +116,7 @@ type DepartmentRepository interface {
 	ListSubtree(ctx context.Context, treePath string) ([]Department, error)
 	Move(ctx context.Context, id uuid.UUID, parentID *uuid.UUID, oldPath, newPath string) error
 	Reorder(ctx context.Context, items []DepartmentOrder) error
+	ClearLeader(ctx context.Context, userID uuid.UUID) error
 }
 
 // OrganizationUnitOfWork serializes all writes that can change department

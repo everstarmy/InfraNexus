@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -79,4 +80,14 @@ func (r *BaseRepository[T, ID]) Update(ctx context.Context, entity *T) error {
 func (r *BaseRepository[T, ID]) Delete(ctx context.Context, id ID) error {
 	var entity T
 	return r.DB(ctx).Delete(&entity, "id = ?", id).Error
+}
+
+// likeEscaper treats user keywords literally so "%" and "_" do not widen a search.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+
+// containsPattern builds a literal substring pattern for
+// "LOWER(column) LIKE LOWER(?) ESCAPE '\'". Both sides are folded by the
+// database so SQLite and PostgreSQL agree on case handling.
+func containsPattern(keyword string) string {
+	return "%" + likeEscaper.Replace(keyword) + "%"
 }

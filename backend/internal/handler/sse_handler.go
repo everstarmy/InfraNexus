@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -205,10 +206,13 @@ func writeSSE(w *bufio.Writer, id, event string, data []byte) error {
 	if len(data) == 0 {
 		data = []byte("null")
 	}
-	if !json.Valid(data) {
+	// A multi-line JSON payload would split into several "data:" fields and
+	// corrupt framing, so always emit the compact single-line form.
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, data); err != nil {
 		return fmt.Errorf("invalid SSE event payload")
 	}
-	if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", id, event, json.RawMessage(data)); err != nil {
+	if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", id, event, compact.Bytes()); err != nil {
 		return err
 	}
 	return nil
