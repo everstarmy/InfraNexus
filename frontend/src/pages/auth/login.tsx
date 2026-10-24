@@ -120,7 +120,10 @@ export default function LoginPage() {
         setTouched(false)
       }
       setSubmitting(false)
-      requestAnimationFrame(() => passwordRef.current?.select())
+      requestAnimationFrame(() => {
+        passwordRef.current?.focus()
+        passwordRef.current?.select()
+      })
       return
     }
     setSubmitting(false)
