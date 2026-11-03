@@ -1,0 +1,567 @@
+package bootstrap
+
+import (
+	"maps"
+	"testing"
+	"time"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+
+	"infranexus/internal/core/response"
+	"infranexus/internal/domain"
+)
+
+func TestUserListFiltersByRole(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	var adminRole domain.Role
+	if err := container.DB.First(&adminRole, "code = ?", "admin").Error; err != nil {
+		t.Fatal(err)
+	}
+	call(t, app, "POST", "/api/v1/users", bearer, map[string]any{"username": "plain", "email": "plain@x.com", "password": "Str0ng!pass"})
+	r := call(t, app, "GET", "/api/v1/users?role_id="+adminRole.ID.String(), bearer, nil)
+	expectCode(t, r, 200, response.CodeSuccess)
+	page := decode[response.PageData[domain.User]](t, r.Data)
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Username != "admin" {
+		t.Fatalf("role filter returned %+v", page)
+	}
+}
+
+func TestUserInputValidationIsEnforced(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	r := call(t, app, "POST", "/api/v1/users", bearer, map[string]any{"username": "ab", "email": "ab@x.com", "password": "Str0ng!pass"})
+	expectCode(t, r, 400, response.CodeParamInvalid)
+	var count int64
+	container.DB.Model(&domain.User{}).Where("username = ?", "ab").Count(&count)
+	if count != 0 {
+		t.Fatal("invalid user was persisted despite validation failure")
+	}
+	var admin domain.User
+	container.DB.First(&admin, "username = ?", "admin")
+	r = call(t, app, "PATCH", "/api/v1/users/"+admin.ID.String()+"/status", bearer, map[string]any{"status": 7})
+	expectCode(t, r, 400, response.CodeParamInvalid)
+	container.DB.First(&admin, "id = ?", admin.ID)
+	if admin.Status != 1 {
+		t.Fatalf("invalid status persisted: %d", admin.Status)
+	}
+}
+
+func TestUserTextUpdatesDistinguishMissingClearAndInvalidEmail(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	user := createLocalUser(t, app, bearer, "profile-semantics", map[string]any{"nickname": "原昵称"})
+	path := "/api/v1/users/" + user.ID.String()
+	missingRevision := call(t, app, "PUT", path, bearer, map[string]any{"nickname": "不应写入"})
+	expectCode(t, missingRevision, 400, response.CodeParamInvalid)
+	zeroRevision := call(t, app, "PUT", path, bearer, map[string]any{"nickname": "不应写入", "expected_revision": 0})
+	expectCode(t, zeroRevision, 400, response.CodeParamInvalid)
+	unchanged := call(t, app, "PUT", path, bearer, map[string]any{"expected_revision": user.EditRevision})
+	expectCode(t, unchanged, 200, response.CodeSuccess)
+	if got := decode[domain.User](t, unchanged.Data).Nickname; got != "原昵称" {
+		t.Fatalf("missing nickname changed the field: %q", got)
+	}
+	cleared := call(t, app, "PUT", path, bearer, map[string]any{"nickname": "", "expected_revision": user.EditRevision})
+	expectCode(t, cleared, 200, response.CodeSuccess)
+	clearedUser := decode[domain.User](t, cleared.Data)
+	if got := clearedUser.Nickname; got != "" {
+		t.Fatalf("explicit empty nickname did not clear the field: %q", got)
+	}
+	expectCode(t, call(t, app, "PUT", path, bearer, map[string]any{"email": "", "expected_revision": clearedUser.EditRevision}), 400, response.CodeParamInvalid)
+	var unchangedUser domain.User
+	if err := container.DB.First(&unchangedUser, "id = ?", user.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if unchangedUser.Email != user.Email {
+		t.Fatalf("invalid empty email changed the stored email: %q", unchangedUser.Email)
+	}
+}
+
+func TestUserProfileUpdateUsesExpectedRevisionWhenProvided(t *testing.T) {
+	_, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	user := createLocalUser(t, app, bearer, "profile-revision", map[string]any{"nickname": "原昵称"})
+	path := "/api/v1/users/" + user.ID.String()
+	updated := call(t, app, "PUT", path, bearer, map[string]any{"nickname": "新昵称", "expected_revision": user.EditRevision})
+	expectCode(t, updated, 200, response.CodeSuccess)
+	current := decode[domain.User](t, updated.Data)
+	if current.Nickname != "新昵称" || current.EditRevision != user.EditRevision+1 {
+		t.Fatalf("profile update revision = %d, nickname = %q", current.EditRevision, current.Nickname)
+	}
+	stale := call(t, app, "PUT", path, bearer, map[string]any{"nickname": "过期覆盖", "expected_revision": user.EditRevision})
+	expectCode(t, stale, 409, response.CodeResourceConflict)
+	latest := decode[domain.User](t, call(t, app, "GET", path, bearer, nil).Data)
+	if latest.Nickname != "新昵称" || latest.EditRevision != current.EditRevision {
+		t.Fatalf("stale profile update overwrote current value: %+v", latest)
+	}
+}
+
+func TestAdminCannotLockThemselvesOut(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	var admin domain.User
+	container.DB.First(&admin, "username = ?", "admin")
+	expectCode(t, call(t, app, "PATCH", "/api/v1/users/"+admin.ID.String()+"/status", bearer, map[string]any{"status": 2, "expected_revision": admin.EditRevision}), 403, response.CodeSelfOperationDenied)
+	for _, body := range []map[string]any{
+		{"status": 2},
+		{"role_ids": []string{}},
+		{"department_id": nil},
+		{"STATUS": 1},
+		{"unexpected": true},
+	} {
+		expectCode(t, call(t, app, "PUT", "/api/v1/users/"+admin.ID.String(), bearer, body), 400, response.CodeParamInvalid)
+	}
+	departmentURL := "/api/v1/users/" + admin.ID.String() + "/department"
+	expectCode(t, call(t, app, "PUT", departmentURL, bearer, map[string]any{}), 400, response.CodeParamInvalid)
+	expectCode(t, call(t, app, "PUT", departmentURL, bearer, map[string]any{"department_id": nil, "status": 1}), 400, response.CodeParamInvalid)
+	expectCode(t, call(t, app, "DELETE", "/api/v1/users/"+admin.ID.String(), bearer, nil), 403, response.CodeSelfOperationDenied)
+	expectCode(t, call(t, app, "GET", "/api/v1/auth/me", bearer, nil), 200, response.CodeSuccess)
+}
+
+func TestUserProfileUpdateCannotChangeAuthorizationFields(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	admin := adminToken(t, app)
+	profileRole := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", admin, map[string]any{"code": "profile-editor", "name": "资料编辑员"}).Data)
+	expectCode(t, assignRolePermissions(t, app, admin, profileRole.ID, permissionIDs(t, container, domain.APIPermissionCode("PUT", "/api/v1/users/:id"))), 200, response.CodeSuccess)
+	profileEditor := createLocalUser(t, app, admin, "profile-editor", map[string]any{"role_ids": []uuid.UUID{profileRole.ID}})
+	profileEditorToken := tokenFor(t, app, profileEditor.Username, "Str0ng!pass")
+	target := createLocalUser(t, app, admin, "profile-target", nil)
+	url := "/api/v1/users/" + target.ID.String()
+	expectCode(t, call(t, app, "PUT", url, profileEditorToken, map[string]any{"nickname": "已授权资料修改", "expected_revision": target.EditRevision}), 200, response.CodeSuccess)
+	for _, body := range []map[string]any{
+		{"status": 2},
+		{"role_ids": []uuid.UUID{}},
+		{"department_id": nil},
+	} {
+		expectCode(t, call(t, app, "PUT", url, profileEditorToken, body), 400, response.CodeParamInvalid)
+	}
+	var unchanged domain.User
+	if err := container.DB.Preload("Roles").First(&unchanged, "id = ?", target.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Status != domain.StatusEnabled || len(unchanged.Roles) != 0 || unchanged.DepartmentID != nil {
+		t.Fatalf("authorization fields changed through profile update: %+v", unchanged)
+	}
+}
+
+func TestBuiltinAdminAccountIsProtectedFromOtherAdmins(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	var adminRole domain.Role
+	container.DB.First(&adminRole, "code = ?", "admin")
+	r := call(t, app, "POST", "/api/v1/users", bearer, map[string]any{"username": "ops", "email": "ops@x.com", "password": "Str0ng!pass", "role_ids": []string{adminRole.ID.String()}})
+	expectCode(t, r, 200, response.CodeSuccess)
+	ops := tokenFor(t, app, "ops", "Str0ng!pass")
+	var admin domain.User
+	container.DB.First(&admin, "username = ?", "admin")
+	expectCode(t, call(t, app, "PATCH", "/api/v1/users/"+admin.ID.String()+"/status", ops, map[string]any{"status": 2, "expected_revision": admin.EditRevision}), 403, response.CodeBuiltinProtected)
+	expectCode(t, call(t, app, "DELETE", "/api/v1/users/"+admin.ID.String(), ops, nil), 403, response.CodeBuiltinProtected)
+	expectCode(t, call(t, app, "PUT", "/api/v1/users/"+admin.ID.String(), ops, map[string]any{"role_ids": []string{}}), 400, response.CodeParamInvalid)
+	expectCode(t, call(t, app, "GET", "/api/v1/users", bearer, nil), 200, response.CodeSuccess)
+}
+
+func TestCreateUserRequiresIndependentGrantAndMovePermissions(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	admin := adminToken(t, app)
+	creatorRole := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", admin, map[string]any{"code": "user-creator", "name": "用户创建员"}).Data)
+	expectCode(t, assignRolePermissions(t, app, admin, creatorRole.ID, permissionIDs(t, container, domain.APIPermissionCode("POST", "/api/v1/users"))), 200, response.CodeSuccess)
+	creator := createLocalUser(t, app, admin, "creator", map[string]any{"role_ids": []uuid.UUID{creatorRole.ID}})
+	creatorToken := tokenFor(t, app, creator.Username, "Str0ng!pass")
+	targetRole := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", admin, map[string]any{"code": "empty-target", "name": "空角色"}).Data)
+
+	base := map[string]any{"username": "new-user", "email": "new-user@x.com", "password": "Str0ng!pass"}
+	withRole := maps.Clone(base)
+	withRole["username"], withRole["email"], withRole["role_ids"] = "new-role-user", "new-role-user@x.com", []uuid.UUID{targetRole.ID}
+	expectCode(t, call(t, app, "POST", "/api/v1/users", creatorToken, withRole), 403, response.CodePermissionDenied)
+	dept := createDept(t, app, admin, "仅管理员可用部门", "admin-only-dept", nil)
+	withDepartment := maps.Clone(base)
+	withDepartment["username"], withDepartment["email"], withDepartment["department_id"] = "new-dept-user", "new-dept-user@x.com", dept.ID
+	expectCode(t, call(t, app, "POST", "/api/v1/users", creatorToken, withDepartment), 403, response.CodePermissionDenied)
+
+	var superRole domain.Role
+	if err := container.DB.First(&superRole, "code = ?", domain.AdminRoleCode).Error; err != nil {
+		t.Fatal(err)
+	}
+	grantRole := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", admin, map[string]any{"code": "user-grantor", "name": "用户授权员"}).Data)
+	expectCode(t, assignRolePermissions(t, app, admin, grantRole.ID, permissionIDs(t, container,
+		domain.APIPermissionCode("POST", "/api/v1/users"),
+		domain.APIPermissionCode("PUT", "/api/v1/users/:id/roles"),
+	)), 200, response.CodeSuccess)
+	grantor := createLocalUser(t, app, admin, "grantor", map[string]any{"role_ids": []uuid.UUID{grantRole.ID}})
+	grantorToken := tokenFor(t, app, grantor.Username, "Str0ng!pass")
+	withAdmin := maps.Clone(base)
+	withAdmin["username"], withAdmin["email"], withAdmin["role_ids"] = "attempt-admin", "attempt-admin@x.com", []uuid.UUID{superRole.ID}
+	expectCode(t, call(t, app, "POST", "/api/v1/users", grantorToken, withAdmin), 403, response.CodePermissionDenied)
+}
+
+func TestDeletedUsernameCanBeReusedAndDuplicatesConflict(t *testing.T) {
+	_, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	body := map[string]any{"username": "bobby", "email": "bob@x.com", "password": "Str0ng!pass"}
+	first := call(t, app, "POST", "/api/v1/users", bearer, body)
+	expectCode(t, first, 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "POST", "/api/v1/users", bearer, body), 409, response.CodeResourceConflict)
+	id := decode[domain.User](t, first.Data).ID
+	expectCode(t, call(t, app, "DELETE", "/api/v1/users/"+id.String(), bearer, nil), 200, response.CodeSuccess)
+	second := call(t, app, "POST", "/api/v1/users", bearer, body)
+	expectCode(t, second, 200, response.CodeSuccess)
+	if decode[domain.User](t, second.Data).ID == id {
+		t.Fatal("recreated user reused the deleted row")
+	}
+}
+
+func createLocalUser(t *testing.T, app *fiber.App, bearer, username string, extra map[string]any) domain.User {
+	t.Helper()
+	body := map[string]any{"username": username, "email": username + "@x.com", "password": "Str0ng!pass"}
+	for k, v := range extra {
+		body[k] = v
+	}
+	r := call(t, app, "POST", "/api/v1/users", bearer, body)
+	expectCode(t, r, 200, response.CodeSuccess)
+	return decode[domain.User](t, r.Data)
+}
+
+func listUsers(t *testing.T, app *fiber.App, bearer, query string) response.PageData[domain.User] {
+	t.Helper()
+	r := call(t, app, "GET", "/api/v1/users?"+query, bearer, nil)
+	expectCode(t, r, 200, response.CodeSuccess)
+	return decode[response.PageData[domain.User]](t, r.Data)
+}
+
+func TestBatchMoveAndDepartmentFilterIncludesChildren(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	hq := createDept(t, app, bearer, "总部", "hq", nil)
+	rd := createDept(t, app, bearer, "研发中心", "rd", &hq.ID)
+	frozen := createDept(t, app, bearer, "冻结部门", "frozen", nil)
+	expectCode(t, call(t, app, "PUT", "/api/v1/departments/"+frozen.ID.String(), bearer, map[string]any{"name": "冻结部门", "code": "frozen", "status": 2, "expected_revision": deptRevision(t, app, bearer)}), 200, response.CodeSuccess)
+	u1 := createLocalUser(t, app, bearer, "user1", nil)
+	u2 := createLocalUser(t, app, bearer, "user2", nil)
+	move := func(ids []uuid.UUID, target uuid.UUID) apiResult {
+		return call(t, app, "POST", "/api/v1/users/batch-move-department", bearer, map[string]any{"user_ids": ids, "target_dept_id": target, "expected_revision": deptRevision(t, app, bearer)})
+	}
+	expectCode(t, move([]uuid.UUID{u1.ID, u2.ID, u1.ID}, rd.ID), 400, response.CodeParamInvalid)
+	r := move([]uuid.UUID{u1.ID, u2.ID}, rd.ID)
+	expectCode(t, r, 200, response.CodeSuccess)
+	if decode[map[string]int](t, r.Data)["moved"] != 2 {
+		t.Fatalf("moved count: %s", r.Data)
+	}
+	expectCode(t, move([]uuid.UUID{u1.ID}, frozen.ID), 409, response.CodeDepartmentInvalidParent)
+	expectCode(t, move([]uuid.UUID{u1.ID, uuid.New()}, hq.ID), 404, response.CodeUserNotFound)
+	expectCode(t, move([]uuid.UUID{}, hq.ID), 400, response.CodeParamInvalid)
+	var stillInRD int64
+	container.DB.Model(&domain.User{}).Where("department_id = ?", rd.ID).Count(&stillInRD)
+	if stillInRD != 2 {
+		t.Fatalf("failed batch moves must not partially apply, got %d in rd", stillInRD)
+	}
+	if page := listUsers(t, app, bearer, "department_id="+hq.ID.String()); page.Total != 0 {
+		t.Fatalf("direct members of hq: %d", page.Total)
+	}
+	if page := listUsers(t, app, bearer, "department_id="+hq.ID.String()+"&include_children=true"); page.Total != 2 {
+		t.Fatalf("subtree members of hq: %d", page.Total)
+	}
+	if page := listUsers(t, app, bearer, "department_id=none"); page.Total != 1 || page.Items[0].Username != "admin" {
+		t.Fatalf("unassigned filter: %+v", page.Items)
+	}
+}
+
+func TestResetPasswordEnforcesPolicyAndRevokesExistingSessions(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	carol := createLocalUser(t, app, bearer, "carol", nil)
+	login := doAuth(t, app, "POST", "/api/v1/auth/login", `{"username":"carol","password":"Str0ng!pass"}`, "http://localhost:5173", "", nil)
+	if login.StatusCode != 200 {
+		t.Fatalf("carol login: %d", login.StatusCode)
+	}
+	cookie := login.Cookies()[0]
+	readAuth(t, login)
+	oldBearer := forgeIssuedAt(t, container, tokenFor(t, app, "carol", "Str0ng!pass"), time.Now().Add(-time.Minute))
+	expectCode(t, call(t, app, "GET", "/api/v1/auth/me", oldBearer, nil), 200, response.CodeSuccess)
+	reset := "/api/v1/users/" + carol.ID.String() + "/reset-password"
+	expectCode(t, call(t, app, "POST", reset, bearer, map[string]any{"password": "weakpass"}), 400, response.CodePasswordTooWeak)
+	expectCode(t, call(t, app, "POST", reset, bearer, map[string]any{"password": "N3w!Passw0rd"}), 200, response.CodeSuccess)
+	res := doAuth(t, app, "GET", "/api/v1/auth/me", "", "", "", cookie)
+	if env := readAuth(t, res); res.StatusCode != 401 || env.Code != response.CodeSessionRevoked {
+		t.Fatalf("old cookie session survived reset: %d/%d", res.StatusCode, env.Code)
+	}
+	expectCode(t, call(t, app, "GET", "/api/v1/auth/me", oldBearer, nil), 401, response.CodeSessionRevoked)
+	expectCode(t, call(t, app, "POST", "/api/v1/auth/token", "", map[string]string{"username": "carol", "password": "Str0ng!pass"}), 401, response.CodeInvalidCredentials)
+	fresh := tokenFor(t, app, "carol", "N3w!Passw0rd")
+	expectCode(t, call(t, app, "GET", "/api/v1/auth/me", fresh, nil), 200, response.CodeSuccess)
+	adUser := domain.User{Username: "dave", Domain: "corp.local", AuthType: domain.AuthTypeAD, Status: 1}
+	container.DB.Create(&adUser)
+	expectCode(t, call(t, app, "POST", "/api/v1/users/"+adUser.ID.String()+"/reset-password", bearer, map[string]any{"password": "N3w!Passw0rd"}), 409, response.CodeExternalAccountManaged)
+}
+
+func TestAssignRolesStatsAndListFilters(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	auditor := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "auditor", "name": "审计员"}).Data)
+	viewer := decode[domain.Role](t, call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "viewer", "name": "访客"}).Data)
+	erin := createLocalUser(t, app, bearer, "erin", nil)
+	r := call(t, app, "PUT", "/api/v1/users/"+erin.ID.String()+"/roles", bearer, map[string]any{"role_ids": []uuid.UUID{auditor.ID, viewer.ID}})
+	expectCode(t, r, 200, response.CodeSuccess)
+	if roles := decode[domain.User](t, r.Data).Roles; len(roles) != 2 {
+		t.Fatalf("multi-role assignment: %+v", roles)
+	}
+	expectCode(t, call(t, app, "PUT", "/api/v1/users/"+erin.ID.String()+"/roles", bearer, map[string]any{"role_ids": []uuid.UUID{}}), 200, response.CodeSuccess)
+	var admin domain.User
+	container.DB.First(&admin, "username = ?", "admin")
+	expectCode(t, call(t, app, "PUT", "/api/v1/users/"+admin.ID.String()+"/roles", bearer, map[string]any{"role_ids": []uuid.UUID{auditor.ID}}), 403, response.CodeBuiltinProtected)
+	frank := createLocalUser(t, app, bearer, "frank", nil)
+	expectCode(t, call(t, app, "PATCH", "/api/v1/users/"+frank.ID.String()+"/status", bearer, map[string]any{"status": 2, "expected_revision": frank.EditRevision}), 200, response.CodeSuccess)
+	container.DB.Create(&domain.User{Username: "gina", Domain: "corp.local", AuthType: domain.AuthTypeAD, Status: 1})
+	r = call(t, app, "GET", "/api/v1/users/stats", bearer, nil)
+	expectCode(t, r, 200, response.CodeSuccess)
+	stats := decode[domain.UserStats](t, r.Data)
+	if stats.Total != 4 || stats.Active != 3 || stats.Disabled != 1 || stats.Local != 3 || stats.Directory != 1 || stats.Unassigned != 4 {
+		t.Fatalf("stats: %+v", stats)
+	}
+	if len(stats.ByDomain) != 1 || stats.ByDomain[0].Domain != "corp.local" || stats.ByDomain[0].Count != 1 {
+		t.Fatalf("by_domain: %+v", stats.ByDomain)
+	}
+	if page := listUsers(t, app, bearer, "auth_type=ad"); page.Total != 1 || page.Items[0].Username != "gina" {
+		t.Fatalf("auth_type filter: %+v", page.Items)
+	}
+	if page := listUsers(t, app, bearer, "status=1,2"); page.Total != 4 {
+		t.Fatalf("multi status filter: %d", page.Total)
+	}
+	page := listUsers(t, app, bearer, "sort=username:asc")
+	if page.Items[0].Username != "admin" || page.Items[len(page.Items)-1].Username != "gina" {
+		t.Fatalf("sort by username asc: %v", page.Items)
+	}
+}
+
+func TestUserStatusUsesCompareAndSetAndRevokesAcrossReenable(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	admin := adminToken(t, app)
+	user := createLocalUser(t, app, admin, "revocation-target", nil)
+	var initialUser domain.User
+	if err := container.DB.First(&initialUser, "id = ?", user.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	loginBody := `{"username":"revocation-target","password":"Str0ng!pass"}`
+	sessionResponse := doAuth(t, app, "POST", "/api/v1/auth/login", loginBody, "http://localhost:5173", "", nil)
+	if sessionResponse.StatusCode != 200 {
+		t.Fatalf("session login: %d", sessionResponse.StatusCode)
+	}
+	cookie := sessionResponse.Cookies()[0]
+	readAuth(t, sessionResponse)
+	pairResponse := call(t, app, "POST", "/api/v1/auth/token", "", map[string]string{"username": "revocation-target", "password": "Str0ng!pass"})
+	expectCode(t, pairResponse, 200, response.CodeSuccess)
+	pair := decode[domain.TokenPair](t, pairResponse.Data)
+	statusPath := "/api/v1/users/" + user.ID.String() + "/status"
+	var afterLogin domain.User
+	if err := container.DB.First(&afterLogin, "id = ?", user.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if afterLogin.EditRevision != user.EditRevision {
+		t.Fatalf("last-login metadata changed the edit revision: before=%d after=%d", user.EditRevision, afterLogin.EditRevision)
+	}
+
+	disabled := call(t, app, "PATCH", statusPath, admin, map[string]any{"status": domain.StatusDisabled, "expected_revision": user.EditRevision})
+	expectCode(t, disabled, 200, response.CodeSuccess)
+	disabledUser := decode[domain.User](t, disabled.Data)
+	if disabledUser.EditRevision != user.EditRevision+1 {
+		t.Fatalf("disable did not bump edit revision: %d", disabledUser.EditRevision)
+	}
+	var afterDisable domain.User
+	if err := container.DB.First(&afterDisable, "id = ?", user.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if afterDisable.AuthVersion != initialUser.AuthVersion+1 {
+		t.Fatalf("disable did not atomically bump auth_version: %d", afterDisable.AuthVersion)
+	}
+	enabled := call(t, app, "PATCH", statusPath, admin, map[string]any{"status": domain.StatusEnabled, "expected_revision": disabledUser.EditRevision})
+	expectCode(t, enabled, 200, response.CodeSuccess)
+	enabledUser := decode[domain.User](t, enabled.Data)
+	var afterEnable domain.User
+	if err := container.DB.First(&afterEnable, "id = ?", user.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if afterEnable.AuthVersion != afterDisable.AuthVersion || afterEnable.Status != domain.StatusEnabled {
+		t.Fatalf("re-enable restored revoked auth version: status=%d auth_version=%d", afterEnable.Status, afterEnable.AuthVersion)
+	}
+	expectCode(t, call(t, app, "PATCH", statusPath, admin, map[string]any{"status": domain.StatusDisabled, "expected_revision": user.EditRevision}), 409, response.CodeResourceConflict)
+
+	if res := doAuth(t, app, "GET", "/api/v1/auth/me", "", "", "", cookie); res.StatusCode != 401 {
+		readAuth(t, res)
+		t.Fatalf("pre-disable cookie remained valid after re-enable: %d", res.StatusCode)
+	} else {
+		readAuth(t, res)
+	}
+	if res := doAuth(t, app, "GET", "/api/v1/auth/me", "", "", "Bearer "+pair.AccessToken, nil); res.StatusCode != 401 {
+		readAuth(t, res)
+		t.Fatalf("pre-disable access token remained valid after re-enable: %d", res.StatusCode)
+	} else {
+		readAuth(t, res)
+	}
+	refresh := call(t, app, "POST", "/api/v1/auth/refresh", "", map[string]string{"refresh_token": pair.RefreshToken})
+	expectCode(t, refresh, 401, response.CodeSessionRevoked)
+	newPair := call(t, app, "POST", "/api/v1/auth/token", "", map[string]string{"username": "revocation-target", "password": "Str0ng!pass"})
+	expectCode(t, newPair, 200, response.CodeSuccess)
+	newAccess := decode[domain.TokenPair](t, newPair.Data).AccessToken
+	if res := doAuth(t, app, "GET", "/api/v1/auth/me", "", "", "Bearer "+newAccess, nil); res.StatusCode != 200 {
+		readAuth(t, res)
+		t.Fatalf("fresh token rejected after re-enable: %d", res.StatusCode)
+	} else {
+		readAuth(t, res)
+	}
+	if enabledUser.EditRevision != afterEnable.EditRevision {
+		t.Fatal("enabled user response returned a stale revision")
+	}
+	// Legacy v1 clients that omit expected_revision remain compatible; the
+	// service reads the current revision and still commits through repository CAS.
+	expectCode(t, call(t, app, "PATCH", statusPath, admin, map[string]any{"status": domain.StatusDisabled}), 200, response.CodeSuccess)
+}
+
+func TestUserCreateValidatesRoleAssociationsTransactionally(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	createdRole := call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "create-tx-role", "name": "事务角色"})
+	expectCode(t, createdRole, 200, response.CodeSuccess)
+	role := decode[domain.Role](t, createdRole.Data)
+	user := call(t, app, "POST", "/api/v1/users", bearer, map[string]any{
+		"username": "transactional-user",
+		"email":    "transactional-user@x.com",
+		"password": "Str0ng!pass",
+		"role_ids": []string{role.ID.String(), role.ID.String()},
+	})
+	expectCode(t, user, 200, response.CodeSuccess)
+	createdUser := decode[domain.User](t, user.Data)
+	if len(createdUser.Roles) != 1 || createdUser.Roles[0].ID != role.ID {
+		t.Fatalf("duplicate initial role IDs were not idempotent: %+v", createdUser.Roles)
+	}
+	missingRoleID := uuid.New()
+	failed := call(t, app, "POST", "/api/v1/users", bearer, map[string]any{
+		"username": "transaction-rollback",
+		"email":    "transaction-rollback@x.com",
+		"password": "Str0ng!pass",
+		"role_ids": []string{missingRoleID.String()},
+	})
+	expectCode(t, failed, 404, response.CodeRoleNotFound)
+	var residual int64
+	if err := container.DB.Model(&domain.User{}).Where("username = ?", "transaction-rollback").Count(&residual).Error; err != nil {
+		t.Fatal(err)
+	}
+	if residual != 0 {
+		t.Fatalf("failed role association left a user row behind: %d", residual)
+	}
+}
+
+func TestSelfServiceAndOptionsNeedOnlyAuthentication(t *testing.T) {
+	_, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	createLocalUser(t, app, bearer, "nobody", nil)
+	plain := tokenFor(t, app, "nobody", "Str0ng!pass")
+	expectCode(t, call(t, app, "GET", "/api/v1/users", plain, nil), 403, response.CodePermissionDenied)
+	expectCode(t, call(t, app, "GET", "/api/v1/options/roles", plain, nil), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "GET", "/api/v1/options/departments", plain, nil), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "PUT", "/api/v1/users/me/preferences", plain, map[string]any{"theme": "dark", "session_timeout": 3600}), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "PUT", "/api/v1/users/me/preferences", plain, map[string]any{"session_timeout": -1}), 400, response.CodeParamInvalid)
+}
+
+func TestUserKeywordSearchIsLiteralAndCaseInsensitive(t *testing.T) {
+	_, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+	createLocalUser(t, app, bearer, "Alpha_One", nil)
+	createLocalUser(t, app, bearer, "alphaxone", nil)
+	if page := listUsers(t, app, bearer, "keyword=alpha_"); page.Total != 1 || page.Items[0].Username != "Alpha_One" {
+		t.Fatalf("underscore must match literally and ignore case: %+v", page)
+	}
+	if page := listUsers(t, app, bearer, "keyword=ALPHA"); page.Total != 2 {
+		t.Fatalf("keyword search must ignore case: total=%d", page.Total)
+	}
+	if page := listUsers(t, app, bearer, "keyword=%25"); page.Total != 0 {
+		t.Fatalf("percent must not act as a wildcard: total=%d", page.Total)
+	}
+}
+
+func TestBatchAssignRoles(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
+	defer cleanup()
+	bearer := adminToken(t, app)
+
+	role1Result := call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "batch-role-1", "name": "角色一"})
+	expectCode(t, role1Result, 200, response.CodeSuccess)
+	role1 := decode[domain.Role](t, role1Result.Data)
+
+	role2Result := call(t, app, "POST", "/api/v1/roles", bearer, map[string]any{"code": "batch-role-2", "name": "角色二"})
+	expectCode(t, role2Result, 200, response.CodeSuccess)
+	role2 := decode[domain.Role](t, role2Result.Data)
+
+	u1 := createLocalUser(t, app, bearer, "batch_user_1", nil)
+	u2 := createLocalUser(t, app, bearer, "batch_user_2", nil)
+
+	batchAssign := func(userIds []uuid.UUID, roleIds []uuid.UUID) apiResult {
+		return call(t, app, "POST", "/api/v1/users/batch-assign-roles", bearer, map[string]any{
+			"user_ids": userIds,
+			"role_ids": roleIds,
+		})
+	}
+
+	expectCode(t, batchAssign([]uuid.UUID{u1.ID, u2.ID, u1.ID}, []uuid.UUID{role1.ID}), 400, response.CodeParamInvalid)
+	expectCode(t, batchAssign([]uuid.UUID{}, []uuid.UUID{role1.ID}), 400, response.CodeParamInvalid)
+	expectCode(t, batchAssign([]uuid.UUID{u1.ID, uuid.New()}, []uuid.UUID{role1.ID}), 404, response.CodeUserNotFound)
+	expectCode(t, batchAssign([]uuid.UUID{u1.ID, u2.ID}, []uuid.UUID{uuid.New()}), 404, response.CodeRoleNotFound)
+
+	res := batchAssign([]uuid.UUID{u1.ID, u2.ID}, []uuid.UUID{role1.ID, role2.ID, role1.ID})
+	expectCode(t, res, 200, response.CodeSuccess)
+	if decode[map[string]int](t, res.Data)["updated"] != 2 {
+		t.Fatalf("expected updated count 2: %s", res.Data)
+	}
+
+	for _, id := range []uuid.UUID{u1.ID, u2.ID} {
+		detail := call(t, app, "GET", "/api/v1/users/"+id.String(), bearer, nil)
+		expectCode(t, detail, 200, response.CodeSuccess)
+		u := decode[domain.User](t, detail.Data)
+		if len(u.Roles) != 2 {
+			t.Fatalf("expected 2 roles on user %s, got %d", id, len(u.Roles))
+		}
+	}
+
+	clearRes := batchAssign([]uuid.UUID{u1.ID, u2.ID}, []uuid.UUID{})
+	expectCode(t, clearRes, 200, response.CodeSuccess)
+	if decode[map[string]int](t, clearRes.Data)["updated"] != 2 {
+		t.Fatalf("expected updated count 2: %s", clearRes.Data)
+	}
+	detail := call(t, app, "GET", "/api/v1/users/"+u1.ID.String(), bearer, nil)
+	expectCode(t, detail, 200, response.CodeSuccess)
+	if len(decode[domain.User](t, detail.Data).Roles) != 0 {
+		t.Fatalf("expected 0 roles after clearing")
+	}
+
+	var adminUser domain.User
+	if err := container.DB.Where("built_in = ?", true).First(&adminUser).Error; err != nil {
+		t.Fatal(err)
+	}
+	var adminRole domain.Role
+	if err := container.DB.Where("code = ?", domain.AdminRoleCode).First(&adminRole).Error; err != nil {
+		t.Fatal(err)
+	}
+	expectCode(t, batchAssign([]uuid.UUID{adminUser.ID, u1.ID}, []uuid.UUID{adminRole.ID, role1.ID}), 403, response.CodeBuiltinProtected)
+	expectCode(t, call(t, app, "PUT", "/api/v1/users/"+adminUser.ID.String()+"/roles", bearer, map[string]any{"role_ids": []uuid.UUID{adminRole.ID, role1.ID}}), 403, response.CodeBuiltinProtected)
+	detail = call(t, app, "GET", "/api/v1/users/"+u1.ID.String(), bearer, nil)
+	expectCode(t, detail, 200, response.CodeSuccess)
+	if len(decode[domain.User](t, detail.Data).Roles) != 0 {
+		t.Fatal("mixed batch modified a regular user")
+	}
+}

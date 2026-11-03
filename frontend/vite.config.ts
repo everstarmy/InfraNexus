@@ -1,0 +1,34 @@
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import path from "path";
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react(), tailwindcss(), {
+    name: 'data-table-gallery-alias',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        if (req.url?.split('?')[0] === '/__e2e__/data-table') req.url = req.url.replace('/__e2e__/data-table', '/e2e/fixtures/data-table/index.html')
+        next()
+      })
+    },
+  }],
+  test: {
+    include: ["src/**/*.test.{ts,tsx}"],
+  },
+  resolve: {
+    alias: {
+      "@": path.resolve(import.meta.dirname, "./src"),
+    },
+  },
+  server: {
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: process.env.INFRANEXUS_PROXY_TARGET || "http://127.0.0.1:8080",
+        changeOrigin: true,
+      },
+    },
+  },
+});

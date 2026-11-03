@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-23",
+  "scope": "authorization Outbox idle SQL noise filtering",
+  "configuration_changed": false,
+  "polling_interval_changed": false,
+  "before_fix": "TestGORMEmptyPollFiltering/empty_background_poll and real SQLite Service polling test failed with INFO SQL; three empty polls yielded three events",
+  "after_fix": {
+    "race_command": "go -C backend test -race -p 1 -json ./... -count=1",
+    "passed_events_including_subtests": 212,
+    "passed_top_level_tests": 139,
+    "failed": 0,
+    "skipped": [
+      {
+        "package": "infranexus/internal/bootstrap",
+        "test": "TestLiveADRootDSEAndPagingReadOnly"
+      },
+      {
+        "package": "infranexus/internal/bootstrap",
+        "test": "TestLiveADGatewayReadOnly"
+      },
+      {
+        "package": "infranexus/internal/bootstrap",
+        "test": "TestLiveADIsolatedApplicationLifecycle"
+      }
+    ],
+    "packages": 9,
+    "sqlite_and_postgres_idle_tests_executed": true,
+    "isolated_redis": "8"
+  },
+  "vet_exit_code": 0,
+  "default_configuration_process_smoke": {
+    "default_logging_unchanged": true,
+    "idle_observation_seconds": 2,
+    "empty_worker_sql_events": 0,
+    "normal_startup_sql_present": true,
+    "graceful_shutdown": true,
+    "exit_code": 0
+  },
+  "retained": [
+    "ordinary request empty SQL",
+    "nonempty polling results",
+    "unknown row counts",
+    "slow polls",
+    "failed polls",
+    "subsequent publish/update operations"
+  ],
+  "environment": "Go 1.27.2 macOS arm64; temporary SQLite; disposable PostgreSQL 17.11 and Redis 8; no production or user-running process changed"
+}

@@ -1,0 +1,101 @@
+{
+  "date": "2026-10-23",
+  "scope": "user-approved test environment; no production deployment",
+  "r13": {
+    "status": "complete_by_explicit_waiver",
+    "manual_screen_reader_executed": false
+  },
+  "r14": {
+    "status": "complete_within_test_environment_scope",
+    "production_ready_claim": false
+  },
+  "directory": {
+    "operations": [
+      "bind",
+      "search",
+      "certificate-verified StartTLS capability probe"
+    ],
+    "writes": 0,
+    "total": 5,
+    "enabled": 3,
+    "disabled": 2,
+    "page_size": 2,
+    "pages": 3,
+    "complete_unique_identity_set": true,
+    "configured_transport": "LDAP",
+    "starttls_advertised": true,
+    "starttls_verified": false,
+    "real_500_plus_users_tested": false
+  },
+  "live_tests": {
+    "sqlite": {
+      "tests": 3,
+      "result": "pass",
+      "race": true,
+      "package_seconds": 4.322
+    },
+    "postgres": {
+      "tests": 1,
+      "result": "pass",
+      "race": true,
+      "package_seconds": 3.77
+    }
+  },
+  "application_assertions": {
+    "concurrent_jit_logins": 3,
+    "unique_profiles": 1,
+    "sync_created": 2,
+    "synthetic_local_missing_user_disabled": 1,
+    "ad_entries_modified": 0,
+    "authz_revocation": "verified",
+    "preview_read_only": "verified",
+    "idempotency": "verified",
+    "repeat_full_and_incremental": "verified",
+    "http_redis_sse_replay": "verified",
+    "secret_redaction": "verified",
+    "shutdown_within_3_seconds": true
+  },
+  "read_only_audit": {
+    "engines": [
+      "sqlite",
+      "postgres"
+    ],
+    "missing_policies": 0,
+    "extra_policies": 0,
+    "missing_default_roles": 0,
+    "broken_department_references": 0,
+    "inconsistent_task_counts": 0,
+    "production_historical_data": "not applicable; user confirmed no deployment"
+  },
+  "regression": {
+    "name": "TestLDAPSyncTerminalProgressBypassesThrottle",
+    "before_fix": "success and partial scenarios fail with processed=0; expected 2",
+    "after_fix": "success, partial and canceled pass under race count=3"
+  },
+  "limitations": [
+    "manual accessibility acceptance explicitly waived",
+    "certificate-verified StartTLS probe unsuccessful; encrypted transport not accepted",
+    "5 directory identities, not production-scale 500+ acceptance",
+    "different production gateways require validation",
+    "no production historical database to audit",
+    "frontend unchanged; previous frontend evidence reused"
+  ],
+  "verification": {
+    "full_backend_race": {
+      "command": "go test -race -count=1 -p=1 ./...",
+      "result": "pass",
+      "bootstrap_seconds": 141.604,
+      "external_integration_environment": "unset; opt-in cases skip here, real AD SQLite/PostgreSQL executed separately as recorded"
+    },
+    "vet": {
+      "command": "go vet ./...",
+      "result": "pass"
+    },
+    "docker_build": {
+      "command": "docker build -f backend/Dockerfile -t infranexus/backend:local .",
+      "result": "pass",
+      "platform": "linux/arm64",
+      "image_id": "sha256:d69c21582a3f9bc574bc756c0cfe11b39c65b72300365dd02c9e44ea3d7c43c4"
+    }
+  }
+}

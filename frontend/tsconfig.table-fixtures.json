@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "e2e/fixtures/data-table/**/*.ts",
+    "e2e/data-table-baseline.spec.ts",
+    "e2e/data-table-layout.spec.ts",
+    "e2e/data-table-toolbar.spec.ts",
+    "e2e/table-layout-pagination.spec.ts",
+    "integration/data-table-query.spec.ts"
+  ],
+  "exclude": []
+}

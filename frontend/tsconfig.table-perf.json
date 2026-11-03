@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src",
+    "perf/data-table",
+    "perf/data-table.spec.ts",
+    "vite.table-perf.config.ts",
+    "playwright.table-perf.config.ts"
+  ],
+  "exclude": ["src/**/*.test.ts"]
+}
