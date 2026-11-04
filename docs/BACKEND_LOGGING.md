@@ -1,6 +1,6 @@
 # 后端日志使用说明
 
-2026-10-23 日志专项实施后的运行契约。设计背景见 [方案](BACKEND_LOGGING_PLAN.md)，任务与验收见 [TODOLIST](TODOLIST.md)。
+本文记录后端日志运行契约。回归证据见 [日志专项验收](BACKEND_LOGGING_VALIDATION.md)。
 
 ## 记录方式与位置
 

@@ -55,7 +55,7 @@ docker compose down
 
 `down` 保留数据卷；日常停止不要添加 `--volumes`。
 
-R09 专用故障脚本、诊断接口和构建标签已移除。SSE 生命周期修复及正式回归测试保留，历史验收证据见 [R09 历史记录](R09_DOCKER_VALIDATION.md)。
+SSE 生命周期由现有集成回归覆盖，运行方法见 [平台集成检查](../README.md#平台集成检查)。
 
 ## 日志
 

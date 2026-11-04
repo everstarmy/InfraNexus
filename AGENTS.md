@@ -2,17 +2,6 @@
 
 本指南供所有参与 **InfraNexus** 项目研发的 AI 智能体（Agents）和工程师遵循。修改或扩展本代码库时必须严格遵循以下约定。
 
-## 功能范围冻结（2026-10-24 起生效）
-
-**InfraNexus 的后台管理脚手架功能范围已冻结，禁止智能体自行扩大范围。** 以当前已实现并验收的能力为基线，后续工作以缺陷修复、安全修补、依赖维护、现有能力的兼容性与性能改进，以及测试、部署和文档维护为主。
-
-- 不得以“完善脚手架”“生产级”“最佳实践”或第三方建议为由，新增业务模块、用户功能或基础设施能力；不得把可选增强列为项目完成或交付的必要条件。
-- OpenAPI / SDK 自动生成、分布式登录限流、多设备会话管理及全量退出、Prometheus 指标、通用操作审计等建议均不属于默认实施范围。只有用户明确要求实施对应能力，才可在该次授权范围内开展工作。
-- 代码审查、项目评价、技术讨论或“是否应该增加”的询问不构成新增功能授权；已有规划文档、历史 TODO 和外部建议也不能替代用户授权。与本冻结规则冲突的未实施规划，未经明确授权不得执行。
-- 修复和重构必须围绕现有问题，保持改动范围最小，不顺带增加功能、扩大接口契约或引入无关依赖。确需改变功能边界时，先说明必要性和具体影响，取得用户明确授权后再实施；已明确授权的范围无需重复确认。
-
----
-
 ## 1. 目录结构规范 (Project Layout)
 
 项目采用现代前后端分离 monorepo/双目录结构：
@@ -99,10 +88,8 @@ InfraNexus/
 │   ├── package.json
 │   ├── vite.config.ts
 │   └── tsconfig.json
-├── REQUIREMENTS.md                 # 需求规格说明书
-├── AGENTS.md                       # 本协作规范
-├── ARCHITECTURE_AND_PLAN.md        # 具体架构与实现方案
-└── TODOLIST.md                     # 开发任务追踪看板
+├── docs/                            # 项目文档
+└── AGENTS.md                        # 本协作规范
 ```
 
 ---
@@ -183,7 +170,7 @@ return response.Error(c, fiber.StatusNotFound, response.CodeUserNotFound, "用�
   }
   ```
 - 外键关系（如 `sys_user_roles`）统一使用 `user_id uuid.UUID` 与 `role_id uuid.UUID` 关联。
-- 初始化连接池必须同时支持 SQLite 与 PostgreSQL，并由 Viper 统一注入池化参数。
+- 生产环境以 PostgreSQL 为基准。初始化连接池必须同时支持 SQLite 与 PostgreSQL，并由 Viper 统一注入池化参数。
 
 ### 2.6 认证双通道策略 (Session Cookie 与 JWT 分级)
 - **Web 端 SaaS 工作台**：采用 **HttpOnly + Secure + SameSite=Lax 的 Session Cookie**。免除前端存储 Token 被 XSS 窃取的风险，支持服务端空闲/绝对有效期及滑动续期；当前只实现单会话退出。
@@ -261,13 +248,8 @@ if err := s.users.UpdateColumns(ctx, user.ID, updates); err != nil {
 3. **Tailwind CSS v4**：
    - 采用 CSS 变量与现代 `@theme` 语法。
    - 所有颜色、圆角使用语义变量，如 `bg-background`, `text-foreground`, `border-border`，保证明暗模式无缝切换。
-2. **移动端优先与抽屉导航**：
-   - 导航栏使用折叠与响应式抽屉，在小屏下由顶部汉堡菜单唤出；在宽屏下保留固定侧栏。
-3. **Tailwind CSS v4**：
-   - 采用 CSS 变量与现代 `@theme` 语法。
-   - 所有颜色、圆角使用语义变量，如 `bg-background`, `text-foreground`, `border-border`，保证明暗模式无缝切换。
 
-### 3.2 数据表格组件接入与使用规范
+### 3.3 数据表格组件接入与使用规范
 - 复用 `src/components/data-table` 的完整组件包：
   - `DataTable`: 核心表格容器。
   - `DataTableColumnHeader`: 带升降序排序的列标题。

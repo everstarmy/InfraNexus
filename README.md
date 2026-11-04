@@ -1,12 +1,24 @@
 # InfraNexus
 
-基于 **Go / Fiber v3 / React 19** 的前后端分离管理工作台脚手架，提供身份认证、权限控制、组织人员管理、AD/LDAP 目录同步、实时通知和日志基础设施，可在此基础上扩展业务模块。
+InfraNexus 面向银行数据中心的硬件运维与存储网络运维团队，建设**数据中心基础设施与存储网络资产运维管理系统（DCIM + SAN）**。业务范围覆盖机房空间、设备台账与生命周期、维保与备件、物理线路、带外采集、告警工单及 SAN 拓扑分析。
 
-项目已实现登录及六个工作台模块：**仪表盘、用户管理、部门管理、角色管理、权限清单、目录同步**。后端采用 Handler → Service → Repository 分层与接口注入；前端提供通用工作台布局、数据表格、表单和权限组件。
+当前代码已提供身份认证、权限、组织管理、目录同步、实时通知和日志等平台底座。下列业务能力按 [DCIM + SAN 业务需求规格](docs/DCIM_SAN_REQUIREMENTS.md) 分阶段实施与验收。
 
-本文按当前代码与截至 **2026-10-23** 的验收记录汇总已完成内容。验证范围和环境限制见文末，后续进度以 [任务清单](docs/TODOLIST.md) 为准。
+## 业务建设阶段
 
-## 已完成的业务模块
+| 阶段 | 交付范围 |
+| --- | --- |
+| **1A 台账底座** | 机房空间、机柜 U 位、库房库位、设备型号与台账、主备管理 IP、Excel 导入、扫码入库、生命周期及上架、移机、下架和报废工单 |
+| **1B 维保与备件** | 供应商、合同覆盖与到期预警、部件台账、备件库存、盘点、维修领料、坏件还厂与涉密介质处置 |
+| **1C 端口与线路** | 设备端口、配线架与 ODF、光缆芯、跳线、路由追踪与查找、跳线工单、标签及导入 |
+| **2A 采集骨架** | 控制中心与 mTLS 卫星探针、四类采集任务、错峰调度、立即采集、主备管理入口切换、台账对账与 PostgreSQL 时序存储。首批适配 Brocade FOS、华为 OceanStor 和服务器 Redfish |
+| **2B 告警闭环** | SNMP Trap、MIB 解译、成对消警、多来源归并、维护窗口、企业微信／短信／Webhook 通知与告警转工单 |
+| **3A 逻辑拓扑** | Brocade Fabric、Zone 与 ISL、华为存储映射、端到端路径、物理与逻辑对账、单点及残留分析和故障影响分析 |
+| **3B 厂商扩展** | Dell EMC PowerMax（经 Unisphere）、Unity、PowerStore，NetApp ONTAP 与 StorageGRID |
+
+设计基线约为 2,000 台服务器、50 台存储和 80 台光纤交换机。生产数据库使用 PostgreSQL，设备采集仅使用只读 REST API 与 SNMP（含 Trap）。阶段依赖、验收条件和现网待确认事项以业务需求规格为准。
+
+## 已实现的平台底座
 
 | 模块 | 当前能力 |
 | --- | --- |
@@ -80,7 +92,7 @@ InfraNexus/
 │   ├── e2e/                    # 浏览器与性能回归
 │   ├── nginx.conf
 │   └── package.json
-├── docs/                       # 需求、架构、API、操作手册与验收证据
+├── docs/                       # 业务需求、API、部署与组件规范
 ├── compose.yaml
 ├── .env.example
 ├── Makefile
@@ -257,39 +269,20 @@ npm --prefix frontend run test:e2e
 npm --prefix frontend run test:perf
 ```
 
-已登记的验证包括：
-
-| 范围 | 记录 |
-| --- | --- |
-| 后端 | 全量 race/vet，SQLite/PostgreSQL 并发、事务及故障回滚，真实 Redis 跨实例通知与连接回收 |
-| 前端 | Vitest、生产构建、Playwright；权限、表单冲突与草稿、通知恢复、多视口、明暗主题、键盘/触控、Axe 自动检查 |
-| 性能 | 部门树 1k/10k 节点虚拟化、过滤与 DOM/长任务预算；属于固定本机环境下的测量 |
-| 集成与部署 | 授权测试 AD 的只读认证/搜索及隔离应用同步，Docker/Nginx SSE 故障与停机，镜像构建和持久化冒烟 |
-| 日志专项 | HTTP→Service→Repository/GORM 请求关联、并发隔离、双数据库敏感哨兵检查、文件轮转及容器输出/停机 |
-
-当前完成结论为**代码与测试环境验收**。真实 AD 加密连接、500+ 用户真实目录规模及不同生产网关需在采用环境另验；人工 VoiceOver/NVDA 实测按此前约定豁免，不能算实测通过。日志专项未重新提供 Live AD 凭据，3 项既有目录测试跳过，双数据库/Redis 的日志相关回归已实际执行。当前没有正式部署验收结论。
-
-本机规模测试不代表生产吞吐或真实目录/网络延迟。现有登录限流为单进程；需要多实例统一限流时需扩展。运行日志与 LDAP 报告已有实现，完整业务审计和集中日志留存需另行接入。
-
 ## 文档索引
 
 | 文档 | 内容 |
 | --- | --- |
-| [需求规格](docs/REQUIREMENTS.md) | 产品能力、技术约束和接口约定 |
-| [架构与实现](docs/ARCHITECTURE_AND_PLAN.md) | 分层、模型、认证、权限与装配设计 |
-| [API 文档](docs/API.md) | 接口、权限、版本控制与实时事件契约 |
-| [开发协作规范](AGENTS.md) | 后端/前端编码、日志记录和验证要求 |
-| [任务清单](docs/TODOLIST.md) | 已完成任务、证据及后续环境门禁 |
+| [DCIM + SAN 业务需求规格](docs/DCIM_SAN_REQUIREMENTS.md) | 项目范围、七阶段依赖及验收条件 |
+| [开发协作规范](AGENTS.md) | 分层架构、开发约定和验证要求 |
+| [API 文档](docs/API.md) | 平台接口、权限与实时事件契约 |
 | [Docker 部署](docs/DOCKER.md) | 构建、初始化、持久化及操作命令 |
 | [迁移与升级](docs/MIGRATION_OPERATIONS.md) | 数据库迁移、升级和回退操作 |
 | [日志使用说明](docs/BACKEND_LOGGING.md) | 日志配置、存放、关联和错误记录 |
-| [发布验证记录](docs/RELEASE_VALIDATION.md) | 分阶段实际结果及历史范围说明 |
-| [AD 测试环境验收](docs/R14_AD_VALIDATION.md) | 真实目录验证与未覆盖范围 |
 | [日志专项验收](docs/BACKEND_LOGGING_VALIDATION.md) | 日志回归、运行环境和输出证据 |
+| [数据表格使用手册](frontend/src/components/data-table/README.md) | DataTable 接入与使用约定 |
 
-## 脚手架稳定性检查
-
-本轮修复范围和执行状态见 [稳定性方案](docs/SCAFFOLD_STABILIZATION_PLAN.md)、[任务清单](docs/TODOLIST.md)。功能范围冻结，后续以缺陷修复和维护为主。
+## 平台集成检查
 
 ```sh
 make check
