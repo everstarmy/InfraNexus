@@ -273,7 +273,7 @@ npm --prefix frontend run test:perf
 
 | 文档 | 内容 |
 | --- | --- |
-| [DCIM + SAN 业务需求规格](docs/DCIM_SAN_REQUIREMENTS.md) | 项目范围、七阶段依赖及验收条件 |
+| [DCIM + SAN 业务需求规格](docs/DCIM_SAN_REQUIREMENTS.md) | 项目范围、前置验证、七个业务阶段的依赖及验收条件 |
 | [开发协作规范](AGENTS.md) | 分层架构、开发约定和验证要求 |
 | [API 文档](docs/API.md) | 平台接口、权限与实时事件契约 |
 | [Docker 部署](docs/DOCKER.md) | 构建、初始化、持久化及操作命令 |
