@@ -66,7 +66,7 @@ func run() (result error) {
 	}
 	defer container.Close()
 
-	// 4. 自动数据库表结构迁移 (兼容 SQLite 与 PostgreSQL)
+	// 4. 执行 PostgreSQL 版本化迁移
 	if err := bootstrap.Migrate(container.DB); err != nil {
 		return err
 	}

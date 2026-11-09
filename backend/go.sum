@@ -170,8 +170,6 @@ github.com/gofiber/storage/redis/v3 v3.6.2 h1:93yTUzIXFhCIS+t6GI1w8/3hNSU0AARWkI
 github.com/gofiber/storage/redis/v3 v3.6.2/go.mod h1:x/sieGcaTuZG3ssTxJvhSoHp1L1dioTf+fZsuy9LkM4=
 github.com/gofiber/storage/s3/v2 v2.7.2 h1:RXavh0WdsPFootSl2WfDu0hyrePTGkTgIkyMeqqc6b0=
 github.com/gofiber/storage/s3/v2 v2.7.2/go.mod h1:hrmWlEmuEDXrhBAKF5fK8tJNh9o/aFr6ypd8QBpWu4U=
-github.com/gofiber/storage/sqlite3/v2 v2.3.1 h1:5c/iz15X20ZBvssQlxD1A0VfeCgMhWXKSK9OnnqDYaQ=
-github.com/gofiber/storage/sqlite3/v2 v2.3.1/go.mod h1:L/4oEND2QRNB0Ju+46JnPh2CoiHZSxYvj3tXshHDySQ=
 github.com/gofiber/storage/testhelpers/redis v0.1.0 h1:lDUwtanDf3f5YwlDwhbqnqCtj9Y/xc8ctxRE6HpQcws=
 github.com/gofiber/storage/testhelpers/redis v0.1.0/go.mod h1:Y1UccxbGVL04+TF5RuyCsksX+76hu6nJIWjPukBBgJ4=
 github.com/gofiber/utils/v2 v2.6.2 h1:+tX8EPc/WO4f8DiV1W3gGWPJvGdHFW3qLIR2ws06At0=

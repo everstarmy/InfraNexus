@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -104,11 +103,5 @@ func retryableOrganizationWrite(err error) bool {
 			return true
 		}
 	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "database is locked") ||
-		strings.Contains(message, "database table is locked") ||
-		strings.Contains(message, "sqlite_busy") ||
-		strings.Contains(message, "deadlock detected") ||
-		strings.Contains(message, "could not serialize access") ||
-		strings.Contains(message, "lock not available")
+	return false
 }

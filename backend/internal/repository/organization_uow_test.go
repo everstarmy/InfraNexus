@@ -3,78 +3,40 @@ package repository
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
 func TestOrganizationUnitOfWorkSerializesConcurrentRevisionWrites(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "organization.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runConcurrentOrganizationWrites(t, db)
-}
-
-func TestOrganizationUnitOfWorkSerializesConcurrentRevisionWritesPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatalf("connect test PostgreSQL database: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
 	runConcurrentOrganizationWrites(t, db)
 }
 
 func TestOrganizationUnitOfWorkSerializesOpposingDepartmentMoves(t *testing.T) {
-	db := openOrganizationSQLite(t, "opposing-moves.db")
+	db := openOrganizationPostgres(t)
 	runOpposingDepartmentMoves(t, db)
 }
 
 func TestOrganizationUnitOfWorkSerializesDepartmentDeleteAndUserTransfer(t *testing.T) {
-	db := openOrganizationSQLite(t, "delete-transfer.db")
+	db := openOrganizationPostgres(t)
 	runDepartmentDeleteAndUserTransfer(t, db)
 }
 
-func TestOrganizationUnitOfWorkDepartmentRacesPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatalf("connect test PostgreSQL database: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	runOpposingDepartmentMoves(t, db)
-	runDepartmentDeleteAndUserTransfer(t, db)
-}
-
-func openOrganizationSQLite(t *testing.T, name string) *gorm.DB {
+func openOrganizationPostgres(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), name)), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,26 +1,16 @@
 package repository
 
 import (
-	"os"
 	"testing"
 	"time"
 
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
-func TestExpiredPlansArePhysicallyDeleted(t *testing.T) {
-	testExpiredPlans(t, sqlite.Open(":memory:"))
-}
-
 func TestExpiredPlansArePhysicallyDeletedPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("requires isolated PostgreSQL")
-	}
-	testExpiredPlans(t, postgres.Open(dsn))
+	testExpiredPlans(t, testdb.Dialector(t))
 }
 
 func testExpiredPlans(t *testing.T, driver gorm.Dialector) {

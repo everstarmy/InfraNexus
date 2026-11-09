@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('M2 real SQLite query spans pages and rejects forbidden fields', async ({ page, context }, info) => {
+test('M2 PostgreSQL query spans pages and rejects forbidden fields', async ({ page, context }, info) => {
   await page.goto('/login')
   await page.getByLabel('用户名', { exact: true }).fill('admin')
   await page.getByLabel('登录密码', { exact: true }).fill('Smoke!Admin2468')
@@ -21,10 +21,12 @@ test('M2 real SQLite query spans pages and rejects forbidden fields', async ({ p
   expect(forbidden.status()).toBe(400)
   expect((await forbidden.json()).code).toBe(400001)
   await page.goto('/users')
+  await page.getByRole('button', { name: '更多表格操作', exact: true }).click()
   await page.getByRole('button', { name: /^高级查询/ }).click()
   await page.getByRole('button', { name: '添加条件', exact: true }).click()
   await page.getByLabel('条件1值1', { exact: true }).fill('m2-query-')
   await page.getByRole('button', { name: '添加排序', exact: true }).click()
+  await page.getByLabel('排序1字段', { exact: true }).selectOption('username')
   await page.getByRole('button', { name: '应用查询', exact: true }).click()
   await expect(page.getByText('共 12 条记录', { exact: false })).toBeVisible()
   await page.getByRole('button', { name: '下一页', exact: true }).click()

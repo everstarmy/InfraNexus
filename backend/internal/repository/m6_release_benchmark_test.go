@@ -11,12 +11,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/datatypes"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
 func BenchmarkM6PostgresAuthorizationRevisionRead(b *testing.B) {
@@ -187,11 +187,7 @@ func BenchmarkM6RedisSSEPublishAndDeliveryRead(b *testing.B) {
 
 func openM6BenchmarkPostgres(b *testing.B) *gorm.DB {
 	b.Helper()
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		b.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(b), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		b.Fatalf("connect benchmark PostgreSQL database: %v", err)
 	}

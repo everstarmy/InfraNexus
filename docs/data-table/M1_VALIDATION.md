@@ -1,5 +1,7 @@
 # M1 验收记录
 
+当前数据库支持范围为 PostgreSQL。下文涉及旧版文件数据库的结果是当时的验收记录。
+
 日期：2026-10-28。源码基点：`e7046d08fb49ac9ff82f90f59efd80f4315c6e03` 加当前工作区 M0/M1 改动，尚未创建本阶段提交。
 
 ## 交付范围与证据
@@ -38,7 +40,7 @@ PW_CHROME_CHANNEL=chrome npm run test:e2e -- data-table-layout.spec.ts --output=
 - 完整运行日志：`/tmp/infranexus-m1-final-e2e.log`；修复后日志：`/tmp/infranexus-m1-layout-final.log`，截图目录 `/tmp/infranexus-m1-layout-final/`。
 - 完整运行中的 reduced-motion 提示来自测试主动启用减少动画；动态模块加载错误来自错误边界用例主动拦截模块，两者对应测试通过。
 
-测试文件：`frontend/e2e/data-table-layout.spec.ts`（16 项 M1 用例），复用 M0 夹具及现有页面 E2E。测试运行的 API 为 mock，不能据此声称真实后端或数据库集成通过。本阶段未改后端，未运行 Go race/vet 或双数据库回归。
+测试文件：`frontend/e2e/data-table-layout.spec.ts`（16 项 M1 用例），复用 M0 夹具及现有页面 E2E。测试运行的 API 为 mock，不能据此声称真实后端或数据库集成通过。本阶段未改后端，未运行 Go race/vet 或数据库回归。
 
 修复过程中发现并回归：全屏 Dialog 提前卸载导致焦点恢复失败；密度单选菜单默认不关闭；触屏最小按钮高度被较高优先级的密度选择器覆盖。均通过对应行为断言验证，不将失败尝试计入通过结果。
 

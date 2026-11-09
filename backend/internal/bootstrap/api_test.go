@@ -7,8 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -19,6 +18,7 @@ import (
 	"infranexus/internal/domain"
 	"infranexus/internal/repository"
 	"infranexus/internal/service"
+	"infranexus/internal/testdb"
 )
 
 const testAdminPassword = "Admin!23456"
@@ -28,12 +28,6 @@ func setupTestApp(t *testing.T) (*AppContainer, *fiber.App, func()) {
 }
 
 func setupTestAppWithAdmin(t *testing.T, initializeAdmin bool) (*AppContainer, *fiber.App, func()) {
-	tempDir, err := os.MkdirTemp("", "infranexus_api_test_*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-
-	dbPath := filepath.Join(tempDir, "api_test.db")
 	cfg := &config.Config{
 		App: config.AppConfig{
 			Name:  "InfraNexus-Test",
@@ -42,14 +36,9 @@ func setupTestAppWithAdmin(t *testing.T, initializeAdmin bool) (*AppContainer, *
 			Debug: false,
 		},
 		Database: config.DatabaseConfig{
-			Driver: "sqlite",
-			SQLite: config.SQLiteConfig{
-				DBPath: dbPath,
-			},
-			Pool: config.PoolConfig{
-				MaxIdleConns: 2,
-				MaxOpenConns: 5,
-			},
+			DSN:          testdb.DSN(t),
+			MaxIdleConns: 2,
+			MaxOpenConns: 5,
 		},
 		Session: config.SessionConfig{
 			CookieName:     "infranexus_session",
@@ -75,6 +64,9 @@ func setupTestAppWithAdmin(t *testing.T, initializeAdmin bool) (*AppContainer, *
 		t.Fatalf("NewAppContainer failed: %v", err)
 	}
 
+	cleanup := sync.OnceFunc(container.Close)
+	t.Cleanup(cleanup)
+
 	// 迁移数据库
 	if err := Migrate(container.DB); err != nil {
 		t.Fatalf("Migrate failed: %v", err)
@@ -91,11 +83,6 @@ func setupTestAppWithAdmin(t *testing.T, initializeAdmin bool) (*AppContainer, *
 	fiberApp, err := NewFiberApp(container)
 	if err != nil {
 		t.Fatalf("NewFiberApp failed: %v", err)
-	}
-
-	cleanup := func() {
-		container.Close()
-		_ = os.RemoveAll(tempDir)
 	}
 
 	return container, fiberApp, cleanup

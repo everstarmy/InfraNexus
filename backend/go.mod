@@ -14,12 +14,10 @@ require (
 	github.com/gofiber/storage/postgres/v3 v3.7.2
 	github.com/gofiber/storage/redis/v3 v3.6.2
 	github.com/gofiber/storage/s3/v2 v2.7.2
-	github.com/gofiber/storage/sqlite3/v2 v2.3.1
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jimlambrt/gldap v0.1.14
-	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/spf13/viper v1.21.0
 	github.com/valyala/fasthttp v1.75.0
@@ -27,7 +25,6 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/datatypes v1.2.7
 	gorm.io/driver/postgres v1.6.3
-	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.2
 )
 
@@ -80,6 +77,7 @@ require (
 	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/mattn/go-sqlite3 v1.14.52 // indirect
 	github.com/microsoft/go-mssqldb v1.9.5 // indirect
 	github.com/molecule-man/go-brrr v1.3.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

@@ -87,7 +87,7 @@ var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
 
 // containsPattern builds a literal substring pattern for
 // "LOWER(column) LIKE LOWER(?) ESCAPE '\'". Both sides are folded by the
-// database so SQLite and PostgreSQL agree on case handling.
+// database for consistent case handling.
 func containsPattern(keyword string) string {
 	return "%" + likeEscaper.Replace(keyword) + "%"
 }

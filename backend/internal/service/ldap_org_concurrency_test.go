@@ -3,38 +3,23 @@ package service
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 
 	"infranexus/internal/domain"
 	"infranexus/internal/repository"
+	"infranexus/internal/testdb"
 )
 
 func TestLDAPDepartmentCreationInterleavesWithUserTransfer(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "ldap-organization.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
-	}
-	runLDAPDepartmentCreationInterleavesWithUserTransfer(t, db)
-}
-
-func TestLDAPDepartmentCreationInterleavesWithUserTransferPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatalf("connect test PostgreSQL database: %v", err)
 	}
 	runLDAPDepartmentCreationInterleavesWithUserTransfer(t, db)
 }

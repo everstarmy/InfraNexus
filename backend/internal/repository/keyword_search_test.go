@@ -1,30 +1,19 @@
 package repository
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
-func TestKeywordSearchIsLiteralAndCaseInsensitive(t *testing.T) {
-	testKeywordSearch(t, sqlite.Open(filepath.Join(t.TempDir(), "keyword.db")))
-}
-
 func TestKeywordSearchIsLiteralAndCaseInsensitivePostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	testKeywordSearch(t, postgres.Open(dsn))
+	testKeywordSearch(t, testdb.Dialector(t))
 }
 
 func testKeywordSearch(t *testing.T, driver gorm.Dialector) {

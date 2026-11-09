@@ -1,79 +1,21 @@
 package repository
 
 import (
-	"crypto/rand"
 	"errors"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
-func TestSetupConcurrentInitialization(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "setup.db")+"?_busy_timeout=5000"), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	runSetupConcurrency(t, db)
-}
-
 func TestSetupConcurrentInitializationPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	connection, err := pgx.ParseConfig(dsn)
-	if err != nil {
-		t.Fatal("parse isolated PostgreSQL connection configuration")
-	}
-	control, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatal("connect isolated PostgreSQL database")
-	}
-	controlSQL, err := control.DB()
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = controlSQL.Close() })
-
-	// Other repository tests use the shared database. Keep this first-run
-	// scenario in its own schema instead of assuming the public users table is empty.
-	schema := "setup_test_" + strings.ToLower(rand.Text())
-	if err := control.Exec("CREATE SCHEMA " + schema).Error; err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := control.Exec("DROP SCHEMA " + schema + " CASCADE").Error; err != nil {
-			t.Errorf("drop setup test schema: %v", err)
-		}
-	})
-	// A session-level SET would affect only one pooled connection. RuntimeParams
-	// applies this search path to every connection used by the concurrent workers.
-	if connection.RuntimeParams == nil {
-		connection.RuntimeParams = make(map[string]string)
-	}
-	connection.RuntimeParams["search_path"] = schema
-	sqlDB := stdlib.OpenDB(*connection)
-	sqlDB.SetMaxOpenConns(8)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatal("open isolated setup test schema")
 	}
 	runSetupConcurrency(t, db)
 }
@@ -134,7 +76,7 @@ func runSetupConcurrency(t *testing.T, db *gorm.DB) {
 }
 
 func TestSetupRoleAssignmentFailureRollsBackAdministrator(t *testing.T) {
-	db := openOrganizationSQLite(t, "setup-rollback.db")
+	db := openOrganizationPostgres(t)
 	if err := db.AutoMigrate(&domain.Role{}, &domain.User{}); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +84,7 @@ func TestSetupRoleAssignmentFailureRollsBackAdministrator(t *testing.T) {
 	if err := db.Create(&role).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec("CREATE TRIGGER reject_setup_role BEFORE INSERT ON sys_user_roles BEGIN SELECT RAISE(ABORT, 'role assignment rejected'); END").Error; err != nil {
+	if err := db.Exec("ALTER TABLE sys_user_roles ADD CONSTRAINT reject_setup_role CHECK (false)").Error; err != nil {
 		t.Fatal(err)
 	}
 	repo := NewSetupRepository(db)
@@ -153,7 +95,7 @@ func TestSetupRoleAssignmentFailureRollsBackAdministrator(t *testing.T) {
 	if initialized, err := repo.Initialized(t.Context()); err != nil || initialized {
 		t.Fatal("failed role assignment left a partially initialized administrator")
 	}
-	if err := db.Exec("DROP TRIGGER reject_setup_role").Error; err != nil {
+	if err := db.Exec("ALTER TABLE sys_user_roles DROP CONSTRAINT reject_setup_role").Error; err != nil {
 		t.Fatal(err)
 	}
 	user = &domain.User{Username: "admin", Password: "hashed-password", BuiltIn: true, AuthType: domain.AuthTypeLocal}

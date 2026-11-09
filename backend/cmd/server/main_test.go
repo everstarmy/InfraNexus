@@ -50,12 +50,12 @@ func TestStartupFailureProcess(t *testing.T) {
 					cmd.Env = append(cmd.Env, value)
 				}
 			}
-			cmd.Env = append(cmd.Env, "INFRANEXUS_TEST_STARTUP_FAILURE=1", "APP_APP_ENV=production", "APP_DATABASE_DRIVER=unsupported", "APP_LOGGING_FORMAT=json", "APP_LOGGING_OUTPUT=stdout", "APP_LOGGING_LEVEL=info", "APP_SECURITY_ENCRYPTION_KEY="+tc.key, "APP_JWT_SECRET="+tc.jwt)
+			cmd.Env = append(cmd.Env, "INFRANEXUS_TEST_STARTUP_FAILURE=1", "APP_APP_ENV=production", "APP_DATABASE_DSN=postgres://test:DB_SENTINEL@localhost:invalid/infranexus", "APP_LOGGING_FORMAT=json", "APP_LOGGING_OUTPUT=stdout", "APP_LOGGING_LEVEL=info", "APP_SECURITY_ENCRYPTION_KEY="+tc.key, "APP_JWT_SECRET="+tc.jwt)
 			output, err := cmd.CombinedOutput()
 			if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
 				t.Fatalf("expected exit 1, got %v", err)
 			}
-			for _, value := range []string{tc.key, tc.jwt} {
+			for _, value := range []string{tc.key, tc.jwt, "DB_SENTINEL"} {
 				if bytes.Contains(output, []byte(value)) {
 					t.Fatal("startup output leaked credential sentinel")
 				}

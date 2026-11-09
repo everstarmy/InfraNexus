@@ -1,25 +1,18 @@
 package repository
 
 import (
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
-func TestRetentionSQLite(t *testing.T) { testRetention(t, sqlite.Open(":memory:")) }
 func TestRetentionPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("requires isolated PostgreSQL")
-	}
-	testRetention(t, postgres.Open(dsn))
+	testRetention(t, testdb.Dialector(t))
 }
 func testRetention(t *testing.T, driver gorm.Dialector) {
 	db, err := gorm.Open(driver, &gorm.Config{})

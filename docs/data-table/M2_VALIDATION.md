@@ -1,5 +1,7 @@
 # M2 验收记录
 
+当前数据库支持范围为 PostgreSQL。下文涉及旧版文件数据库的结果是当时的验收记录。
+
 日期：2026-10-28。源码基点仍为 `e7046d08fb49ac9ff82f90f59efd80f4315c6e03`，M0/M1/M2 工作区改动尚未提交。实际接口见 [M2 接入说明](M2_IMPLEMENTATION.md)。
 
 ## 结果
@@ -12,7 +14,7 @@
 | 生产构建 | 通过；保留 Vite 入口 chunk >500kB 提示，没有开展无关分包优化 |
 | 完整 mock E2E | 99 项通过，耗时 4.9 分钟 |
 | 最后 URL 页大小/中文摘要修改后复验 | 5 项相关用例通过，耗时 16.1 秒；未把局部复验说成再次运行完整 99 项 |
-| 真实 SQLite 集成 | 新增 1 项通过，启动隔离后端并使用临时数据库，12 条合成用户跨页查询、复合排序、非法字段拒绝、页面查询与下一页 |
+| 真实 旧版文件数据库 集成 | 新增 1 项通过，启动隔离后端并使用临时数据库，12 条合成用户跨页查询、复合排序、非法字段拒绝、页面查询与下一页 |
 | Go 回归 | domain/repository/handler/service 包通过 |
 | Go race | 上述相关包通过 |
 | Go vet | `go vet ./...` 通过 |
@@ -51,7 +53,7 @@ PostgreSQL 复验入口：在明确指定的可丢弃测试数据库配置 `INFR
 
 - 查询验证拒绝未知/敏感字段、重复排序、错误操作符、范围倒置、无时区日期、超过 20 个条件、危险数值及损坏 JSON。
 - 特别覆盖枚举值传入数组/对象，返回无效查询而非 panic。
-- Repository 真实 SQLite 覆盖 OR 不能越过外层 status 范围、跨页顺序和总数一致、日期时区等价及包含边界、NULL-last 多列排序、LIKE 通配符字面量、未知字段。
+- Repository 真实 旧版文件数据库 覆盖 OR 不能越过外层 status 范围、跨页顺序和总数一致、日期时区等价及包含边界、NULL-last 多列排序、LIKE 通配符字面量、未知字段。
 - HTTP Handler 验证有效 query、页码、部门范围传递；非法 query 返回 400，且不进入服务调用。
 - 浏览器覆盖默认视图刷新恢复、重命名/删除确认、过期视图写入冲突、URL 保留其他命名空间、前进后退、URL 页大小、中文输入法结束前不提交。
 - 列布局覆盖移动、适配宽度、多列固定持久化、移动端临时降级不修改保存配置；纯函数覆盖系统列、组边界、删除列、宽度上下限和全部隐藏回退。
@@ -67,7 +69,7 @@ PostgreSQL 复验入口：在明确指定的可丢弃测试数据库配置 `INFR
 
 - `/tmp/infranexus-m2-full-e2e.log`：99 项完整回归。
 - `/tmp/infranexus-m2-focused-final.log`：最终局部复验。
-- `/tmp/infranexus-m2-integration.log`：真实 SQLite 集成；最终页面复验见 `/tmp/infranexus-m2-integration-final.log`（1 项通过）。
+- `/tmp/infranexus-m2-integration.log`：真实 旧版文件数据库 集成；最终页面复验见 `/tmp/infranexus-m2-integration-final.log`（1 项通过）。
 - `/tmp/infranexus-m2-postgres.log`：PostgreSQL 17.11 真实查询及字面量搜索，race 启用，两项通过。
 - `/tmp/infranexus-m2-go-final.log`、`/tmp/infranexus-m2-race.log`、`/tmp/infranexus-m2-vet.log`。
 - 系统临时目录 `infranexus-playwright-results/`：`m2-query-dialog.png`。
@@ -79,7 +81,7 @@ PostgreSQL 复验入口：在明确指定的可丢弃测试数据库配置 `INFR
 
 未覆盖项与边界：
 
-1. 双库验证覆盖用户查询 Repository 的相同场景；完整浏览器集成使用 SQLite，未运行 PostgreSQL 浏览器部署矩阵。
+1. 历史数据库矩阵覆盖用户查询 Repository 的相同场景；完整浏览器集成使用 旧版文件数据库，未运行 PostgreSQL 浏览器部署矩阵。
 2. Firefox/WebKit、真机触摸和原生浏览器菜单 200% 缩放仍未覆盖，沿用 M1 验收边界。
 3. 用户列表是本阶段高级查询/视图试点，角色、权限、LDAP 等页面未开放尚无服务端实现的高级查询入口。
 4. localStorage 冲突检测没有原子 CAS；极短时间内同时写入的竞争仍可能最后写入者获胜。没有云同步、团队共享和跨设备一致性承诺。

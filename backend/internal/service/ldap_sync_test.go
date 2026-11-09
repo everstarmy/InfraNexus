@@ -3,20 +3,19 @@ package service
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	coreerrors "infranexus/internal/core/errors"
 	"infranexus/internal/domain"
 	"infranexus/internal/repository"
+	"infranexus/internal/testdb"
 )
 
 type jitLookupBarrier struct {
@@ -60,7 +59,7 @@ func syncConfig(strategy string, mappings ...domain.OUMapping) *domain.LDAPConfi
 }
 
 func TestLDAPApplyCreatesUserRoleAndDepartmentAtomically(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "ldap-apply-atomic.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +155,7 @@ func TestLDAPApplyCreatesUserRoleAndDepartmentAtomically(t *testing.T) {
 }
 
 func TestLDAPProvisionConcurrentJITUsesCommittedIdentityAndRejectsNameBinding(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "ldap-jit-race.db")+"?_busy_timeout=5000"), &gorm.Config{Logger: logger.Discard, TranslateError: true})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard, TranslateError: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +240,7 @@ func TestLDAPProvisionConcurrentJITUsesCommittedIdentityAndRejectsNameBinding(t 
 }
 
 func TestDepartmentResolverEvictsDeletedCachedDepartment(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "ldap-department-cache.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}

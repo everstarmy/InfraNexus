@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,13 +10,13 @@ import (
 	"github.com/casbin/casbin/v3/model"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"github.com/google/uuid"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"infranexus/internal/domain"
 	"infranexus/internal/middleware"
 	"infranexus/internal/repository"
+	"infranexus/internal/testdb"
 )
 
 type testAuthorizationNotifier struct {
@@ -65,7 +64,7 @@ func (fixedAuthorizationState) MarkFailed(context.Context, uuid.UUID, string, ti
 }
 
 func TestAuthorizationOutboxRetriesPublishFailureAndMarksSuccess(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "authorization-outbox.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +133,7 @@ func TestAuthorizationEnforcementFailsClosedWhenRevisionCannotBeRead(t *testing.
 }
 
 func TestAuthorizationEnforcementFailsClosedWhenPolicyReloadFails(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "authorization-load-failure.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}

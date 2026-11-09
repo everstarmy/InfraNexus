@@ -28,7 +28,7 @@ test('real batch status persists disable and enable through pagination actions',
     await expect(page.getByRole('alertdialog')).not.toContainText('已经是目标状态')
     await expect(page.getByRole('alertdialog')).not.toContainText('预检跳过')
     const execute = page.waitForResponse(r => r.url().endsWith('/batch-status'))
-    await page.getByRole('button', { name: '确认执行', exact: true }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: status === 2 ? '确认停用' : '确认启用', exact: true }).click()
     const previewResponse = await preview
     expect(previewResponse.status()).toBe(200)
     const response = await execute

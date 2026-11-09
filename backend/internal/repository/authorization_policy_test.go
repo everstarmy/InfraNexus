@@ -2,23 +2,21 @@ package repository
 
 import (
 	"context"
-	"os"
 	"sync"
 	"testing"
 
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"github.com/google/uuid"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
 func TestRolePolicyOutboxFailureRollsBackPermissionAndRevision(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/authorization-atomicity.db"), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +39,7 @@ func TestRolePolicyOutboxFailureRollsBackPermissionAndRevision(t *testing.T) {
 	if err := db.Create(&permission).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec(`CREATE TRIGGER reject_authorization_outbox BEFORE INSERT ON authorization_outbox BEGIN SELECT RAISE(ABORT, 'injected outbox failure'); END`).Error; err != nil {
+	if err := db.Exec(`ALTER TABLE authorization_outbox ADD CONSTRAINT reject_authorization_outbox CHECK (false)`).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -86,7 +84,7 @@ func TestRolePolicyOutboxFailureRollsBackPermissionAndRevision(t *testing.T) {
 }
 
 func TestAuthorizationReconcileCannotRestoreConcurrentRevocation(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/authorization-reconcile.db"), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,11 +98,7 @@ func TestAuthorizationReconcileCannotRestoreConcurrentRevocation(t *testing.T) {
 }
 
 func TestAuthorizationReconcileCannotRestoreConcurrentRevocationPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatalf("connect test PostgreSQL database: %v", err)
 	}
@@ -188,11 +182,7 @@ func runAuthorizationReconcileCannotRestoreConcurrentRevocation(t *testing.T, db
 }
 
 func TestRolePolicyTransactionsPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatalf("connect test PostgreSQL database: %v", err)
 	}

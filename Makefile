@@ -26,6 +26,7 @@ build-frontend:
 	cd frontend && npm run build
 
 test:
+	@test -n "$$INFRANEXUS_TEST_POSTGRES_DSN" || (echo 'Set an isolated disposable PostgreSQL DSN'; exit 1)
 	cd backend && go test -v ./...
 
 tidy:
@@ -46,6 +47,7 @@ docker-down:
 check: check-backend check-frontend
 
 check-backend:
+	@test -n "$$INFRANEXUS_TEST_POSTGRES_DSN" || (echo 'Set an isolated disposable PostgreSQL DSN'; exit 1)
 	go -C backend test -race -count=1 -p=1 ./...
 	go -C backend vet ./...
 	@test -z "$$(gofmt -l $$(git ls-files 'backend/*.go' 'backend/**/*.go'))"

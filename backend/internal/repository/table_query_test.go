@@ -1,28 +1,18 @@
 package repository
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
-func TestAdvancedUserQuery(t *testing.T) {
-	testAdvancedUserQuery(t, sqlite.Open(filepath.Join(t.TempDir(), "query.db")))
-}
 func TestAdvancedUserQueryPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("PostgreSQL not configured; this is not a passing database validation")
-	}
-	testAdvancedUserQuery(t, postgres.Open(dsn))
+	testAdvancedUserQuery(t, testdb.Dialector(t))
 }
 func testAdvancedUserQuery(t *testing.T, driver gorm.Dialector) {
 	t.Helper()

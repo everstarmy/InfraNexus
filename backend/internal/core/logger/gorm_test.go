@@ -36,7 +36,7 @@ func TestGORMModesAndLazySQL(t *testing.T) {
 			c := config.DefaultLogging(false, "test")
 			c.SQL.Level = "info"
 			log := testLogger(&out, c)
-			base := NewGORM(log, c.SQL, "sqlite")
+			base := NewGORM(log, c.SQL, "postgres")
 			l := base.LogMode(test.mode)
 			calls := 0
 			l.Trace(requestmeta.WithRequestID(t.Context(), "sql-request"), time.Now().Add(-test.elapsed), func() (string, int64) { calls++; return "SELECT ?", 1 }, test.err)
@@ -102,7 +102,7 @@ func TestGORMEmptyPollFiltering(t *testing.T) {
 			var out bytes.Buffer
 			c := config.DefaultLogging(true, "test")
 			c.Format = "json"
-			log := NewGORM(testLogger(&out, c), c.SQL, "sqlite")
+			log := NewGORM(testLogger(&out, c), c.SQL, "postgres")
 			ctx := t.Context()
 			if tc.marked {
 				ctx = requestmeta.WithSQLPoll(ctx)

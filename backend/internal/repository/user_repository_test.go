@@ -2,22 +2,19 @@ package repository
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
 func TestCreateWithRolesRollsBackUserWhenRoleIsMissing(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "user-roles.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,8 +37,7 @@ func TestCreateWithRolesRollsBackUserWhenRoleIsMissing(t *testing.T) {
 }
 
 func TestCreateWithRolesMapsConcurrentIdentityWinner(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "user-identity-race.db")
-	db, err := gorm.Open(sqlite.Open("file:"+path+"?_busy_timeout=5000"), &gorm.Config{Logger: logger.Discard, TranslateError: true})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard, TranslateError: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,60 +89,8 @@ func TestCreateWithRolesMapsConcurrentIdentityWinner(t *testing.T) {
 	}
 }
 
-func TestCreateWithRolesMapsConcurrentIdentityWinnerPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard, TranslateError: true})
-	if err != nil {
-		t.Fatalf("connect test PostgreSQL database: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlDB.SetMaxOpenConns(4)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&domain.Department{}, &domain.Role{}, &domain.User{}); err != nil {
-		t.Fatal(err)
-	}
-	repo := NewUserRepository(db)
-	username := "race-" + uuid.NewString()[:8]
-	domainName := "corp-" + uuid.NewString()[:8]
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	var wait sync.WaitGroup
-	for range 2 {
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			<-start
-			user := &domain.User{Username: username, Domain: domainName, ExternalID: "stable-guid", Email: username + "@example.test", AuthType: domain.AuthTypeLDAP, Status: domain.StatusEnabled}
-			results <- repo.CreateWithRoles(t.Context(), user, nil)
-		}()
-	}
-	close(start)
-	wait.Wait()
-	close(results)
-	created, conflicts := 0, 0
-	for err := range results {
-		switch {
-		case err == nil:
-			created++
-		case errors.Is(err, domain.ErrIdentityConflict):
-			conflicts++
-		default:
-			t.Fatalf("CreateWithRoles() error = %v, want a committed winner and typed identity conflict", err)
-		}
-	}
-	if created != 1 || conflicts != 1 {
-		t.Fatalf("concurrent create results = created %d, conflicts %d; want one each", created, conflicts)
-	}
-}
-
 func TestUpdateColumnsCASRejectsStaleRevision(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "user-revision.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,51 +118,39 @@ func TestUpdateColumnsCASRejectsStaleRevision(t *testing.T) {
 }
 
 func TestUpdateStatusDialectRegression(t *testing.T) {
-	for _, driver := range []string{"sqlite", "postgres"} {
-		t.Run(driver, func(t *testing.T) {
-			var dialector gorm.Dialector = sqlite.Open(filepath.Join(t.TempDir(), "status.db"))
-			if driver == "postgres" {
-				dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-				if dsn == "" {
-					t.Skip("requires an isolated PostgreSQL test database")
-				}
-				dialector = postgres.Open(dsn)
-			}
-			db, err := gorm.Open(dialector, &gorm.Config{Logger: logger.Discard})
-			if err != nil {
-				t.Fatal(err)
-			}
-			sqlDB, err := db.DB()
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = sqlDB.Close() })
-			if err := db.AutoMigrate(&domain.Department{}, &domain.Role{}, &domain.User{}); err != nil {
-				t.Fatal(err)
-			}
-			user := domain.User{Username: "status-" + uuid.NewString(), Email: uuid.NewString() + "@example.test", Password: "hash", AuthType: domain.AuthTypeLocal, Status: domain.StatusEnabled, EditRevision: 1, AuthVersion: 1}
-			if err := db.Create(&user).Error; err != nil {
-				t.Fatal(err)
-			}
-			repo := NewUserRepository(db)
-			for _, want := range []struct {
-				status      int
-				revision    int64
-				authVersion int64
-			}{{domain.StatusDisabled, 2, 2}, {domain.StatusEnabled, 3, 2}, {domain.StatusEnabled, 4, 2}} {
-				if err := repo.UpdateStatus(t.Context(), user.ID, want.status, user.EditRevision); err != nil {
-					t.Fatalf("UpdateStatus(%d): %v", want.status, err)
-				}
-				if err := db.First(&user, "id = ?", user.ID).Error; err != nil {
-					t.Fatal(err)
-				}
-				if user.Status != want.status || user.EditRevision != want.revision || int64(user.AuthVersion) != want.authVersion {
-					t.Fatalf("status/revisions = %d/%d/%d, want %d/%d/%d", user.Status, user.EditRevision, user.AuthVersion, want.status, want.revision, want.authVersion)
-				}
-			}
-			if err := repo.UpdateStatus(t.Context(), user.ID, domain.StatusDisabled, 1); !errors.Is(err, domain.ErrEditRevisionConflict) {
-				t.Fatalf("stale revision: %v", err)
-			}
-		})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&domain.Department{}, &domain.Role{}, &domain.User{}); err != nil {
+		t.Fatal(err)
+	}
+	user := domain.User{Username: "status-" + uuid.NewString(), Email: uuid.NewString() + "@example.test", Password: "hash", AuthType: domain.AuthTypeLocal, Status: domain.StatusEnabled, EditRevision: 1, AuthVersion: 1}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := NewUserRepository(db)
+	for _, want := range []struct {
+		status      int
+		revision    int64
+		authVersion int64
+	}{{domain.StatusDisabled, 2, 2}, {domain.StatusEnabled, 3, 2}, {domain.StatusEnabled, 4, 2}} {
+		if err := repo.UpdateStatus(t.Context(), user.ID, want.status, user.EditRevision); err != nil {
+			t.Fatalf("UpdateStatus(%d): %v", want.status, err)
+		}
+		if err := db.First(&user, "id = ?", user.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if user.Status != want.status || user.EditRevision != want.revision || int64(user.AuthVersion) != want.authVersion {
+			t.Fatalf("status/revisions = %d/%d/%d, want %d/%d/%d", user.Status, user.EditRevision, user.AuthVersion, want.status, want.revision, want.authVersion)
+		}
+	}
+	if err := repo.UpdateStatus(t.Context(), user.ID, domain.StatusDisabled, 1); !errors.Is(err, domain.ErrEditRevisionConflict) {
+		t.Fatalf("stale revision: %v", err)
 	}
 }

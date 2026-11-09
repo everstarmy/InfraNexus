@@ -3,17 +3,16 @@ package service
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	coreerrors "infranexus/internal/core/errors"
 	"infranexus/internal/domain"
 	"infranexus/internal/repository"
+	"infranexus/internal/testdb"
 )
 
 type failingJITRepository struct {
@@ -50,7 +49,7 @@ func (r *failingJITRepository) CreateWithRoles(ctx context.Context, u *domain.Us
 }
 func jitNegativeDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "jit.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}

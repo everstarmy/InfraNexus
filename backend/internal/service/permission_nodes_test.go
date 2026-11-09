@@ -1,28 +1,18 @@
 package service
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"infranexus/internal/domain"
 	"infranexus/internal/repository"
+	"infranexus/internal/testdb"
 )
 
-func TestPermissionNodeScopeSQLite(t *testing.T) {
-	testPermissionNodeScope(t, sqlite.Open(filepath.Join(t.TempDir(), "nodes.db")))
-}
 func TestPermissionNodeScopePostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("PostgreSQL not configured; not a passing database validation")
-	}
-	testPermissionNodeScope(t, postgres.Open(dsn))
+	testPermissionNodeScope(t, testdb.Dialector(t))
 }
 func testPermissionNodeScope(t *testing.T, driver gorm.Dialector) {
 	db, err := gorm.Open(driver, &gorm.Config{Logger: logger.Discard})

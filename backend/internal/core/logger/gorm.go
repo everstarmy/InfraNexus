@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
@@ -138,9 +137,6 @@ func SafeError(err error) []any {
 	attrs := []any{"error_type", fmt.Sprintf("%T", err)}
 	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
 		attrs = append(attrs, "db_code", pg.Code)
-	}
-	if sqlite, ok := errors.AsType[sqlite3.Error](err); ok {
-		attrs = append(attrs, "db_code", int(sqlite.ExtendedCode))
 	}
 	return attrs
 }

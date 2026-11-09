@@ -1,10 +1,12 @@
 # 后端日志专项验证记录
 
+当前数据库支持范围为 PostgreSQL。下文涉及旧版文件数据库的结果是当时的验收记录。
+
 日期：2026-10-23；范围：本地代码与隔离测试环境，未操作正式部署。对应任务 L01–L08，操作说明见 [日志使用说明](BACKEND_LOGGING.md)。
 
 ## 验收结论
 
-全量 race 测试退出码 0：200 项测试事件通过（含子用例，137 个顶层测试），3 项 Live AD 测试跳过，0 失败；9 个含测试包通过，其他包无测试。go vet、go mod tidy、Docker 构建与隔离容器冒烟通过。SQLite/PostgreSQL 日志专项用例及真实 Redis 回归均已执行。结构化环境与镜像证据见 [JSON](evidence/backend-logging-2026-10-23.json)。
+全量 race 测试退出码 0：200 项测试事件通过（含子用例，137 个顶层测试），3 项 Live AD 测试跳过，0 失败；9 个含测试包通过，其他包无测试。go vet、go mod tidy、Docker 构建与隔离容器冒烟通过。旧版文件数据库及 PostgreSQL 日志专项用例及真实 Redis 回归均已执行。结构化环境与镜像证据见 [JSON](evidence/backend-logging-2026-10-23.json)。
 
 各任务通过上述正式回归与对应代码变更验收，提交关联以 Git 历史为准。测试专用容器/卷已清理，历史 local 镜像和现有项目数据保持原状。
 
@@ -20,7 +22,7 @@
 
 ## 环境与命令
 
-执行环境：macOS arm64、Go 1.27.2、Docker Engine 29.3.1；隔离 PostgreSQL 17.11（alpine3.23）、Redis 8；SQLite 使用临时目录。测试 PostgreSQL/Redis 容器分别为 infranexus-logging-test-pg、infranexus-logging-test-redis，通过临时 loopback 端口提供；环境变量分别为 INFRANEXUS_TEST_POSTGRES_DSN、INFRANEXUS_TEST_REDIS_ADDR，不使用真实部署凭据。
+执行环境：macOS arm64、Go 1.27.2、Docker Engine 29.3.1；隔离 PostgreSQL 17.11（alpine3.23）、Redis 8；旧版文件数据库 使用临时目录。测试 PostgreSQL/Redis 容器分别为 infranexus-logging-test-pg、infranexus-logging-test-redis，通过临时 loopback 端口提供；环境变量分别为 INFRANEXUS_TEST_POSTGRES_DSN、INFRANEXUS_TEST_REDIS_ADDR，不使用真实部署凭据。
 
 实际命令（环境变量在命令执行时指向上述隔离实例）：
 
@@ -42,12 +44,12 @@ Go build cache 和 Buildx activity 目录切换到临时目录以满足写入边
 | TestContextGroupsAndConcurrency | 24 个并发请求隔离；task/operator 与请求一致；WithGroup/WithAttrs、无来源不伪造 |
 | TestIndependentLevelsAndBoundedEvent | app=error 时 sql=info 仍输出；超限保留关联字段与合法 JSON |
 | TestGORMModesAndLazySQL / TestGORMDisabledAndLiteralSQL | 各级别、NotFound、慢查询、LogMode 副本、禁用、惰性回调与字面值省略 |
-| TestHTTPServiceSQLCorrelation/sqlite、postgres | 真实 AuthHandler→AuthService→Repository/GORM；8 并发登录辅助操作失败仍成功，三流 ID 一致；真实失败 SQL→HTTP 500002；404/401/403/409/500/panic/CORS/超长 ID；官方与标准 Context ID 一致；参数、驱动、密码哈希与 panic 哨兵不泄露 |
+| TestHTTPServiceSQLCorrelation（历史矩阵） | 真实 AuthHandler→AuthService→Repository/GORM；8 并发登录辅助操作失败仍成功，三流 ID 一致；真实失败 SQL→HTTP 500002；404/401/403/409/500/panic/CORS/超长 ID；官方与标准 Context ID 一致；参数、驱动、密码哈希与 panic 哨兵不泄露 |
 | TestOutputFailureTriesOtherDestinations / TestInitializationFailureAndStdoutNoDirectory | 一个输出失败继续写另一个；诊断限频且不泄露原始错误；stdout 无目录副作用，文件初始化失败 |
 | TestFileRoutingRotationAndPermissions / TestBackupCountAndAgeCleanup | app/sql 分流、1MiB 触发实际轮转、压缩完整性、0640、备份数和年龄清理、重复关闭 |
 | TestSafeAttributes | 显式敏感字段和原始 error 保护、UTF-8 截断 |
 | TestLDAPTaskRestoresPersistedLogCorrelation | 任务从持久化来源恢复 Context；数据库操作与终态日志携带相同字段；无请求来源不伪造 |
-| 既有后端完整矩阵 | 授权/事务、双数据库、真实 Redis、LDAP 业务状态、SSE 停机等回归 |
+| 既有后端完整矩阵 | 授权/事务、数据库、真实 Redis、LDAP 业务状态、SSE 停机等回归 |
 
 ## Docker 实测
 
@@ -61,14 +63,14 @@ Go build cache 和 Buildx activity 目录切换到临时目录以满足写入边
 
 ### 正常空轮询 SQL 降噪增量（2026-10-23）
 
-反馈为默认开发配置下，无用户操作也每 500ms 打印授权 Outbox 空查询。正式回归 `TestAuthorizationWorkerIdleSQLLogging` 在真实 Service→Repository/GORM 链路连续执行三个空轮询，修复前复现三条 SQL，修复后无输出；SQLite/PostgreSQL 均执行。查到工作时仍发布和更新，普通请求空查询及数据库失败均保留日志。
+反馈为默认开发配置下，无用户操作也每 500ms 打印授权 Outbox 空查询。正式回归 `TestAuthorizationWorkerIdleSQLLogging` 在真实 Service→Repository/GORM 链路连续执行三个空轮询，修复前复现三条 SQL，修复后无输出；旧版文件数据库及 PostgreSQL 均执行。查到工作时仍发布和更新，普通请求空查询及数据库失败均保留日志。
 
-`TestGORMEmptyPollFiltering` 覆盖标记空轮询、普通空查询、带 request_id 的查询、非空结果、未知行数、慢查询、错误和 NotFound。默认配置进程冒烟未设置任何 logging 环境变量，空闲观察 2 秒未出现空轮询 SQL，正常启动 SQL 与 app.stopped 仍可见。该改动不改变轮询频率或日志参数。增量全量 race：212 项测试事件通过（含子用例），0 失败，3 项既有 Live AD 因无凭据跳过；vet 通过，隔离 SQLite/PostgreSQL/Redis 回归均执行。新证据见 [空轮询验证](evidence/backend-idle-sql-2026-10-23.json)。
+`TestGORMEmptyPollFiltering` 覆盖标记空轮询、普通空查询、带 request_id 的查询、非空结果、未知行数、慢查询、错误和 NotFound。默认配置进程冒烟未设置任何 logging 环境变量，空闲观察 2 秒未出现空轮询 SQL，正常启动 SQL 与 app.stopped 仍可见。该改动不改变轮询频率或日志参数。增量全量 race：212 项测试事件通过（含子用例），0 失败，3 项既有 Live AD 因无凭据跳过；vet 通过，隔离 旧版文件数据库及 PostgreSQL/Redis 回归均执行。新证据见 [空轮询验证](evidence/backend-idle-sql-2026-10-23.json)。
 
 ### 既有范围说明
 
 无数据库 schema 变更、无 API/前端业务字段迁移。日志消费方需适配 duration_ms 数值字段、route 路由模板、category/event、安全错误分类；旧 latency/path/trace 嵌套结构不继续保证。默认仍为 stdout；文件模式可改回 stdout 后重启。
 
-三项既有 Live AD 测试因本轮未注入真实目录凭据而跳过：TestLiveADRootDSEAndPagingReadOnly、TestLiveADGatewayReadOnly、TestLiveADIsolatedApplicationLifecycle。本轮日志专项的 SQLite/PostgreSQL/Redis 测试不允许以 Skip 代替通过；未重做真实企业目录验收，也未配置集中采集和生产磁盘配额。L05 的来源恢复采用已持久化任务快照的正式回归，无新增进程崩溃恢复协议。
+三项既有 Live AD 测试因本轮未注入真实目录凭据而跳过：TestLiveADRootDSEAndPagingReadOnly、TestLiveADGatewayReadOnly、TestLiveADIsolatedApplicationLifecycle。本轮日志专项的 旧版文件数据库及 PostgreSQL/Redis 测试不允许以 Skip 代替通过；未重做真实企业目录验收，也未配置集中采集和生产磁盘配额。L05 的来源恢复采用已持久化任务快照的正式回归，无新增进程崩溃恢复协议。
 
 SQL 正文省略是保守策略，不是任意 SQL 方言脱敏保证；Raw/Exec 必须继续绑定参数。轮转清理/压缩由依赖库异步维护触发，Close 不承诺等待所有历史压缩完成；容器日志容量策略不保证固定保留天数。运行日志不承担完整业务审计。

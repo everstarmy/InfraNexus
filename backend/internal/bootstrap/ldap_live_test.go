@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +27,7 @@ import (
 	"infranexus/internal/domain"
 	"infranexus/internal/repository"
 	"infranexus/internal/service"
+	"infranexus/internal/testdb"
 )
 
 // liveADConfig is explicitly opt-in. No directory credentials are embedded in
@@ -164,7 +164,7 @@ func liveADApplication(t *testing.T) (*AppContainer, string, *liveLogBuffer) {
 	logs := &liveLogBuffer{}
 	cfg := &config.Config{
 		App:      config.AppConfig{Name: "InfraNexus-Live-AD-Acceptance", Env: "test"},
-		Database: config.DatabaseConfig{Driver: "sqlite", SQLite: config.SQLiteConfig{DBPath: filepath.Join(t.TempDir(), "live-ad.db")}, Pool: config.PoolConfig{MaxIdleConns: 2, MaxOpenConns: 5}},
+		Database: config.DatabaseConfig{MaxIdleConns: 2, MaxOpenConns: 5},
 		Redis:    config.RedisConfig{Host: host, Port: port, PoolSize: 10},
 		Session:  config.SessionConfig{CookieName: "infranexus_live_ad", MaxAge: 1800, AbsoluteMaxAge: 86400, SameSite: "Lax"},
 		JWT:      config.JWTConfig{Secret: uuid.NewString() + uuid.NewString(), AccessTokenExpire: 900, RefreshTokenExpire: 3600, Issuer: "live-ad-test"},
@@ -185,7 +185,14 @@ func liveADApplication(t *testing.T) (*AppContainer, string, *liveLogBuffer) {
 		if pgPassword == "" {
 			t.Fatal("missing disposable PostgreSQL password")
 		}
-		cfg.Database = config.DatabaseConfig{Driver: "postgres", Postgres: config.PostgresConfig{Host: pgHost, Port: portNumber, User: "live_ad", Password: pgPassword, DBName: "live_ad", SSLMode: "disable"}, Pool: cfg.Database.Pool}
+		cfg.Database.Host = pgHost
+		cfg.Database.Port = portNumber
+		cfg.Database.User = "live_ad"
+		cfg.Database.Password = pgPassword
+		cfg.Database.DBName = "live_ad"
+		cfg.Database.SSLMode = "disable"
+	} else {
+		cfg.Database.DSN = testdb.DSN(t)
 	}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	container, err := NewAppContainer(cfg, logger)

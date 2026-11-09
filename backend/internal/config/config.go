@@ -35,29 +35,16 @@ type AppConfig struct {
 }
 
 type DatabaseConfig struct {
-	Driver   string         `mapstructure:"driver"` // "sqlite" | "postgres"
-	SQLite   SQLiteConfig   `mapstructure:"sqlite"`
-	Postgres PostgresConfig `mapstructure:"postgres"`
-	Pool     PoolConfig     `mapstructure:"pool"`
-}
-
-type SQLiteConfig struct {
-	DBPath string `mapstructure:"dbpath"`
-}
-
-type PostgresConfig struct {
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
-	User     string `mapstructure:"user"`
-	Password string `mapstructure:"password"`
-	DBName   string `mapstructure:"dbname"`
-	SSLMode  string `mapstructure:"sslmode"`
-}
-
-type PoolConfig struct {
-	MaxIdleConns    int `mapstructure:"max_idle_conns"`
-	MaxOpenConns    int `mapstructure:"max_open_conns"`
-	ConnMaxLifetime int `mapstructure:"conn_max_lifetime"`
+	DSN             string `mapstructure:"dsn"`
+	Host            string `mapstructure:"host"`
+	Port            int    `mapstructure:"port"`
+	User            string `mapstructure:"user"`
+	Password        string `mapstructure:"password"`
+	DBName          string `mapstructure:"dbname"`
+	SSLMode         string `mapstructure:"sslmode"`
+	MaxIdleConns    int    `mapstructure:"max_idle_conns"`
+	MaxOpenConns    int    `mapstructure:"max_open_conns"`
+	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime"`
 }
 
 type RedisConfig struct {
@@ -101,7 +88,7 @@ type JWTConfig struct {
 }
 
 type StorageConfig struct {
-	Driver string   `mapstructure:"driver"` // "memory" | "sqlite3" | "postgres" | "redis" | "s3"
+	Driver string   `mapstructure:"driver"` // "memory" | "postgres" | "redis" | "s3"
 	S3     S3Config `mapstructure:"s3"`
 }
 
@@ -134,6 +121,7 @@ func LoadConfig(path ...string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read configuration: %w", err)
 	}
 	setLoggingDefaults(v)
+	v.SetDefault("database.dsn", "")
 	v.SetDefault("retention.enabled", true)
 	v.SetDefault("retention.outbox_days", 30)
 	v.SetDefault("retention.sync_log_days", 90)

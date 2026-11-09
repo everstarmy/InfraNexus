@@ -2,8 +2,6 @@ package bootstrap
 
 import (
 	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -11,26 +9,15 @@ import (
 
 	"infranexus/internal/config"
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
-func TestInitDatabase_SQLite_And_UUID(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "infranexus_db_test_*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	dbPath := filepath.Join(tempDir, "test.db")
+func TestInitDatabasePostgresUUIDAndJSONB(t *testing.T) {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
-			Driver: "sqlite",
-			SQLite: config.SQLiteConfig{
-				DBPath: dbPath,
-			},
-			Pool: config.PoolConfig{
-				MaxIdleConns: 2,
-				MaxOpenConns: 5,
-			},
+			DSN:          testdb.DSN(t),
+			MaxIdleConns: 2,
+			MaxOpenConns: 5,
 		},
 	}
 
@@ -39,6 +26,12 @@ func TestInitDatabase_SQLite_And_UUID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitDatabase failed: %v", err)
 	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
 
 	// 自动迁移
 	err = db.AutoMigrate(&domain.User{}, &domain.Role{}, &domain.Permission{})

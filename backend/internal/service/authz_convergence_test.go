@@ -3,7 +3,6 @@ package service_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/casbin/casbin/v3/model"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"github.com/google/uuid"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -20,12 +18,13 @@ import (
 	"infranexus/internal/middleware"
 	"infranexus/internal/repository"
 	"infranexus/internal/service"
+	"infranexus/internal/testdb"
 )
 
 func TestAuthorizationRevisionRefreshesIndependentInstancesAndRevokes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "authz.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}

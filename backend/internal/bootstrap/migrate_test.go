@@ -3,8 +3,6 @@ package bootstrap
 import (
 	"bytes"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,14 +10,13 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/datatypes"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"infranexus/internal/domain"
 	"infranexus/internal/repository"
 	"infranexus/internal/service"
+	"infranexus/internal/testdb"
 )
 
 type legacyUser struct {
@@ -101,43 +98,11 @@ type legacyBootstrapUser struct {
 
 func (legacyBootstrapUser) TableName() string { return "users" }
 
-func TestLegacySQLiteAdminKeepsPublicPasswordUntilExplicitRotation(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "legacy-admin.db")), &gorm.Config{Logger: logger.Discard, TranslateError: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	exerciseLegacyAdminUpgrade(t, db)
-}
-
 func TestLegacyPostgresAdminKeepsPublicPasswordUntilExplicitRotation(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard, TranslateError: true})
-	if err != nil {
-		t.Fatalf("connect test PostgreSQL database: %v", err)
-	}
-	sqlDB, err := db.DB()
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard, TranslateError: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB.SetMaxOpenConns(1)
-	schema := "infranexus_legacy_admin_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	if err := db.Exec("CREATE SCHEMA " + schema).Error; err != nil {
-		t.Fatalf("create isolated PostgreSQL schema: %v", err)
-	}
-	if err := db.Exec("SET search_path TO " + schema).Error; err != nil {
-		t.Fatalf("select isolated PostgreSQL schema: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := db.Exec("DROP SCHEMA " + schema + " CASCADE").Error; err != nil {
-			t.Errorf("drop isolated PostgreSQL schema: %v", err)
-		}
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("close PostgreSQL connection: %v", err)
-		}
-	})
 	exerciseLegacyAdminUpgrade(t, db)
 }
 
@@ -198,7 +163,7 @@ func exerciseLegacyAdminUpgrade(t *testing.T, db *gorm.DB) {
 }
 
 func TestMigrateUpgradesLegacyUniqueIndexesSoDeletedNamesCanBeReused(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "legacy.db")), &gorm.Config{Logger: logger.Discard, TranslateError: true})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard, TranslateError: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +199,7 @@ func TestMigrateUpgradesLegacyUniqueIndexesSoDeletedNamesCanBeReused(t *testing.
 }
 
 func TestMigrationLedgerSkipsCompletedBackfill(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "migration-ledger.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,96 +265,10 @@ func TestMigrationLedgerSkipsCompletedBackfill(t *testing.T) {
 }
 
 func TestLDAPTaskMigrationPreservesLegacySyncRows(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "ldap-task-migration.db")), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(testdb.Dialector(t), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&domain.SchemaMigration{}); err != nil {
-		t.Fatal(err)
-	}
-	for _, previous := range migrations[:len(migrations)-1] {
-		if err := db.Create(&domain.SchemaMigration{Version: previous.version}).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := db.Exec(`CREATE TABLE ldap_configs (
-		id char(36) PRIMARY KEY, created_at datetime, updated_at datetime, deleted_at datetime,
-		name varchar(64) NOT NULL, type varchar(16) NOT NULL, domain varchar(128) NOT NULL,
-		server_host varchar(255) NOT NULL, port integer NOT NULL,
-		use_ssl numeric NOT NULL DEFAULT false, start_tls numeric NOT NULL DEFAULT false,
-		insecure_skip_verify numeric NOT NULL DEFAULT false, bind_dn varchar(512), bind_password varchar(1024),
-		base_dn varchar(512) NOT NULL, user_filter varchar(512) NOT NULL,
-		attribute_mapping json, department_sync json, default_role_id char(36),
-		enabled numeric NOT NULL DEFAULT false, sync_enabled numeric NOT NULL DEFAULT false,
-		sync_interval_minutes integer NOT NULL, disable_missing_users numeric NOT NULL DEFAULT false,
-		timeout_seconds integer NOT NULL, sync_status varchar(16) NOT NULL DEFAULT 'idle',
-		sync_started_at datetime, last_sync_at datetime, last_success_at datetime
-	)`).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Exec(`CREATE TABLE ldap_sync_logs (
-		id char(36) PRIMARY KEY, created_at datetime, updated_at datetime, deleted_at datetime,
-		config_id char(36) NOT NULL, domain varchar(128) NOT NULL, trigger varchar(16) NOT NULL,
-		mode varchar(16) NOT NULL, status varchar(16) NOT NULL, started_at datetime NOT NULL,
-		request_id varchar(128)
-	)`).Error; err != nil {
-		t.Fatal(err)
-	}
-	legacyID := "018f2a51-55b2-7f19-9000-000000000077"
-	configID := "018f2a51-55b2-7f19-9000-000000000078"
-	if err := db.Exec(`INSERT INTO ldap_configs (
-		id, name, type, domain, server_host, port, base_dn, user_filter,
-		sync_interval_minutes, timeout_seconds
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, configID, "Corporate LDAP", "ldap", "corp.example.test", "ldap.example.test", 636, "DC=example,DC=test", "(&(objectClass=user)(sAMAccountName=%s))", 60, 5).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Exec(`INSERT INTO ldap_sync_logs (id, config_id, domain, trigger, mode, status, started_at, request_id) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`, legacyID, configID, "corp.example.test", "manual", "full", "success", "legacy-request").Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := Migrate(db); err != nil {
-		t.Fatalf("migrate stored LDAP history: %v", err)
-	}
-	var log domain.LDAPSyncLog
-	if err := db.First(&log, "id = ?", legacyID).Error; err != nil {
-		t.Fatal(err)
-	}
-	if log.ID.String() != legacyID || log.Domain != "corp.example.test" || log.RequestID != "legacy-request" || log.PlanID != uuid.Nil {
-		t.Fatalf("legacy LDAP task history was not preserved: %+v", log)
-	}
-	if !db.Migrator().HasTable(&domain.LDAPSyncPlanSnapshot{}) || !db.Migrator().HasIndex(&domain.LDAPSyncLog{}, "uidx_ldap_sync_idempotency") {
-		t.Fatal("LDAP plan snapshot or idempotency index missing after upgrade")
-	}
-}
-
-func TestLDAPTaskMigrationPreservesLegacySyncRowsPostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set INFRANEXUS_TEST_POSTGRES_DSN to an isolated, disposable PostgreSQL database")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		t.Fatalf("connect test PostgreSQL database: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlDB.SetMaxOpenConns(1)
-	schema := "infranexus_m6_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	if err := db.Exec("CREATE SCHEMA " + schema).Error; err != nil {
-		t.Fatalf("create isolated PostgreSQL schema: %v", err)
-	}
-	if err := db.Exec("SET search_path TO " + schema).Error; err != nil {
-		t.Fatalf("select isolated PostgreSQL schema: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := db.Exec("DROP SCHEMA " + schema + " CASCADE").Error; err != nil {
-			t.Errorf("drop isolated PostgreSQL schema: %v", err)
-		}
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("close PostgreSQL connection: %v", err)
-		}
-	})
 	if err := db.AutoMigrate(&domain.SchemaMigration{}, &legacyLDAPConfig{}, &legacyLDAPSyncLog{}); err != nil {
 		t.Fatal(err)
 	}

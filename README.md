@@ -2,9 +2,17 @@
 
 InfraNexus 面向银行数据中心的硬件运维与存储网络运维团队，建设**数据中心基础设施与存储网络资产运维管理系统（DCIM + SAN）**。业务范围覆盖机房空间、设备台账与生命周期、维保与备件、物理线路、带外采集、告警工单及 SAN 拓扑分析。
 
-当前代码已提供身份认证、权限、组织管理、目录同步、实时通知和日志等平台底座。下列业务能力按 [DCIM + SAN 业务需求规格](docs/DCIM_SAN_REQUIREMENTS.md) 分阶段实施与验收。
+当前代码已提供身份认证、权限、组织管理、目录同步、实时通知和日志等平台底座。业务功能与验收依据 [DCIM + SAN 业务需求规格](docs/DCIM_SAN_REQUIREMENTS.md)，开发顺序统一见 [正式开发路线](docs/DCIM_DEVELOPMENT_ROADMAP.md)。本项目按正式项目建设，已撤销此前 Demo 开发方案。
 
-## 业务建设阶段
+## 正式开发顺序
+
+基础核对与契约 → 位置管理 → 制造商/供应商 → 组件与设备模型 → IP 管理 → 资产与采购到货 → 生命周期工单 → 合同/备件维修/处置 → 端口与线路 → 正式采集 → 告警闭环 → SAN 与厂商扩展。
+
+基础模块先具备完整管理能力，后续模块按真实依赖集成；每批包含接口、页面、权限、迁移、异常路径与验证。当前代码目录尚未发现 DCIM 业务模块，不以方案文档代替交付记录。
+
+## 完整业务范围与验收阶段
+
+下表是需求归属，不是另一套开发顺序；1A 的基础、资产、工单和处置跨多个开发批次，完整验收要求不因分批实施而减少。
 
 | 阶段 | 交付范围 |
 | --- | --- |
@@ -16,7 +24,7 @@ InfraNexus 面向银行数据中心的硬件运维与存储网络运维团队，
 | **3A 逻辑拓扑** | Brocade Fabric、Zone 与 ISL、华为存储映射、端到端路径、物理与逻辑对账、单点及残留分析和故障影响分析 |
 | **3B 厂商扩展** | Dell EMC PowerMax（经 Unisphere）、Unity、PowerStore，NetApp ONTAP 与 StorageGRID |
 
-设计基线约为 2,000 台服务器、50 台存储和 80 台光纤交换机。生产数据库使用 PostgreSQL，设备采集仅使用只读 REST API 与 SNMP（含 Trap）。阶段依赖、验收条件和现网待确认事项以业务需求规格为准。
+设计基线约为 2,000 台服务器、50 台存储和 80 台光纤交换机。开发、测试和生产数据库统一使用 PostgreSQL，设备采集仅使用只读 REST API 与 SNMP（含 Trap）。阶段依赖、验收条件和现网待确认事项以业务需求规格为准。
 
 ## 已实现的平台底座
 
@@ -43,19 +51,19 @@ InfraNexus 面向银行数据中心的硬件运维与存储网络运维团队，
 ## 后端基础能力
 
 - **分层与统一契约**：domain 定义实体和接口，构造函数装配依赖；泛型 Repository、UUID 主键、强类型 JSON 配置；统一 JSON 响应、业务码、领域错误与 Request ID。
-- **双数据库与迁移**：GORM 支持 SQLite/PostgreSQL、连接池、版本化迁移与初始化数据；组织调整和授权变更使用事务、版本检查及并发控制。
+- **数据库与迁移**：使用 PostgreSQL，支持连接池、版本化迁移与初始化数据；组织调整和授权变更使用事务、版本检查及并发控制。
 - **双通道认证**：Web 使用 HttpOnly Session Cookie，支持空闲/绝对有效期；外部客户端使用 Bearer JWT。Header 凭据优先，失效时不回退 Cookie；用户停用、改密及认证版本变更参与凭据校验。
 - **RBAC 与多实例一致性**：Casbin v3 控制角色/API 访问，前后端共用有效权限；授权 revision、事务 Outbox、Redis 通知和后台收敛实现跨实例更新。Casbin 中间件为项目适配实现。
 - **目录任务可靠性**：绑定密码加密存储；目录请求支持取消和总时限；预览计划、幂等提交、任务租约、进度持久化与过期任务恢复；不完整搜索不会直接作为完整目录执行缺失账号停用。
 - **运行日志**：统一 slog，应用/访问/SQL 分类；Service 自动关联请求，后台任务关联任务来源；独立级别、慢查询、SQL 绑定参数保护、标准输出和文件轮转。
-- **存储与生命周期**：统一 Fiber Storage 工厂已接入 memory、SQLite、PostgreSQL、Redis、S3 驱动；提供后台任务管理、资源关闭及 SIGINT/SIGTERM 平滑停机。存储驱动属于基础设施，可供后续业务接入。
+- **存储与生命周期**：统一 Fiber Storage 工厂已接入 memory、PostgreSQL、Redis、S3 驱动；提供后台任务管理、资源关闭及 SIGINT/SIGTERM 平滑停机。存储驱动属于基础设施，可供后续业务接入。
 
 ## 技术栈
 
 | 层次 | 使用技术 |
 | --- | --- |
 | 后端 | Go 1.27.2+、Fiber v3、GORM、Casbin v3、Viper、slog |
-| 数据与存储 | SQLite / PostgreSQL、Redis、gorm datatypes、Fiber Storage |
+| 数据与存储 | PostgreSQL、Redis、gorm datatypes、Fiber Storage |
 | 前端 | React 19、TypeScript、Vite 8、React Router 7、Axios、React Query |
 | UI 与数据展示 | Tailwind CSS v4、shadcn / Base UI、TanStack Table v9、Lucide、Recharts |
 | 测试 | Go test / race / vet、Vitest、Playwright、Axe |
@@ -105,27 +113,28 @@ InfraNexus/
 
 ### 环境与依赖
 
-需要 Go 1.27.2+、支持 CGO 的 C 编译工具链（SQLite 驱动使用 CGO）、Node.js 22.12+ 和 npm。前端 Docker 构建使用 Node 24.11.1。
+需要 Go 1.27.2+、Node.js 22.12+、npm 和 PostgreSQL。前端 Docker 构建使用 Node 24.11.1。
 
 ```sh
 go -C backend mod tidy
 npm --prefix frontend install
 ```
 
-默认配置使用 SQLite，数据库目录会自动创建。开发环境 Redis 不可用时，认证存储可回退进程内模式；要使用 Redis SSE 事件和跨实例能力，需要连接 Redis。生产环境 Redis 不可用会拒绝启动。
+本地启动前创建 PostgreSQL 数据库，并配置连接凭据。连接与连接池参数都在 `database` 下直接配置。服务启动时执行版本化迁移。开发环境 Redis 不可用时，认证存储可回退进程内模式；要使用 Redis SSE 事件和跨实例能力，需要连接 Redis。生产环境 Redis 不可用会拒绝启动。
 
 本机后端可选用根目录 `.env.local` 配置环境变量；`make dev-backend` 会自动加载该文件。它被 Git 忽略，请勿提交。示例：
 
 ```sh
-APP_DATABASE_DRIVER=postgres
-APP_DATABASE_POSTGRES_USER=infranexus
-APP_DATABASE_POSTGRES_DBNAME=infranexus
-APP_DATABASE_POSTGRES_PASSWORD='替换为数据库密码'
+APP_DATABASE_HOST=127.0.0.1
+APP_DATABASE_PORT=5432
+APP_DATABASE_USER=infranexus
+APP_DATABASE_DBNAME=infranexus
+APP_DATABASE_PASSWORD='替换为数据库密码'
 APP_JWT_SECRET='替换为独立的随机密钥'
 APP_SECURITY_ENCRYPTION_KEY='替换为独立的随机密钥'
 ```
 
-`.env.local` 使用 shell 赋值语法，包含特殊字符的值应加引号；Docker Compose 继续使用 `.env`。
+`.env.local` 使用 shell 赋值语法，包含特殊字符的值应加引号。已有本地数据库覆盖配置需改用上述平铺字段和环境变量。Docker Compose 继续使用 `.env`。
 
 ### 初始化管理员
 
@@ -167,7 +176,7 @@ make dev-frontend
 | 配置 | 环境变量 | 用途 |
 | --- | --- | --- |
 | `app.env` | `APP_APP_ENV` | development / test / production |
-| `database.driver` | `APP_DATABASE_DRIVER` | sqlite / postgres |
+| `database.dsn` | `APP_DATABASE_DSN` | 可选 PostgreSQL 连接字符串，优先于分项连接配置 |
 | `redis.host` | `APP_REDIS_HOST` | Redis 主机 |
 | `jwt.secret` | `APP_JWT_SECRET` | JWT 签名密钥 |
 | `security.encryption_key` | `APP_SECURITY_ENCRYPTION_KEY` | 目录绑定密码加密密钥 |
@@ -243,20 +252,12 @@ SQL 绑定参数与驱动原始错误详情不输出，业务仍须使用参数�
 
 ## 测试与当前验证范围
 
-后端默认使用临时 SQLite；完整测试、竞争检测与静态检查：
+数据库测试使用独立 PostgreSQL 实例，测试角色需要有创建 schema 的权限。每个用例在专用 schema 中运行并清理。Redis 集成也需要独立实例。运行 race 检测需要 CGO 和 C 编译工具链。将以下变量指向可丢弃的测试环境后执行检查。
 
 ```sh
-go -C backend test -count=1 -p=1 ./...
-go -C backend test -race -count=1 -p=1 ./...
-go -C backend vet ./...
-```
-
-PostgreSQL/Redis 集成矩阵需指向**独立、空白、可丢弃**的测试实例，测试会修改数据库和事件状态：
-
-```sh
-INFRANEXUS_TEST_POSTGRES_DSN='postgres://<user>:<password>@127.0.0.1:5432/<isolated_test_db>?sslmode=disable' \
-INFRANEXUS_TEST_REDIS_ADDR='127.0.0.1:<isolated_redis_port>' \
-go -C backend test -race -count=1 -p=1 ./...
+export INFRANEXUS_TEST_POSTGRES_DSN='postgres://<user>:<password>@127.0.0.1:5432/<isolated_test_db>?sslmode=disable'
+export INFRANEXUS_TEST_REDIS_ADDR='127.0.0.1:<isolated_redis_port>'
+make check-backend
 ```
 
 前端单测、构建、浏览器与性能回归：
@@ -273,7 +274,9 @@ npm --prefix frontend run test:perf
 
 | 文档 | 内容 |
 | --- | --- |
+| [正式开发路线](docs/DCIM_DEVELOPMENT_ROADMAP.md) | 基础管理优先、模块依赖、B0～B11 开发顺序及交付要求 |
 | [DCIM + SAN 业务需求规格](docs/DCIM_SAN_REQUIREMENTS.md) | 项目范围、前置验证、七个业务阶段的依赖及验收条件 |
+| [领域数据模型规格](docs/DOMAIN_ER_MODEL.md) | 涵盖 DCIM、IPAM、资产工单、备件库存、布线路由、采集监控与 SAN 拓扑的完整 ER 模型与数据字典 |
 | [开发协作规范](AGENTS.md) | 分层架构、开发约定和验证要求 |
 | [API 文档](docs/API.md) | 平台接口、权限与实时事件契约 |
 | [Docker 部署](docs/DOCKER.md) | 构建、初始化、持久化及操作命令 |
@@ -288,7 +291,7 @@ npm --prefix frontend run test:perf
 make check
 # 浏览器依赖只需首次安装或升级 Playwright 后安装
 npm --prefix frontend exec -- playwright install chromium
-# 真实前后端 + 代理 + 浏览器；自动创建并回收临时 SQLite，不使用开发数据库
+# 真实前后端 + 代理 + 浏览器；需要 Docker，自动创建并回收独立 PostgreSQL 容器
 npm --prefix frontend run test:integration
 ```
 

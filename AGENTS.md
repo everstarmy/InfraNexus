@@ -42,9 +42,9 @@ InfraNexus/
 │   │   │   ├── request_log.go      # 请求链路日志与 RequestID 关联
 │   │   │   └── error_handler.go    # 全局异常捕获与格式化转换
 │   │   ├── storage/                # Fiber Storage 统一驱动工厂
-│   │   │   └── storage.go          # 支持 memory, sqlite3, postgres, redis, s3
+│   │   │   └── factory.go          # 支持 memory, postgres, redis, s3
 │   │   └── bootstrap/              # 启动装配器 (wire/ioc 接口装配)
-│   │       ├── database.go         # GORM 双驱动初始化 (SQLite / Postgres)
+│   │       ├── database.go         # GORM PostgreSQL 初始化
 │   │       ├── redis.go            # Redis 客户端初始化
 │   │       └── casbin.go           # Casbin Enforcer 初始化
 │   ├── config.yaml                 # 默认配置文件
@@ -139,10 +139,10 @@ return response.Page(c, userList, total, page, pageSize)
 return response.Error(c, fiber.StatusNotFound, response.CodeUserNotFound, "用户不存在")
 ```
 
-### 2.5 GORM 双驱动与 UUID / JSONB 支持规范 (`gorm.io/datatypes`)
+### 2.5 PostgreSQL 与 UUID / JSONB 支持规范 (`gorm.io/datatypes`)
 - **表主键全量使用 UUID**：
   - 杜绝自增整型，统一使用 `github.com/google/uuid` 的 `uuid.UUID`（推荐时间有序的 UUIDv7 或标准 UUIDv4）。
-  - 在 PostgreSQL 下对应原生 `uuid` 类型；在 SQLite 下对应标准字符串文本类型。
+  - 数据库使用 PostgreSQL 原生 `uuid` 类型。
   ```go
   type BaseEntity struct {
       ID        uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
@@ -159,7 +159,7 @@ return response.Error(c, fiber.StatusNotFound, response.CodeUserNotFound, "用�
   }
   ```
 - **复杂结构与配置统一使用 `datatypes.JSONType[T]`**：
-  - 底层兼容 PostgreSQL 原生 `jsonb`（支持 GIN 索引与高效检索）和 SQLite 文本存储，同时保证 Go 侧编译期强类型安全。
+  - 底层使用 PostgreSQL 原生 `jsonb`，可使用 GIN 索引，Go 侧保持编译期类型安全。
   - 参考：`https://gorm.io/docs/data_types.html` 及 `datatypes/json_type.go`。
   ```go
   type User struct {
@@ -170,7 +170,7 @@ return response.Error(c, fiber.StatusNotFound, response.CodeUserNotFound, "用�
   }
   ```
 - 外键关系（如 `sys_user_roles`）统一使用 `user_id uuid.UUID` 与 `role_id uuid.UUID` 关联。
-- 生产环境以 PostgreSQL 为基准。初始化连接池必须同时支持 SQLite 与 PostgreSQL，并由 Viper 统一注入池化参数。
+- 开发、测试和生产统一使用 PostgreSQL。连接与连接池参数由 Viper 注入。
 
 ### 2.6 认证双通道策略 (Session Cookie 与 JWT 分级)
 - **Web 端 SaaS 工作台**：采用 **HttpOnly + Secure + SameSite=Lax 的 Session Cookie**。免除前端存储 Token 被 XSS 窃取的风险，支持服务端空闲/绝对有效期及滑动续期；当前只实现单会话退出。
@@ -219,7 +219,7 @@ if err := s.users.UpdateColumns(ctx, user.ID, updates); err != nil {
 - 应用与 SQL 级别独立，不可用应用级别提前过滤 SQL。生产默认 JSON，单行事件保持合法、关联字段位于顶层且不重复；保留 16KiB 事件上限和超限关联摘要。
 - 后台轮询如需降噪，只在该轮询查询的派生 Context 上使用 `requestmeta.WithSQLPoll(ctx)`；统一适配器仅过滤无请求来源、成功、非慢查询且返回零行的 INFO SQL。不得以 rows=0、task_id 或 sql_omitted 为通用过滤条件，也不得关闭整个 worker 的错误/慢查询日志；实际处理记录与普通请求 SQL 保留。
 - 停机先停止请求/后台任务、关闭业务资源，记录最终结果，再关闭 logger；不要引入绕过清理的 os.Exit。输出故障的安全 stderr 诊断仅由统一日志设施负责，不能递归记录。
-- 修改 Context、日志 Handler、SQL 适配器或请求中间件时，运行对应正式回归；至少验证真实 HTTP→Service→Repository 的请求 ID 一致、并发不串号、非致命错误仍保持原响应、敏感哨兵不泄露。涉及 SQL 的变更验证 SQLite/PostgreSQL；缺环境登记未覆盖，不以 Skip 代替通过。行为性改造完成后按项目要求运行 race/vet，纯文档变更检查链接和 diff。
+- 修改 Context、日志 Handler、SQL 适配器或请求中间件时，运行对应正式回归；至少验证真实 HTTP→Service→Repository 的请求 ID 一致、并发不串号、非致命错误仍保持原响应、敏感哨兵不泄露。涉及 SQL 的变更使用真实 PostgreSQL 验证；缺环境登记未覆盖，不以 Skip 代替通过。行为性改造完成后按项目要求运行 race/vet，纯文档变更检查链接和 diff。
 
 ---
 
@@ -272,7 +272,7 @@ if err := s.users.UpdateColumns(ctx, user.ID, updates); err != nil {
 ## 4. 协作工作流与指令规范 (Agent Execution Rules)
 
 1. **环境与运行前置检查**：
-   - 后端启动前确认依赖完整（`go mod tidy`），SQLite 数据目录自动创建（`mkdir -p ./data`）。
+   - 后端启动前确认依赖完整（`go mod tidy`），并准备可连接的 PostgreSQL 数据库。
    - 前端依赖安装推荐使用 `npm install`。
 2. **渐进式验证**：
    - 每次完成核心模块后，AI Agent 必须编写或运行轻量验证脚本或单元测试，确保接口返回与响应结构 100% 吻合。

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -8,7 +9,6 @@ import (
 	"github.com/gofiber/storage/postgres/v3"
 	"github.com/gofiber/storage/redis/v3"
 	"github.com/gofiber/storage/s3/v2"
-	"github.com/gofiber/storage/sqlite3/v2"
 
 	"infranexus/internal/config"
 )
@@ -30,22 +30,17 @@ func NewStorage(cfg *config.Config) (fiber.Storage, error) {
 			Reset:    false,
 		}), nil
 
-	case "sqlite3":
-		return sqlite3.New(sqlite3.Config{
-			Database: cfg.Database.SQLite.DBPath,
-			Table:    "fiber_storage",
-			Reset:    false,
-		}), nil
-
 	case "postgres":
 		return postgres.New(postgres.Config{
-			Host:     cfg.Database.Postgres.Host,
-			Port:     cfg.Database.Postgres.Port,
-			Username: cfg.Database.Postgres.User,
-			Password: cfg.Database.Postgres.Password,
-			Database: cfg.Database.Postgres.DBName,
-			Table:    "fiber_storage",
-			Reset:    false,
+			ConnectionURI: cfg.Database.DSN,
+			Host:          cfg.Database.Host,
+			Port:          cfg.Database.Port,
+			Username:      cfg.Database.User,
+			Password:      cfg.Database.Password,
+			Database:      cfg.Database.DBName,
+			SSLMode:       cfg.Database.SSLMode,
+			Table:         "fiber_storage",
+			Reset:         false,
 		}), nil
 
 	case "s3":
@@ -63,7 +58,9 @@ func NewStorage(cfg *config.Config) (fiber.Storage, error) {
 		}
 		return s3.New(cfgS3), nil
 
-	default:
+	case "":
 		return memory.New(), nil
+	default:
+		return nil, fmt.Errorf("unsupported storage driver: %s", cfg.Storage.Driver)
 	}
 }

@@ -51,11 +51,10 @@ services:
       APP_LOGGING_OUTPUT: stdout
       APP_LOGGING_LEVEL: ${LOG_LEVEL:-info}
       APP_LOGGING_SQL_LEVEL: ${SQL_LOG_LEVEL:-warn}
-      APP_DATABASE_DRIVER: postgres
-      APP_DATABASE_POSTGRES_HOST: postgres
-      APP_DATABASE_POSTGRES_USER: infranexus
-      APP_DATABASE_POSTGRES_DBNAME: infranexus
-      APP_DATABASE_POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      APP_DATABASE_HOST: postgres
+      APP_DATABASE_USER: infranexus
+      APP_DATABASE_DBNAME: infranexus
+      APP_DATABASE_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
       APP_REDIS_HOST: redis
       APP_JWT_SECRET: ${JWT_SECRET:?set a random JWT_SECRET of at least 32 characters}
       APP_SECURITY_ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set a unique ENCRYPTION_KEY}

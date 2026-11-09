@@ -2,28 +2,18 @@ package repository
 
 import (
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"infranexus/internal/domain"
+	"infranexus/internal/testdb"
 )
 
-func TestDeleteConfigRefusesActiveSyncLease(t *testing.T) {
-	testDeleteConfigLease(t, sqlite.Open(":memory:"))
-}
-
 func TestDeleteConfigRefusesActiveSyncLeasePostgres(t *testing.T) {
-	dsn := os.Getenv("INFRANEXUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("requires isolated PostgreSQL")
-	}
-	testDeleteConfigLease(t, postgres.Open(dsn))
+	testDeleteConfigLease(t, testdb.Dialector(t))
 }
 
 func testDeleteConfigLease(t *testing.T, driver gorm.Dialector) {

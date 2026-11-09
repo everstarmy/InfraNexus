@@ -2,20 +2,15 @@
 
 InfraNexus 的数据库变更由 `backend/internal/bootstrap/migrate.go` 中按版本注册的迁移执行。每个版本号写入 `schema_migrations`，记录和对应 DDL/数据回填处于同一事务；失败时记录回滚，服务下次启动可重试。已经完成的版本会跳过，后续 schema 变更必须新增版本，不能修改已发布迁移的语义。
 
+数据库统一使用 PostgreSQL。旧版文件数据库中的存量数据需另行备份与迁移，并核对数据和凭据后切换。应用启动时只迁移已配置的 PostgreSQL 库内 schema。
+
 ## 生产升级顺序
 
 1. 确认数据库连接、磁盘空间、迁移版本和回滚负责人；先在与生产相同数据库类型及版本的副本上演练。
-2. 创建并验证可恢复备份。SQLite 使用 `.backup` 到另一磁盘；PostgreSQL 使用 custom 格式的 `pg_dump`，并通过 `pg_restore --list` 检查归档。保留应用配置和密钥的受控备份，不把凭据写进命令历史。
+2. 创建并验证可恢复备份。使用 custom 格式的 PostgreSQL `pg_dump`，并通过 `pg_restore --list` 检查归档。保留应用配置和密钥的受控备份，不把凭据写进命令历史。
 3. 停止或摘除所有旧版本应用实例，确认没有旧版本仍能接受请求。M1 引入 `auth_version` 撤销校验，不能让忽略该字段的旧版本与新版本混跑。
 4. 使用新版本二进制启动一次迁移并确认启动成功、`schema_migrations` 中包含预期版本。再启动新版本实例并执行登录、当前用户、用户停用/启用和健康检查。
 5. 记录迁移版本、备份标识、应用版本、验证结果与操作者。迁移完成前不要开放流量。
-
-SQLite 备份示例：
-
-```sh
-sqlite3 ./data/infranexus.db '.backup ./data/infranexus-pre-upgrade.db'
-sqlite3 ./data/infranexus-pre-upgrade.db 'PRAGMA integrity_check;'
-```
 
 PostgreSQL 备份示例（从受控环境读取 `DATABASE_URL`）：
 

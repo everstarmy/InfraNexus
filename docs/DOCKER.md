@@ -1,6 +1,6 @@
 # Docker 构建与部署
 
-前后端镜像均从仓库根目录构建，使用多阶段构建与非 root 运行用户。后端启用 CGO，保留 SQLite/PostgreSQL 双驱动；编译器、Go SDK 和 Node/npm 不进入运行镜像。
+前后端镜像均从仓库根目录构建，使用多阶段构建与非 root 运行用户。后端以 `CGO_ENABLED=0` 构建并使用 PostgreSQL。运行镜像不含编译器、Go SDK 和 Node/npm。
 
 ## 构建镜像
 
@@ -45,7 +45,7 @@ unset INFRANEXUS_BOOTSTRAP_ADMIN_PASSWORD
 
 该恢复命令只更新已有内置管理员密码并使旧凭据失效，不创建账号。修改数据库/JWT/加密配置前应按相应业务流程处理既有数据和会话，不要在每次启动时重新生成密钥。
 
-PostgreSQL 和 Redis 使用命名卷持久化，均不向宿主机发布端口；前端是唯一发布入口。SQLite 单独运行镜像时可将可写卷挂载到 `/app/data`，目录需要允许 UID 10001 写入。
+PostgreSQL 和 Redis 使用命名卷持久化，均不向宿主机发布端口；前端是唯一发布入口。单独运行后端镜像时，配置可达的 PostgreSQL 实例和连接凭据。
 
 ```sh
 docker compose ps

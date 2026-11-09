@@ -5,20 +5,16 @@ app:
   debug: true
 
 database:
-  driver: "sqlite" # "sqlite" | "postgres"
-  sqlite:
-    dbpath: "./data/infranexus.db"
-  postgres:
-    host: "127.0.0.1"
-    port: 5432
-    user: "postgres"
-    password: "your_password"
-    dbname: "infranexus_db"
-    sslmode: "disable"
-  pool:
-    max_idle_conns: 10
-    max_open_conns: 100
-    conn_max_lifetime: 3600 # 秒
+  dsn: "" # 可选 PostgreSQL 连接字符串，设置后优先于下面的连接字段
+  host: "127.0.0.1"
+  port: 5432
+  user: "postgres"
+  password: "your_password"
+  dbname: "infranexus_db"
+  sslmode: "disable"
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 3600 # 秒
 
 redis:
   host: "127.0.0.1"
@@ -42,7 +38,7 @@ jwt:
   issuer: "infranexus-platform"
 
 storage:
-  driver: "memory" # "memory" | "sqlite3" | "postgres" | "redis" | "s3"
+  driver: "memory" # "memory" | "postgres" | "redis" | "s3"
   s3:
     bucket: "infranexus-assets"
     endpoint: "s3.amazonaws.com"

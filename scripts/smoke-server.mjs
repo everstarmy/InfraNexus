@@ -2,13 +2,16 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn, execFileSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { setTimeout } from 'node:timers/promises'
 
-// All mutable backend state belongs to this disposable directory.
+// Each run owns a temporary binary and a disposable database container.
 const root = resolve(import.meta.dirname, '..')
 const directory = await mkdtemp(join(tmpdir(), 'infranexus-smoke-'))
 const binary = join(directory, 'server')
+const databaseContainer = `infranexus-smoke-${randomBytes(8).toString('hex')}`
 const children = []
+let databaseStarted = false
 let closing = false
 async function close(code = 0) {
   if (closing) return
@@ -19,6 +22,14 @@ async function close(code = 0) {
     child.once('exit', () => { clearTimeout(timer); resolve() })
     child.kill('SIGTERM')
   })))
+  if (databaseStarted) {
+    try {
+      execFileSync('docker', ['rm', '-f', '-v', databaseContainer], { stdio: 'ignore' })
+    } catch {
+      console.error(`Could not remove smoke database container ${databaseContainer}`)
+      code = 1
+    }
+  }
   await rm(directory, { recursive: true, force: true })
   process.exit(code)
 }
@@ -33,9 +44,28 @@ function start(command, args, env) {
 }
 try {
   execFileSync('go', ['-C', 'backend', 'build', '-o', binary, './cmd/server'], { cwd: root, stdio: 'inherit' })
+  const password = randomBytes(24).toString('hex')
+  execFileSync('docker', [
+    'run', '-d', '--name', databaseContainer, '-p', '127.0.0.1::5432',
+    '-e', 'POSTGRES_PASSWORD', '-e', 'POSTGRES_DB=infranexus_smoke',
+    'postgres:17.11-alpine3.23',
+  ], { env: { ...process.env, POSTGRES_PASSWORD: password }, stdio: ['ignore', 'ignore', 'inherit'] })
+  databaseStarted = true
+  const address = execFileSync('docker', ['port', databaseContainer, '5432/tcp'], { encoding: 'utf8' }).trim()
+  let databaseReady = false
+  for (let i = 0; i < 100; i++) {
+    try {
+      execFileSync('docker', ['exec', databaseContainer, 'pg_isready', '-h', '127.0.0.1', '-d', 'infranexus_smoke', '-U', 'postgres'], { stdio: 'ignore' })
+      databaseReady = true
+      break
+    } catch {
+      await setTimeout(200)
+    }
+  }
+  if (!databaseReady || closing) throw new Error('isolated PostgreSQL did not become ready')
   const env = { ...process.env,
     APP_APP_ENV: 'test', APP_APP_PORT: '18081', APP_APP_DEBUG: 'false',
-    APP_DATABASE_DRIVER: 'sqlite', APP_DATABASE_SQLITE_DBPATH: join(directory, 'smoke.db'),
+    APP_DATABASE_DSN: `postgres://postgres:${password}@${address}/infranexus_smoke?sslmode=disable`,
     APP_STORAGE_DRIVER: 'memory', APP_REDIS_HOST: '127.0.0.1', APP_REDIS_PORT: '1',
     APP_LDAP_SCHEDULER_ENABLED: 'false', APP_SECURITY_LOGIN_RATE_LIMIT: '100',
     APP_SECURITY_TRUSTED_ORIGINS: 'http://127.0.0.1:4175',

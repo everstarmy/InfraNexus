@@ -29,8 +29,7 @@ func (r *setupRepository) Initialized(ctx context.Context) (bool, error) {
 }
 
 // lockAdministratorInitialization serializes HTTP initialization across
-// processes. A no-op write locks the seeded role in PostgreSQL and obtains the
-// SQLite writer lock before reading users, avoiding a deferred read/write upgrade.
+// processes. A no-op write locks the seeded role before reading users.
 func lockAdministratorInitialization(tx *gorm.DB) error {
 	result := tx.Model(&domain.Role{}).Where("code = ?", domain.AdminRoleCode).
 		UpdateColumn("built_in", gorm.Expr("built_in"))
