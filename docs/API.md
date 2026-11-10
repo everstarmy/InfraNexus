@@ -4,6 +4,20 @@
 
 位置、IPAM、制造商与供应商接口见 [基础管理 API](DCIM_MANAGEMENT_API.md)。
 
+## OpenAPI 接口文档
+
+后端启动后可访问 `/api/docs` 查看 Swagger UI，或访问 `/api/docs/openapi.json` 获取接口定义。开发环境默认开启，测试和生产环境默认关闭。可以通过 `app.swagger_enabled` 或环境变量 `APP_APP_SWAGGER_ENABLED` 显式启停。Swagger UI 的浏览器资源由上游中间件从 CDN 加载。
+
+[OpenAPI 3.0 文档](../backend/internal/bootstrap/openapi.json)编译进后端二进制，包含已注册的业务 API、请求和响应结构，以及 Cookie 与 Bearer 认证。可以将文件导入兼容 OpenAPI 3.0 的工具，并将服务地址设置为后端实际地址。
+
+在 Swagger UI 中调试时，可先调用 `POST /api/v1/auth/token`，再用页面的 **Authorize** 按钮填写响应里的 `access_token`。使用 Cookie 登录或发送写请求时，需将 Swagger UI 的来源加入 `security.trusted_origins`。
+
+浏览器客户端调用 `POST /api/v1/auth/login` 后，服务端设置 HttpOnly 会话 Cookie；后续请求使用该 Cookie。Cookie 的默认名称是 `infranexus_session`，部署时可通过 `session.cookie_name` 修改；在接口工具中需要相应调整 Cookie 名称。登录及 Cookie 认证的写操作还需要可信的 `Origin` 或 `Referer`，跨域调试时也需要浏览器和部署配置允许携带凭据。
+
+外部客户端调用 `POST /api/v1/auth/token`，用响应中的 `access_token` 通过工具的 Bearer 授权或 `Authorization: Bearer <access_token>` 访问接口；使用 `POST /api/v1/auth/refresh` 刷新令牌。公开接口无需认证，其他接口还受 Casbin 权限约束。请求中若提供 `Authorization`，服务端优先使用该凭据，认证失败不会回退到 Cookie。
+
+后端测试会检查 OpenAPI 中的操作与实际注册路由是否一致；调整路由或接口契约时需同步更新文档。
+
 ## 响应与认证
 
 成功和失败响应统一包含 `code`、`message`、`data`、`request_id` 和 Unix 秒级 `timestamp`。分页数据位于 `data.items`，并带 `total`、`page`、`page_size`。`request_id` 同时用于响应、请求日志和后台 LDAP 任务日志。

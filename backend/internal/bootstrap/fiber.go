@@ -2,10 +2,12 @@ package bootstrap
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/gofiber/contrib/v3/swaggerui"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/recover"
@@ -18,7 +20,12 @@ import (
 	"infranexus/internal/middleware"
 	"infranexus/internal/repository"
 	"infranexus/internal/service"
+
+	"github.com/yokeTH/gofiber-scalar/scalar/v3"
 )
+
+//go:embed openapi.json
+var openAPISpec []byte
 
 func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 	fiberApp := fiber.New(fiber.Config{
@@ -55,6 +62,23 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Request-Id", "Idempotency-Key"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
 	}))
+	if app.Config.App.SwaggerEnabled {
+		serveDocs := swaggerui.New(swaggerui.Config{
+			BasePath:    "/api/",
+			Path:        "docs",
+			FilePath:    "docs/openapi.json",
+			FileContent: openAPISpec,
+			Title:       "InfraNexus API",
+		})
+		fiberApp.Get("/api/docs", serveDocs)
+		fiberApp.Get("/api/docs/openapi.json", serveDocs)
+		fiberApp.Get("/api/scalar/*", scalar.New(scalar.Config{
+			BasePath:          "/api/scalar",
+			Path:              "/docs",
+			Theme:             scalar.ThemeMars,
+			FileContentString: string(openAPISpec),
+		}))
+	}
 
 	// 2. 初始化 Casbin Enforcer
 	enforcer, err := InitCasbin(app.DB, app.Logger)

@@ -28,10 +28,11 @@ type RetentionConfig struct {
 }
 
 type AppConfig struct {
-	Name  string `mapstructure:"name"`
-	Env   string `mapstructure:"env"`
-	Port  string `mapstructure:"port"`
-	Debug bool   `mapstructure:"debug"`
+	Name           string `mapstructure:"name"`
+	Env            string `mapstructure:"env"`
+	Port           string `mapstructure:"port"`
+	Debug          bool   `mapstructure:"debug"`
+	SwaggerEnabled bool   `mapstructure:"swagger_enabled"`
 }
 
 type DatabaseConfig struct {
@@ -126,6 +127,7 @@ func LoadConfig(path ...string) (*Config, error) {
 	v.SetDefault("retention.outbox_days", 30)
 	v.SetDefault("retention.sync_log_days", 90)
 	v.SetDefault("app.env", "development")
+	v.SetDefault("app.swagger_enabled", v.GetString("app.env") == "development")
 	v.SetDefault("session.max_age", 1800)
 	v.SetDefault("session.absolute_max_age", 604800)
 	v.SetDefault("jwt.access_token_expire", 900)
