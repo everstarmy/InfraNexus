@@ -52,7 +52,7 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 	fiberApp.Use(cors.New(cors.Config{
 		AllowOrigins:     app.Config.Security.TrustedOrigins,
 		AllowCredentials: true,
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Request-Id"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Request-Id", "Idempotency-Key"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
 	}))
 
@@ -89,6 +89,12 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 	permSvc := service.NewPermissionService(permRepo, authzSvc, func() ([]domain.RouteInfo, error) { return discoverAPIRoutes(fiberApp) })
 	deptSvc := service.NewDepartmentService(deptRepo, userRepo, organization)
 
+	managedWrites := repository.NewManagedUnitOfWork(app.DB)
+	datacenterRepo := repository.NewManagedRepository[domain.Datacenter](app.DB, "")
+	roomRepo := repository.NewManagedRepository[domain.Room](app.DB, "floor_id")
+	rackRepo := repository.NewManagedRepository[domain.Rack](app.DB, "rack_row_id")
+	securityZoneRepo := repository.NewManagedRepository[domain.SecurityZone](app.DB, "datacenter_id")
+
 	sqlDB, err := app.DB.DB()
 	if err != nil {
 		return nil, err
@@ -102,16 +108,19 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 			Authorize: authzSvc.Enforce,
 			SuperRole: domain.AdminRoleCode,
 		}),
-		setup:       handler.NewSetupHandler(service.NewSetupService(repository.NewSetupRepository(app.DB))),
-		auth:        handler.NewAuthHandler(app.Config, authSvc),
-		users:       handler.NewUserHandler(userSvc, authSvc),
-		roles:       handler.NewRoleHandler(roleSvc),
-		permissions: handler.NewPermissionHandler(permSvc),
-		sse:         handler.NewSSEHandler(eventStore, authSvc, authzSvc, app.Logger, app.lifecycleContext()),
-		departments: handler.NewDepartmentHandler(deptSvc),
-		options:     handler.NewOptionsHandler(roleSvc, deptSvc),
-		ldap:        handler.NewLDAPHandler(ldapSvc),
-		dashboard:   handler.NewDashboardHandler(service.NewDashboardService(userRepo, deptRepo, roleRepo, permRepo, ldapRepo)),
+		setup:            handler.NewSetupHandler(service.NewSetupService(repository.NewSetupRepository(app.DB))),
+		auth:             handler.NewAuthHandler(app.Config, authSvc),
+		users:            handler.NewUserHandler(userSvc, authSvc),
+		roles:            handler.NewRoleHandler(roleSvc),
+		permissions:      handler.NewPermissionHandler(permSvc),
+		sse:              handler.NewSSEHandler(eventStore, authSvc, authzSvc, app.Logger, app.lifecycleContext()),
+		departments:      handler.NewDepartmentHandler(deptSvc),
+		options:          handler.NewOptionsHandler(roleSvc, deptSvc),
+		ldap:             handler.NewLDAPHandler(ldapSvc),
+		location:         assembleLocation(app.DB, managedWrites, userRepo, datacenterRepo, rackRepo, roomRepo, securityZoneRepo),
+		ipam:             assembleIPAM(app.DB, managedWrites, datacenterRepo, rackRepo, roomRepo, securityZoneRepo),
+		vendorManagement: assembleVendorManagement(app.DB, managedWrites),
+		dashboard:        handler.NewDashboardHandler(service.NewDashboardService(userRepo, deptRepo, roleRepo, permRepo, ldapRepo)),
 	})
 	if _, err := discoverAPIRoutes(fiberApp); err != nil {
 		return nil, fmt.Errorf("validate API route access classes: %w", err)

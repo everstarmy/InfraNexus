@@ -30,6 +30,7 @@ var migrations = []migration{
 	{version: migrationLDAPSyncRequestID, apply: migrateLDAPSyncRequestID},
 	{version: migrationAuthorizationOutboxRetry, apply: migrateAuthorizationOutboxRetry},
 	{version: migrationLDAPRecoverableTasks, apply: migrateLDAPRecoverableTasks},
+	{version: migrationLocationIPAMVendors, apply: migrateLocationIPAMVendors},
 }
 
 var legacyIndexes = []legacyIndex{

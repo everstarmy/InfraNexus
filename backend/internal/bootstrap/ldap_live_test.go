@@ -261,7 +261,10 @@ func liveRequest(ctx context.Context, client *http.Client, base, method, path, b
 	return apiResult{Status: result.StatusCode, Code: envelope.Code, Message: envelope.Message, Data: []byte(envelope.Data)}, nil
 }
 
-type liveStreamEvent struct{ id, name string }
+type liveStreamEvent struct {
+	id, name string
+	err      error
+}
 
 func openLiveStream(t *testing.T, ctx context.Context, base, bearer, cursor string) (*http.Response, <-chan liveStreamEvent) {
 	t.Helper()
@@ -291,11 +294,11 @@ func openLiveStream(t *testing.T, ctx context.Context, base, bearer, cursor stri
 		current := liveStreamEvent{}
 		for scanner.Scan() {
 			line := scanner.Text()
-			if strings.HasPrefix(line, "id: ") {
-				current.id = strings.TrimPrefix(line, "id: ")
+			if id, ok := strings.CutPrefix(line, "id: "); ok {
+				current.id = id
 			}
-			if strings.HasPrefix(line, "event: ") {
-				current.name = strings.TrimPrefix(line, "event: ")
+			if name, ok := strings.CutPrefix(line, "event: "); ok {
+				current.name = name
 			}
 			if line == "" {
 				switch current.name {
@@ -307,6 +310,12 @@ func openLiveStream(t *testing.T, ctx context.Context, base, bearer, cursor stri
 					}
 				}
 				current = liveStreamEvent{}
+			}
+		}
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			select {
+			case events <- liveStreamEvent{err: err}:
+			case <-ctx.Done():
 			}
 		}
 	}()
@@ -321,6 +330,9 @@ func awaitLiveEvent(t *testing.T, ctx context.Context, events <-chan liveStreamE
 		case event, open := <-events:
 			if !open {
 				t.Fatalf("SSE closed before %s", name)
+			}
+			if event.err != nil {
+				t.Fatalf("SSE read failed before %s (error type %T)", name, event.err)
 			}
 			if event.name == name {
 				return event

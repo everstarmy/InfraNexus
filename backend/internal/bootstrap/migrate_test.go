@@ -269,10 +269,15 @@ func TestLDAPTaskMigrationPreservesLegacySyncRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&domain.SchemaMigration{}, &legacyLDAPConfig{}, &legacyLDAPSyncLog{}); err != nil {
+	// The prior platform migration already created users. Later migrations
+	// may legitimately reference it even though this test exercises LDAP data.
+	if err := db.AutoMigrate(&domain.SchemaMigration{}, &legacyBootstrapUser{}, &legacyLDAPConfig{}, &legacyLDAPSyncLog{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, previous := range migrations[:len(migrations)-1] {
+	for _, previous := range migrations {
+		if previous.version == migrationLDAPRecoverableTasks {
+			break
+		}
 		if err := db.Create(&domain.SchemaMigration{Version: previous.version}).Error; err != nil {
 			t.Fatal(err)
 		}

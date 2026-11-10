@@ -27,6 +27,7 @@ const (
 	CodeDepartmentNotFound       BusinessCode = 404003 // 部门未找到
 	CodePermissionNotFound       BusinessCode = 404004 // 权限点未找到
 	CodeDirectoryConfigNotFound  BusinessCode = 404005 // 目录配置不存在
+	CodeManagedNotFound          BusinessCode = 404007
 	CodeDirectorySyncNotFound    BusinessCode = 404006 // 目录同步任务或计划不存在
 	CodeResourceConflict         BusinessCode = 409001 // 唯一约束冲突
 	CodeDepartmentHasChildren    BusinessCode = 409002 // 部门下仍有子部门

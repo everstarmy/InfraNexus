@@ -15,20 +15,23 @@ import (
 )
 
 type routeDeps struct {
-	health      *handler.HealthHandler
-	cfg         *config.Config
-	authSvc     domain.AuthService
-	casbin      *middleware.Casbin
-	setup       *handler.SetupHandler
-	auth        *handler.AuthHandler
-	users       *handler.UserHandler
-	roles       *handler.RoleHandler
-	permissions *handler.PermissionHandler
-	sse         *handler.SSEHandler
-	departments *handler.DepartmentHandler
-	options     *handler.OptionsHandler
-	ldap        *handler.LDAPHandler
-	dashboard   *handler.DashboardHandler
+	health           *handler.HealthHandler
+	cfg              *config.Config
+	authSvc          domain.AuthService
+	casbin           *middleware.Casbin
+	setup            *handler.SetupHandler
+	auth             *handler.AuthHandler
+	users            *handler.UserHandler
+	roles            *handler.RoleHandler
+	permissions      *handler.PermissionHandler
+	sse              *handler.SSEHandler
+	departments      *handler.DepartmentHandler
+	options          *handler.OptionsHandler
+	ldap             *handler.LDAPHandler
+	dashboard        *handler.DashboardHandler
+	location         locationServices
+	ipam             ipamServices
+	vendorManagement vendorManagementServices
 }
 
 var publicRoutes = map[string]struct{}{
@@ -51,6 +54,31 @@ var authenticatedRoutes = map[string]struct{}{
 	"GET /api/v1/sse/notifications":    {},
 }
 
+const (
+	locationPath             = "/locations"
+	datacenterPath           = "/datacenters"
+	buildingPath             = "/buildings"
+	floorPath                = "/floors"
+	roomPath                 = "/rooms"
+	rackRowPath              = "/rack-rows"
+	rackPath                 = "/racks"
+	warehousePath            = "/warehouses"
+	shelfPath                = "/shelves"
+	binPath                  = "/bins"
+	temporaryLocationPath    = "/temporary-locations"
+	ipamPath                 = "/ipam"
+	networkScopePath         = "/network-scopes"
+	securityZonePath         = "/security-zones"
+	subnetPath               = "/subnets"
+	rackSubnetBindingPath    = "/rack-bindings"
+	vendorManagementPath     = "/vendor-management"
+	manufacturerPath         = "/manufacturers"
+	vendorPath               = "/vendors"
+	organizationContactPath  = "/contacts"
+	vendorQualificationPath  = "/qualifications"
+	contactCertificationPath = "/contact-certifications"
+)
+
 var rbacRouteRoots = []string{
 	"/api/v1/dashboard",
 	"/api/v1/users",
@@ -59,6 +87,9 @@ var rbacRouteRoots = []string{
 	"/api/v1/permissions",
 	"/api/v1/ldap",
 	"/api/v1/reports",
+	apiPrefix + locationPath,
+	apiPrefix + ipamPath,
+	apiPrefix + vendorManagementPath,
 }
 
 func discoverAPIRoutes(app *fiber.App) ([]domain.RouteInfo, error) {
@@ -141,6 +172,35 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	rbac := authRequired.Group("", d.casbin.RoutePermission())
 
 	rbac.Get("/dashboard/overview", d.dashboard.Overview)
+
+	location := rbac.Group(locationPath)
+	handler.RegisterManagedRoutes(location.Group(datacenterPath), d.location.datacenter)
+	handler.RegisterManagedRoutes(location.Group(buildingPath), d.location.building)
+	handler.RegisterManagedRoutes(location.Group(floorPath), d.location.floor)
+	handler.RegisterManagedRoutes(location.Group(roomPath), d.location.room)
+	handler.RegisterManagedRoutes(location.Group(rackRowPath), d.location.rackRow)
+	rackRouter := location.Group(rackPath)
+	handler.RegisterManagedRoutes(rackRouter, d.location.rack)
+	handler.RegisterRackInventoryRoute(rackRouter, d.location.rackUnits)
+	handler.RegisterManagedRoutes(location.Group(warehousePath), d.location.warehouse)
+	handler.RegisterManagedRoutes(location.Group(shelfPath), d.location.shelf)
+	handler.RegisterManagedRoutes(location.Group(binPath), d.location.bin)
+	handler.RegisterManagedRoutes(location.Group(temporaryLocationPath), d.location.temporaryLocation)
+
+	ipam := rbac.Group(ipamPath)
+	handler.RegisterManagedRoutes(ipam.Group(networkScopePath), d.ipam.networkScope)
+	handler.RegisterManagedRoutes(ipam.Group(securityZonePath), d.ipam.securityZone)
+	subnetRouter := ipam.Group(subnetPath)
+	handler.RegisterManagedRoutes(subnetRouter, d.ipam.subnet)
+	handler.RegisterAddressPoolRoutes(subnetRouter, d.ipam.addresses)
+	handler.RegisterManagedRoutes(ipam.Group(rackSubnetBindingPath), d.ipam.rackSubnetBinding)
+
+	vendorManagement := rbac.Group(vendorManagementPath)
+	handler.RegisterManagedRoutes(vendorManagement.Group(manufacturerPath), d.vendorManagement.manufacturer)
+	handler.RegisterManagedRoutes(vendorManagement.Group(vendorPath), d.vendorManagement.vendor)
+	handler.RegisterManagedRoutes(vendorManagement.Group(organizationContactPath), d.vendorManagement.organizationContact)
+	handler.RegisterManagedRoutes(vendorManagement.Group(vendorQualificationPath), d.vendorManagement.vendorQualification)
+	handler.RegisterManagedRoutes(vendorManagement.Group(contactCertificationPath), d.vendorManagement.contactCertification)
 
 	users := rbac.Group("/users")
 	users.Get("", d.users.List)

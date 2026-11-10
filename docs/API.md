@@ -2,6 +2,8 @@
 
 本文记录当前 `/api/v1` 的认证、并发冲突和 LDAP 可恢复同步契约，供前后端与集成客户端共同使用。路由权限仍由 Casbin 按方法和路由模板执行；公开路由与登录/令牌路由除外。
 
+位置、IPAM、制造商与供应商接口见 [基础管理 API](DCIM_MANAGEMENT_API.md)。
+
 ## 响应与认证
 
 成功和失败响应统一包含 `code`、`message`、`data`、`request_id` 和 Unix 秒级 `timestamp`。分页数据位于 `data.items`，并带 `total`、`page`、`page_size`。`request_id` 同时用于响应、请求日志和后台 LDAP 任务日志。
