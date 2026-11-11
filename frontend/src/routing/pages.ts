@@ -16,6 +16,13 @@ export const routePages = {
   "/roles": preloadable(() => import("@/pages/roles/index")),
   "/permissions": preloadable(() => import("@/pages/permissions/index")),
   "/ldap": preloadable(() => import("@/pages/ldap/index")),
+
+  // DCIM Foundation Modules
+  "/vendor-management": preloadable(() => import("@/pages/vendor-management/index")),
+  "/locations": preloadable(() => import("@/pages/locations/index")),
+  "/locations/warehouses": preloadable(() => import("@/pages/locations/warehouses")),
+  "/ipam/subnets": preloadable(() => import("@/pages/ipam/index")),
+  "/ipam/rack-bindings": preloadable(() => import("@/pages/ipam/rack-bindings")),
 }
 
 export function preloadPage(pathname: string) {
