@@ -33,13 +33,6 @@ export interface SubnetDTO extends ManagedBase {
   is_allocatable: boolean
 }
 
-export interface RackSubnetBindingDTO extends ManagedBase {
-  rack_id: string
-  subnet_id: string
-  usage_type: SubnetUsageType
-  is_default: boolean
-}
-
 export type IPAllocationState = "free" | "reserved" | "in_use" | "quarantined"
 
 export interface IPAddressView {
@@ -150,7 +143,3 @@ export const subnetsService = {
       { reason }
     ) as Promise<Envelope<{ resolved: boolean }>>,
 }
-
-export const rackBindingsService = createManagedClient<RackSubnetBindingDTO>(
-  "/ipam/rack-bindings"
-)

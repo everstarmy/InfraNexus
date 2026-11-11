@@ -18,6 +18,8 @@ import type { Envelope, PageData } from "@/services/types"
 const actionLabels: Record<string, { label: string; variant?: "default" | "outline" | "secondary" | "destructive" }> = {
   create: { label: "创建", variant: "default" },
   update: { label: "更新", variant: "outline" },
+  move: { label: "更改上级", variant: "outline" },
+  "security-zone": { label: "变更安全域", variant: "outline" },
   status: { label: "变更状态", variant: "secondary" },
   delete: { label: "删除", variant: "destructive" },
   import: { label: "批量导入", variant: "default" },
@@ -112,6 +114,15 @@ export function ManagedHistorySheet({
                             <span className="font-semibold">{audit.after.status === 1 ? "启用" : "停用"}</span>
                           </div>
                         )}
+                        {(audit.before?.location || audit.after?.location) && <details>
+                          <summary className="cursor-pointer font-sans">位置属性</summary>
+                          {([["变更前", audit.before?.location], ["变更后", audit.after?.location]] as const).map(([label, location]) =>
+                            location && <div key={label} className="mt-2">
+                              <p className="font-sans text-muted-foreground">{label}</p>
+                              <pre className="whitespace-pre-wrap break-all">{JSON.stringify(location, null, 2)}</pre>
+                            </div>
+                          )}
+                        </details>}
                         {audit.after?.reason && (
                           <div className="text-foreground/80 font-sans">
                             <span className="text-muted-foreground">原因：</span>

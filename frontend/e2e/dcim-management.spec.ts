@@ -77,44 +77,36 @@ async function chooseAction(page: Page, label: string) {
   }
 }
 
-test("机柜列表和新增都使用真实的机柜列 ID", async ({ page }) => {
+test("四层位置树从机房直接新建机柜", async ({ page }) => {
   const levels = [
-    ["datacenters", "北京数据中心"],
-    ["buildings", "一号楼"],
-    ["floors", "一楼"],
-    ["rooms", "主机房"],
-    ["rack-rows", "A 列"],
-  ] as const
-  const rackRequests: URL[] = []
+    { uid: id(40), name: "北京数据中心", type: "datacenter", parent: null, ext: { address: "北京", contact: { name: "联系人" } }, has_children: true },
+    { uid: id(41), name: "一号楼", type: "building", parent: id(40), ext: {}, has_children: true },
+    { uid: id(42), name: "主机房", type: "room", parent: id(41), ext: { floor: 0 }, has_children: false },
+  ]
   await mockAPI(page, (route, url) => {
-    const path = url.pathname.split("/").at(-1)
-    const index = levels.findIndex(([resource]) => resource === path)
-    if (index >= 0) {
-      if (index > 0) expect(url.searchParams.get("parent_id")).toBe(id(39 + index))
-      return json(route, list([{ ...entry(40 + index, levels[index][1]), kind: "primary" }]))
+    if (url.pathname.endsWith(`/locations/nodes/${id(50)}/units`)) {
+      return json(route, { rack_id: id(50), units: [{ unit: 42, state: "free", available: true }] })
     }
-    if (path === "racks" && route.request().method() === "GET") {
-      rackRequests.push(url)
-      return json(route, list([]))
+    if (!url.pathname.endsWith("/locations/nodes")) return
+    if (route.request().method() === "POST") {
+      return json(route, { ...route.request().postDataJSON(), uid: id(50), status: 1, version: 1 })
     }
-    if (path === "racks" && route.request().method() === "POST")
-      return json(route, entry(50, "测试机柜"))
+    const parentParam = url.searchParams.get("parent")
+    const actualParent = parentParam === "root" ? null : parentParam
+    return json(route, list(levels.filter(node => node.parent === actualParent).map(node => ({ ...node, status: 1, version: 1 }))))
   })
   await page.goto("/locations")
-  await expect(page.getByText("请选择机柜列")).toBeVisible()
-  await expect(page.getByRole("button", { name: "新建机柜", exact: true })).toHaveCount(0)
-  for (const [, name] of levels) await page.getByRole("button", { name, exact: true }).click()
-  await expect.poll(() => rackRequests.at(-1)?.searchParams.get("parent_id")).toBe(id(44))
-  await page.getByRole("button", { name: "新建机柜", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "新建服务器机柜" })
-  await dialog.locator("input").nth(0).fill("RACK-1")
-  await dialog.locator("input").nth(1).fill("测试机柜")
-  const request = page.waitForRequest(
-    (req) => req.method() === "POST" && req.url().endsWith("/locations/racks"),
-  )
-  await dialog.getByRole("button", { name: "创建机柜" }).click()
-  expect((await request).postDataJSON()).toMatchObject({ rack_row_id: id(44), code: "RACK-1" })
-  await expect(dialog).toBeHidden()
+  await page.getByRole("button", { name: /展开.*北京数据中心/ }).click()
+  await page.getByRole("button", { name: /展开.*一号楼/ }).click()
+  await page.getByRole("button", { name: /主机房/ }).first().click()
+  await expect(page.getByText(/0F|楼层/)).toBeVisible()
+  await page.getByRole("button", { name: "新建机柜" }).first().click()
+  await page.getByPlaceholder("请输入机柜名称").fill("测试机柜")
+  await page.getByPlaceholder("A 或 1").fill("A")
+  await page.getByPlaceholder("1", { exact: true }).fill("1")
+  const request = page.waitForRequest(req => req.method() === "POST" && req.url().endsWith("/locations/nodes"))
+  await page.getByRole("button", { name: "确认创建" }).click()
+  expect((await request).postDataJSON()).toMatchObject({ parent: id(42), type: "rack", ext: { row: "A", column: 1, height_u: 42 } })
 })
 
 test("制造商编辑保留现有编码、版本和未展示字段", async ({ page }) => {
@@ -229,7 +221,7 @@ test("地址空间选项异步加载不会清空已输入的子网草稿", async
 test("空库可以创建地址空间和安全域", async ({ page }) => {
   const datacenter = entry(61, "初始化数据中心")
   await mockAPI(page, (route, url) => {
-    if (url.pathname.endsWith("/datacenters")) return json(route, list([datacenter]))
+    if (url.pathname.endsWith("/locations/nodes")) return json(route, list([{ ...datacenter, uid: datacenter.id }]))
     if (route.request().method() === "POST")
       return json(route, { ...entry(62, "新建档案"), ...route.request().postDataJSON() })
   })
@@ -262,74 +254,5 @@ test("空库可以创建地址空间和安全域", async ({ page }) => {
   expect((await createZone).postDataJSON()).toMatchObject({
     code: "ZONE-1",
     datacenter_id: datacenter.id,
-  })
-})
-
-test("批量导入只允许提交已通过预检的记录，并附带幂等键", async ({ page }) => {
-  await mockAPI(page, (route, url) => {
-    if (url.pathname.endsWith("/manufacturers/import/preview")) {
-      const { items } = route.request().postDataJSON()
-      return json(route, {
-        items: [],
-        errors: items[0].code ? [] : [{ row: 1, message: "缺少编码" }],
-      })
-    }
-    if (url.pathname.endsWith("/manufacturers/import"))
-      return json(route, { items: [entry(63, "测试制造商")], errors: [] })
-  })
-  await page.goto("/vendor-management")
-  await page.getByRole("button", { name: "导入", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "批量导入制造商" })
-  const input = dialog.getByLabel("JSON 记录")
-  const submit = dialog.getByRole("button", { name: "提交导入" })
-  await input.fill('[{"name":"测试制造商"}]')
-  await dialog.getByRole("button", { name: "预检", exact: true }).click()
-  await expect(dialog.getByText("第 1 行：缺少编码")).toBeVisible()
-  await expect(submit).toBeDisabled()
-  await input.fill('[{"code":"MFR-1","name":"测试制造商"}]')
-  await dialog.getByRole("button", { name: "预检", exact: true }).click()
-  await expect(submit).toBeEnabled()
-  const commit = page.waitForRequest(
-    (req) => req.method() === "POST" && req.url().endsWith("/manufacturers/import"),
-  )
-  await submit.click()
-  const request = await commit
-  expect(request.headers()["idempotency-key"]).toMatch(/^[a-f0-9]{32}$/)
-  expect(request.postDataJSON()).toEqual({ items: [{ code: "MFR-1", name: "测试制造商" }] })
-  await expect(dialog).toBeHidden()
-})
-
-test("机柜网段绑定可选择已有机柜和可分配子网", async ({ page }) => {
-  const rack = entry(70, "机柜 A01")
-  await mockAPI(page, (route, url) => {
-    if (url.pathname.endsWith("/locations/racks")) return json(route, list([rack]))
-    if (url.pathname.endsWith("/ipam/subnets"))
-      return json(
-        route,
-        list([subnet, { ...subnet, id: id(71), name: "规划前缀", is_allocatable: false }]),
-      )
-    if (url.pathname.endsWith("/ipam/rack-bindings") && route.request().method() === "POST")
-      return json(route, entry(72, "生产绑定"))
-  })
-  await page.goto("/ipam/rack-bindings")
-  await page.getByRole("button", { name: "新建机柜网段绑定", exact: true }).click()
-  const dialog = page.getByRole("dialog")
-  await dialog.getByLabel("编码", { exact: true }).fill("BIND-1")
-  await dialog.getByLabel("名称", { exact: true }).fill("生产绑定")
-  await dialog.getByLabel("机柜", { exact: true }).selectOption(rack.id)
-  const subnetPicker = dialog.getByLabel("子网", { exact: true })
-  await subnetPicker.selectOption(subnet.id)
-  await expect(subnetPicker.locator(`option[value="${id(71)}"]`)).toHaveCount(0)
-  await dialog.getByLabel("与子网一致的网络用途").selectOption("production")
-  const request = page.waitForRequest(
-    (req) => req.method() === "POST" && req.url().endsWith("/rack-bindings"),
-  )
-  await dialog.getByRole("button", { name: "保存" }).click()
-  expect((await request).postDataJSON()).toMatchObject({
-    code: "BIND-1",
-    rack_id: rack.id,
-    subnet_id: subnet.id,
-    usage_type: "production",
-    is_default: false,
   })
 })

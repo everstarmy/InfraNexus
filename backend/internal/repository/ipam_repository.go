@@ -98,24 +98,10 @@ func NewSubnetRepository(db *gorm.DB) domain.ManagedRepository[domain.Subnet] {
 		if filters.SecurityZoneID != nil {
 			query = query.Where("security_zone_id = ?", *filters.SecurityZoneID)
 		}
-		return filterSubnetUsage(query, filters)
-	}
-	return repo
-}
-
-func NewRackSubnetBindingRepository(db *gorm.DB) domain.ManagedRepository[domain.RackSubnetBinding] {
-	repo := newManagedRepository[domain.RackSubnetBinding](db, "rack_id")
-	parent := repo.filter
-	repo.order = "is_default DESC, code, id"
-	repo.filter = func(query *gorm.DB, filters domain.ManagedQuery) *gorm.DB {
-		return filterSubnetUsage(parent(query, filters), filters)
-	}
-	return repo
-}
-
-func filterSubnetUsage(query *gorm.DB, filters domain.ManagedQuery) *gorm.DB {
-	if filters.UsageType == "" {
+		if filters.UsageType != "" {
+			query = query.Where("usage_type = ?", filters.UsageType)
+		}
 		return query
 	}
-	return query.Where("usage_type = ?", filters.UsageType)
+	return repo
 }

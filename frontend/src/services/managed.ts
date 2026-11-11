@@ -39,6 +39,7 @@ export interface ManagedAuditSnapshot {
 }
 
 export interface ManagedAuditFields {
+  location?: { name: string; parent: string | null; ext: Record<string, unknown>; security_zone_id?: string }
   qualification?: ManagedAuditSnapshot
   code?: string
   status?: number
@@ -59,16 +60,6 @@ export interface ManagedAudit {
   before: ManagedAuditFields
   after: ManagedAuditFields
   created_at: string
-}
-
-export interface ManagedImportError {
-  row: number
-  message: string
-}
-
-export interface ManagedImportResult<T> {
-  items: T[]
-  errors: ManagedImportError[]
 }
 
 export function newManagedIdempotencyKey() {
@@ -117,21 +108,5 @@ export function createManagedClient<T extends ManagedBase>(basePath: string) {
         Envelope<PageData<ManagedAudit>>
       >,
 
-    importPreview: (items: Partial<T>[]) =>
-      api.post(`${basePath}/import/preview`, { items }) as Promise<
-        Envelope<ManagedImportResult<T>>
-      >,
-
-    importCommit: (items: Partial<T>[], idempotencyKey: string) =>
-      api.post(
-        `${basePath}/import`,
-        { items },
-        {
-          headers: { "Idempotency-Key": idempotencyKey },
-        }
-      ) as Promise<Envelope<ManagedImportResult<T>>>,
-
-    export: (params?: ManagedQueryParams, signal?: AbortSignal) =>
-      api.get(`${basePath}/export`, { params, signal }) as Promise<Envelope<T[]>>,
   }
 }

@@ -15,7 +15,7 @@ import { usersService } from "@/services/users"
 
 const datacenters = {
   key: "datacenters",
-  permission: "locations:datacenters:read",
+  permission: "locations:nodes:type:datacenter",
   list: datacentersService.list,
 }
 const warehouses = {
@@ -54,8 +54,6 @@ export default function WarehousesPage() {
     can([
       `locations:${value}:read`,
       `locations:${value}:create`,
-      `locations:${value}:import`,
-      `locations:${value}:export`,
     ]),
   )
   return (

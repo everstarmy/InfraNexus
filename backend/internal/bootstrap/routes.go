@@ -15,6 +15,7 @@ import (
 )
 
 type routeDeps struct {
+	authz            domain.AuthorizationService
 	health           *handler.HealthHandler
 	cfg              *config.Config
 	authSvc          domain.AuthService
@@ -55,13 +56,8 @@ var authenticatedRoutes = map[string]struct{}{
 }
 
 const (
-	locationPath             = "/locations"
-	datacenterPath           = "/datacenters"
-	buildingPath             = "/buildings"
-	floorPath                = "/floors"
-	roomPath                 = "/rooms"
-	rackRowPath              = "/rack-rows"
-	rackPath                 = "/racks"
+	locationPath = "/locations"
+
 	warehousePath            = "/warehouses"
 	shelfPath                = "/shelves"
 	binPath                  = "/bins"
@@ -70,7 +66,6 @@ const (
 	networkScopePath         = "/network-scopes"
 	securityZonePath         = "/security-zones"
 	subnetPath               = "/subnets"
-	rackSubnetBindingPath    = "/rack-bindings"
 	vendorManagementPath     = "/vendor-management"
 	manufacturerPath         = "/manufacturers"
 	vendorPath               = "/vendors"
@@ -174,14 +169,7 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	rbac.Get("/dashboard/overview", d.dashboard.Overview)
 
 	location := rbac.Group(locationPath)
-	handler.RegisterManagedRoutes(location.Group(datacenterPath), d.location.datacenter)
-	handler.RegisterManagedRoutes(location.Group(buildingPath), d.location.building)
-	handler.RegisterManagedRoutes(location.Group(floorPath), d.location.floor)
-	handler.RegisterManagedRoutes(location.Group(roomPath), d.location.room)
-	handler.RegisterManagedRoutes(location.Group(rackRowPath), d.location.rackRow)
-	rackRouter := location.Group(rackPath)
-	handler.RegisterManagedRoutes(rackRouter, d.location.rack)
-	handler.RegisterRackInventoryRoute(rackRouter, d.location.rackUnits)
+	handler.RegisterLocationNodeRoutes(location.Group("/nodes"), d.location.nodes, d.authz)
 	handler.RegisterManagedRoutes(location.Group(warehousePath), d.location.warehouse)
 	handler.RegisterManagedRoutes(location.Group(shelfPath), d.location.shelf)
 	handler.RegisterManagedRoutes(location.Group(binPath), d.location.bin)
@@ -193,7 +181,6 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	subnetRouter := ipam.Group(subnetPath)
 	handler.RegisterManagedRoutes(subnetRouter, d.ipam.subnet)
 	handler.RegisterAddressPoolRoutes(subnetRouter, d.ipam.addresses)
-	handler.RegisterManagedRoutes(ipam.Group(rackSubnetBindingPath), d.ipam.rackSubnetBinding)
 
 	vendorManagement := rbac.Group(vendorManagementPath)
 	handler.RegisterManagedRoutes(vendorManagement.Group(manufacturerPath), d.vendorManagement.manufacturer)

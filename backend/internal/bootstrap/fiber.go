@@ -114,9 +114,7 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 	deptSvc := service.NewDepartmentService(deptRepo, userRepo, organization)
 
 	managedWrites := repository.NewManagedUnitOfWork(app.DB)
-	datacenterRepo := repository.NewManagedRepository[domain.Datacenter](app.DB, "")
-	roomRepo := repository.NewManagedRepository[domain.Room](app.DB, "floor_id")
-	rackRepo := repository.NewManagedRepository[domain.Rack](app.DB, "rack_row_id")
+	locationNodes := repository.NewLocationNodeRepository(app.DB)
 	securityZoneRepo := repository.NewManagedRepository[domain.SecurityZone](app.DB, "datacenter_id")
 
 	sqlDB, err := app.DB.DB()
@@ -127,6 +125,7 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 		health:  handler.NewHealthHandler(service.NewHealthService(repository.NewHealthRepository(sqlDB, app.Redis, app.Config.App.Env == "production"))),
 		cfg:     app.Config,
 		authSvc: authSvc,
+		authz:   authzSvc,
 		casbin: middleware.NewCasbin(middleware.CasbinConfig{
 			Enforcer:  enforcer,
 			Authorize: authzSvc.Enforce,
@@ -141,8 +140,8 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 		departments:      handler.NewDepartmentHandler(deptSvc),
 		options:          handler.NewOptionsHandler(roleSvc, deptSvc),
 		ldap:             handler.NewLDAPHandler(ldapSvc),
-		location:         assembleLocation(app.DB, managedWrites, userRepo, datacenterRepo, rackRepo, roomRepo, securityZoneRepo),
-		ipam:             assembleIPAM(app.DB, managedWrites, datacenterRepo, rackRepo, roomRepo, securityZoneRepo),
+		location:         assembleLocation(app.DB, managedWrites, userRepo, locationNodes),
+		ipam:             assembleIPAM(app.DB, managedWrites, locationNodes, securityZoneRepo),
 		vendorManagement: assembleVendorManagement(app.DB, managedWrites),
 		dashboard:        handler.NewDashboardHandler(service.NewDashboardService(userRepo, deptRepo, roleRepo, permRepo, ldapRepo)),
 	})

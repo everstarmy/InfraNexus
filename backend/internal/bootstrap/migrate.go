@@ -31,6 +31,12 @@ var migrations = []migration{
 	{version: migrationAuthorizationOutboxRetry, apply: migrateAuthorizationOutboxRetry},
 	{version: migrationLDAPRecoverableTasks, apply: migrateLDAPRecoverableTasks},
 	{version: migrationLocationIPAMVendors, apply: migrateLocationIPAMVendors},
+	{version: migrationRetiredIPAMBinding, apply: migrateRetiredIPAMBinding},
+	{version: migrationLocationNodes, apply: migrateLocationNodes},
+	{version: migrationLocationCutover, apply: migrateLocationCutover},
+	{version: migrationLocationTransferRetirement, apply: migrateLocationTransferRetirement},
+	{version: migrationManagedTransferRetirement, apply: migrateManagedTransferRetirement},
+	{version: migrationLocationParentFixed, apply: migrateLocationParentFixed},
 }
 
 var legacyIndexes = []legacyIndex{

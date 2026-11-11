@@ -77,9 +77,6 @@ func RegisterManagedRoutes[T any](router fiber.Router, service domain.ManagedSer
 	h := managedHandler[T]{service: service}
 	router.Get("", h.list)
 	router.Post("", h.create)
-	router.Post("/import/preview", h.importPreview)
-	router.Post("/import", h.importCommit)
-	router.Get("/export", h.export)
 	router.Get("/:id", h.detail)
 	router.Get("/:id/history", h.history)
 	router.Get("/:id/references", h.references)
@@ -214,34 +211,4 @@ func (h *managedHandler[T]) delete(c fiber.Ctx) error {
 	return response.Success(c, struct {
 		Deleted bool `json:"deleted"`
 	}{Deleted: true})
-}
-func (h *managedHandler[T]) importPreview(c fiber.Ctx) error { return h.importRows(c, true) }
-func (h *managedHandler[T]) importCommit(c fiber.Ctx) error  { return h.importRows(c, false) }
-func (h *managedHandler[T]) importRows(c fiber.Ctx, preview bool) error {
-	actor, err := managedActor(c)
-	if err != nil {
-		return err
-	}
-	var input struct {
-		Items []T `json:"items"`
-	}
-	if err := c.Bind().JSON(&input); err != nil {
-		return coreerrors.ErrParamInvalid.WithMessage("请求体格式错误")
-	}
-	result, err := h.service.Import(c.Context(), actor, c.Get("Idempotency-Key"), input.Items, preview)
-	if err != nil {
-		return managedError(err)
-	}
-	return response.Success(c, result)
-}
-func (h *managedHandler[T]) export(c fiber.Ctx) error {
-	q, err := managedQuery(c)
-	if err != nil {
-		return err
-	}
-	items, err := h.service.Export(c.Context(), q)
-	if err != nil {
-		return managedError(err)
-	}
-	return response.Success(c, items)
 }

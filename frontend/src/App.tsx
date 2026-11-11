@@ -168,6 +168,7 @@ const router = createBrowserRouter([
         ),
         children: [
           { index: true, element: <HomeRedirect /> },
+          { path: "locations", element: <Navigate to="/locations/topology" replace /> },
           ...pageNavItems.map((item) => {
             const { Page } = routePages[item.url as keyof typeof routePages]
             return {

@@ -7,8 +7,6 @@ func managedResourcePermissions(module, path, label string) permSeed {
 	history := []permSeed{apiPerm("GET", p+"/:id/history", "查看"+label+"历史")}
 	var extra []permSeed
 	switch p {
-	case locationPath + rackPath:
-		read = append(read, apiPerm("GET", p+"/:id/units", "查看机柜 U 位"))
 	case ipamPath + subnetPath:
 		address := p + "/:id/addresses/:address"
 		read = append(read, apiPerm("GET", p+"/:id/addresses", "查询地址池"), apiPerm("GET", address, "查看 IP 地址"))
@@ -28,8 +26,6 @@ func managedResourcePermissions(module, path, label string) permSeed {
 		buttonPerm(key+":update", "编辑"+label, apiPerm("PUT", p+"/:id", "编辑"+label)),
 		buttonPerm(key+":status", "启停"+label, apiPerm("PATCH", p+"/:id/status", "启停"+label)),
 		buttonPerm(key+":delete", "删除"+label, apiPerm("DELETE", p+"/:id", "删除"+label)),
-		buttonPerm(key+":import", "导入"+label, apiPerm("POST", p+"/import/preview", "预检导入"), apiPerm("POST", p+"/import", "提交导入")),
-		buttonPerm(key+":export", "导出"+label, apiPerm("GET", p+"/export", "导出"+label)),
 	}
 	return menuPerm(key, label, p, "", append(actions, extra...)...)
 }

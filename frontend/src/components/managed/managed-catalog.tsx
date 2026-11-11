@@ -19,7 +19,6 @@ import type { ManagedBase, createManagedClient } from "@/services/managed"
 import { ManagedEditor, type EditorField } from "./managed-editor"
 import { ManagedHistorySheet } from "./managed-history-sheet"
 import { ManagedReferencesDialog } from "./managed-references-dialog"
-import { ManagedTransferActions } from "./managed-transfer-actions"
 
 export function ManagedCatalog<T extends ManagedBase>({
   label,
@@ -147,13 +146,6 @@ export function ManagedCatalog<T extends ManagedBase>({
         onRetry={() => void query.refetch()}
         actions={
           <>
-            <ManagedTransferActions
-              permission={permission}
-              label={label}
-              service={service}
-              filters={filters}
-              onImported={refresh}
-            />
             {can(`${permission}:create`) && (
               <Button size="sm" onClick={() => setEditing("new")}>
                 <Plus />

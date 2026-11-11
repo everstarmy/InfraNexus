@@ -61,6 +61,4 @@ export const queryKeys = {
   subnetsAll: ["subnets"] as const,
   subnetAddresses: (subnetId: string, page?: number, pageSize?: number) =>
     ["subnets", "addresses", subnetId, page, pageSize] as const,
-  rackBindings: (params?: ManagedQueryParams) => ["rack-bindings", "list", params] as const,
-  rackBindingsAll: ["rack-bindings"] as const,
 }

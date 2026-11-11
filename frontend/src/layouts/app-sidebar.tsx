@@ -61,14 +61,32 @@ const ActivePill = () => (
   </motion.span>
 )
 
+function getActiveChildUrl(children: NavItem[], activeUrl: string): string | null {
+  const clean = activeUrl.length > 1 && activeUrl.endsWith("/") ? activeUrl.slice(0, -1) : activeUrl
+  const normalized = clean === "/locations" ? "/locations/topology" : clean
+
+  // 1. Exact match has highest priority
+  const exact = children.find((c) => normalized === c.url)
+  if (exact) return exact.url
+
+  // 2. Longest prefix match among children (e.g. /locations/warehouses/123)
+  const matching = children
+    .filter((c) => normalized.startsWith(`${c.url}/`))
+    .sort((a, b) => b.url.length - a.url.length)
+
+  return matching[0]?.url ?? null
+}
+
 function NavMenuItem({ item, activeUrl }: { item: NavItem; activeUrl: string }) {
   const Icon = item.icon
   const { state, isMobile } = useSidebar()
   const isCollapsed = state === "collapsed" && !isMobile
   const hasChildren = item.children && item.children.length > 0
+  const cleanActiveUrl = activeUrl.length > 1 && activeUrl.endsWith("/") ? activeUrl.slice(0, -1) : activeUrl
+  const normalizedActiveUrl = cleanActiveUrl === "/locations" ? "/locations/topology" : cleanActiveUrl
 
   if (!hasChildren) {
-    const isActive = activeUrl === item.url || activeUrl.startsWith(`${item.url}/`)
+    const isActive = normalizedActiveUrl === item.url || normalizedActiveUrl.startsWith(`${item.url}/`)
 
     if (isCollapsed) {
       return (
@@ -158,9 +176,8 @@ function NavMenuItem({ item, activeUrl }: { item: NavItem; activeUrl: string }) 
     )
   }
 
-  const isChildActive = item.children?.some(
-    (c) => activeUrl === c.url || activeUrl.startsWith(`${c.url}/`)
-  )
+  const activeChildUrl = hasChildren ? getActiveChildUrl(item.children!, normalizedActiveUrl) : null
+  const isChildActive = Boolean(activeChildUrl)
 
   // When sidebar is collapsed to icon rail: hover over the icon triggers flyout submenu to the right!
   if (isCollapsed) {
@@ -197,7 +214,7 @@ function NavMenuItem({ item, activeUrl }: { item: NavItem; activeUrl: string }) 
             <DropdownMenuGroup>
               {item.children!.map((child) => {
                 const ChildIcon = child.icon
-                const isSubActive = activeUrl === child.url || activeUrl.startsWith(`${child.url}/`)
+                const isSubActive = child.url === activeChildUrl
                 const hasSubChildren = child.children && child.children.length > 0
 
                 if (hasSubChildren) {
@@ -286,7 +303,7 @@ function NavMenuItem({ item, activeUrl }: { item: NavItem; activeUrl: string }) 
         <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden data-open:animate-sidebar-submenu-down data-closed:animate-sidebar-submenu-up motion-reduce:animate-none">
           <SidebarMenuSub>
             {item.children!.map((child) => {
-              const isSubActive = activeUrl === child.url || activeUrl.startsWith(`${child.url}/`)
+              const isSubActive = child.url === activeChildUrl
               return (
                 <SidebarMenuSubItem key={child.url}>
                   <SidebarMenuSubButton

@@ -72,28 +72,3 @@ func SubnetRule(uow domain.ManagedUnitOfWork, inventory domain.SubnetOverlapRepo
 		return nil
 	}
 }
-
-func RackSubnetRule(racks domain.ManagedRepository[domain.Rack], rooms domain.ManagedRepository[domain.Room], subnets domain.ManagedRepository[domain.Subnet], zones domain.ManagedRepository[domain.SecurityZone]) ManagedRule[domain.RackSubnetBinding] {
-	return func(ctx context.Context, item, _ *domain.RackSubnetBinding) error {
-		rack, err := activeManagedParent(ctx, racks, item.RackID)
-		if err != nil {
-			return err
-		}
-		subnet, err := activeManagedParent(ctx, subnets, item.SubnetID)
-		if err != nil {
-			return err
-		}
-		room, err := activeManagedParent(ctx, rooms, rack.RoomID)
-		if err != nil {
-			return err
-		}
-		zone, err := activeManagedParent(ctx, zones, subnet.SecurityZoneID)
-		if err != nil {
-			return err
-		}
-		if !subnet.IsAllocatable || subnet.UsageType != item.UsageType || room.DatacenterID != zone.DatacenterID || rack.SecurityZoneID != nil && *rack.SecurityZoneID != zone.ID {
-			return coreerrors.ErrParamInvalid.WithMessage("网段必须可分配，并与机柜的数据中心、安全域及用途相容")
-		}
-		return nil
-	}
-}

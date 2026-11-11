@@ -12,7 +12,6 @@ import (
 type managedRepository[T any, P domain.ManagedEntity[T]] struct {
 	*BaseRepository[T, uuid.UUID]
 	filter func(*gorm.DB, domain.ManagedQuery) *gorm.DB
-	order  string
 }
 
 func NewManagedRepository[T any, P domain.ManagedEntity[T]](db *gorm.DB, parentColumn string) domain.ManagedRepository[T] {
@@ -22,7 +21,6 @@ func NewManagedRepository[T any, P domain.ManagedEntity[T]](db *gorm.DB, parentC
 func newManagedRepository[T any, P domain.ManagedEntity[T]](db *gorm.DB, parentColumn string) *managedRepository[T, P] {
 	return &managedRepository[T, P]{
 		BaseRepository: NewBaseRepository[T, uuid.UUID](db),
-		order:          "code, id",
 		filter: func(query *gorm.DB, filters domain.ManagedQuery) *gorm.DB {
 			if filters.ParentID == nil {
 				return query
@@ -44,7 +42,7 @@ func (r *managedRepository[T, P]) List(ctx context.Context, q domain.ManagedQuer
 	if q.Status != 0 {
 		db = db.Where("status = ?", q.Status)
 	}
-	return managedPage[T](r.filter(db, q), q, r.order)
+	return managedPage[T](r.filter(db, q), q, "code, id")
 }
 
 func (r *managedRepository[T, P]) Update(ctx context.Context, record *T) error {
@@ -99,13 +97,6 @@ func (r *managedUnitOfWork) Write(ctx context.Context, fn func(context.Context) 
 	})
 }
 
-// Attempt isolates a row failure so a batch can report every invalid row.
-func (r *managedUnitOfWork) Attempt(ctx context.Context, fn func(context.Context) error) error {
-	return r.connection(ctx).Transaction(func(tx *gorm.DB) error {
-		return fn(contextWithTransaction(ctx, tx))
-	})
-}
-
 func (r *managedUnitOfWork) HasReferences(ctx context.Context, table string, id uuid.UUID, activeOnly bool) (bool, error) {
 	for _, ref := range domain.ManagedReferences() {
 		if ref.Target != table {
@@ -114,7 +105,7 @@ func (r *managedUnitOfWork) HasReferences(ctx context.Context, table string, id 
 		db := r.connection(ctx).Table(ref.Table).Where(ref.Column+" = ?", id)
 		if activeOnly {
 			switch ref.Table {
-			case "dc_rack_unit_allocation":
+			case "dc_rack_unit_allocation", "dc_rack_security_zone":
 				// Every persisted U position is an occupied or reserved slot.
 			case "ipam_ip_address":
 				// Historical facts survive a stop. Live allocations block it.

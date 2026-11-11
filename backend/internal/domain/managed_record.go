@@ -52,6 +52,7 @@ type QualificationAuditSnapshot struct {
 }
 
 type ManagedAuditFields struct {
+	Location      *LocationNode               `json:"location,omitempty"`
 	Qualification *QualificationAuditSnapshot `json:"qualification,omitempty"`
 	Code          string                      `json:"code,omitempty"`
 	Status        int                         `json:"status,omitempty"`
@@ -92,7 +93,7 @@ type ManagedReference struct {
 
 // ManagedReferences is the shared registry of restrictive foreign keys and
 // reference checks. It contains trusted schema identifiers only.
-func ManagedReferences() []ManagedReference {
+func LegacyManagedReferences() []ManagedReference {
 	return []ManagedReference{
 		{"dc_datacenter", "owner_id", "users"},
 		{"dc_building", "datacenter_id", "dc_datacenter"},
@@ -112,8 +113,6 @@ func ManagedReferences() []ManagedReference {
 		{"ipam_security_zone", "datacenter_id", "dc_datacenter"},
 		{"ipam_subnet", "network_scope_id", "ipam_network_scope"},
 		{"ipam_subnet", "security_zone_id", "ipam_security_zone"},
-		{"ipam_rack_subnet_binding", "rack_id", "dc_rack"},
-		{"ipam_rack_subnet_binding", "subnet_id", "ipam_subnet"},
 		{"ipam_ip_address", "subnet_id", "ipam_subnet"},
 		{"ipam_ip_address", "network_scope_id", "ipam_network_scope"},
 		{"ipam_conflict", "address_id", "ipam_ip_address"},
@@ -126,6 +125,25 @@ func ManagedReferences() []ManagedReference {
 	}
 }
 
+func ManagedReferences() []ManagedReference {
+	out := []ManagedReference{
+		{"dc_location", "parent", "dc_location"},
+		{"dc_rack_security_zone", "rack_id", "dc_location"},
+		{"dc_rack_security_zone", "security_zone_id", "ipam_security_zone"},
+	}
+	for _, ref := range LegacyManagedReferences() {
+		switch ref.Table {
+		case "dc_datacenter", "dc_building", "dc_floor", "dc_room", "dc_rack_row", "dc_rack":
+			continue
+		}
+		if ref.Target == "dc_datacenter" || ref.Target == "dc_rack" {
+			ref.Target = "dc_location"
+		}
+		out = append(out, ref)
+	}
+	return out
+}
+
 type ManagedReferenceCount struct {
 	Resource string `json:"resource"`
 	Field    string `json:"field"`
@@ -135,7 +153,6 @@ type ManagedReferenceCount struct {
 type ManagedUnitOfWork interface {
 	References(context.Context, string, uuid.UUID) ([]ManagedReferenceCount, error)
 	Write(context.Context, func(context.Context) error) error
-	Attempt(context.Context, func(context.Context) error) error
 	HasReferences(context.Context, string, uuid.UUID, bool) (bool, error)
 	Audit(context.Context, *ManagedAudit) error
 	History(context.Context, string, uuid.UUID, ManagedQuery) ([]ManagedAudit, int64, error)
@@ -160,16 +177,4 @@ type ManagedService[T any] interface {
 	Update(context.Context, uuid.UUID, uuid.UUID, int64, T) (*T, error)
 	SetStatus(context.Context, uuid.UUID, uuid.UUID, int64, int) (*T, error)
 	Delete(context.Context, uuid.UUID, uuid.UUID, int64) error
-	Import(context.Context, uuid.UUID, string, []T, bool) (ManagedImportResult[T], error)
-	Export(context.Context, ManagedQuery) ([]T, error)
-}
-
-type ManagedImportResult[T any] struct {
-	Items  []T                  `json:"items"`
-	Errors []ManagedImportError `json:"errors"`
-}
-
-type ManagedImportError struct {
-	Row     int    `json:"row"`
-	Message string `json:"message"`
 }

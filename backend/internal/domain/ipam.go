@@ -39,16 +39,6 @@ type Subnet struct {
 
 func (Subnet) TableName() string { return "ipam_subnet" }
 
-type RackSubnetBinding struct {
-	ManagedBase
-	RackID    uuid.UUID `gorm:"column:rack_id;type:uuid;not null;index" json:"rack_id" validate:"required"`
-	SubnetID  uuid.UUID `gorm:"column:subnet_id;type:uuid;not null;index" json:"subnet_id" validate:"required"`
-	UsageType string    `gorm:"column:usage_type;size:32;not null" json:"usage_type" validate:"required,oneof=bmc storage_management business_management production heartbeat vip other"`
-	IsDefault bool      `gorm:"column:is_default;not null" json:"is_default" validate:"-"`
-}
-
-func (RackSubnetBinding) TableName() string { return "ipam_rack_subnet_binding" }
-
 type IPAddress struct {
 	BaseEntity
 	SubnetID         uuid.UUID  `gorm:"type:uuid;not null;index:idx_ipam_address_subnet,priority:1" json:"subnet_id"`

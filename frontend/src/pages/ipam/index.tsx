@@ -1,5 +1,4 @@
 import { IpamCatalogSheet } from "./components/ipam-catalog-sheet"
-import { ManagedTransferActions } from "@/components/managed/managed-transfer-actions"
 import { useState, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -100,7 +99,7 @@ export default function SubnetsPage() {
     const ok = await confirm({
       tone: "destructive",
       title: `删除子网「${s.cidr}」？`,
-      description: "已产生在用/预留 IP 或被机柜绑定的子网无法删除。",
+      description: "有在用或预留 IP 的子网无法删除。",
       confirmText: "确认删除",
     })
     if (!ok) return
@@ -285,10 +284,10 @@ export default function SubnetsPage() {
         description="VRF 隔离地址空间、CIDR 子网规划、VLAN 关联与 IP 地址池 5 态生命周期管理"
         icon={Network}
         actions={<>
-          {can(["ipam:network-scopes:read", "ipam:network-scopes:create", "ipam:network-scopes:import", "ipam:network-scopes:export"]) && (
+          {can(["ipam:network-scopes:read", "ipam:network-scopes:create"]) && (
             <Button size="sm" variant="outline" onClick={() => setCatalog("network-scopes")}>地址空间</Button>
           )}
-          {can(["ipam:security-zones:read", "ipam:security-zones:create", "ipam:security-zones:import", "ipam:security-zones:export"]) && (
+          {can(["ipam:security-zones:read", "ipam:security-zones:create"]) && (
             <Button size="sm" variant="outline" onClick={() => setCatalog("security-zones")}>安全域</Button>
           )}
         </>}
@@ -330,7 +329,6 @@ export default function SubnetsPage() {
         label="子网列表"
         title={<DataTableTitle title="CIDR 子网列表" count={total} />}
         actions={<>
-          <ManagedTransferActions permission="ipam:subnets" label="子网" service={subnetsService} filters={{ search: debouncedSearch }} onImported={() => void queryClient.invalidateQueries({ queryKey: ["subnets"] })} />
           {can("ipam:subnets:create") && (
             <Button
               size="sm"

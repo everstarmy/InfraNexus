@@ -6,6 +6,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --breakpoint-wide: 1520px;
   --font-heading: var(--font-sans);
   --font-sans: "Inter Variable", system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;

@@ -12,15 +12,15 @@ const migrationLocationIPAMVendors = "20261109_v05_dcim_foundation"
 
 func migrateLocationIPAMVendors(tx *gorm.DB) error {
 	if err := tx.AutoMigrate(
-		&domain.Datacenter{}, &domain.Building{}, &domain.Floor{}, &domain.Room{}, &domain.RackRow{}, &domain.Rack{},
+		&legacyDatacenter{}, &legacyBuilding{}, &legacyFloor{}, &legacyRoom{}, &legacyRackRow{}, &legacyRack{},
 		&domain.Warehouse{}, &domain.Shelf{}, &domain.Bin{}, &domain.TemporaryLocation{}, &domain.RackUnitAllocation{},
-		&domain.NetworkScope{}, &domain.SecurityZone{}, &domain.Subnet{}, &domain.RackSubnetBinding{}, &domain.IPAddress{}, &domain.IPConflict{},
+		&domain.NetworkScope{}, &domain.SecurityZone{}, &domain.Subnet{}, &domain.IPAddress{}, &domain.IPConflict{},
 		&domain.Manufacturer{}, &domain.Vendor{}, &domain.OrganizationContact{}, &domain.VendorQualification{}, &domain.ContactCertification{},
 		&domain.ManagedAudit{}, &domain.ManagedReceipt{},
 	); err != nil {
 		return fmt.Errorf("create managed schema: %w", err)
 	}
-	for _, ref := range domain.ManagedReferences() {
+	for _, ref := range domain.LegacyManagedReferences() {
 		// All identifiers come from the static domain registry.
 		if err := tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT fk_%s_%s FOREIGN KEY (%s) REFERENCES %s(id) ON DELETE RESTRICT",
 			ref.Table, ref.Table, ref.Column, ref.Column, ref.Target)).Error; err != nil {
@@ -32,7 +32,7 @@ func migrateLocationIPAMVendors(tx *gorm.DB) error {
 		{"dc_room", "datacenter_id, code"}, {"dc_rack_row", "room_id, code"}, {"dc_rack", "room_id, code"},
 		{"dc_warehouse", "datacenter_id, code"}, {"dc_shelf", "warehouse_id, code"}, {"dc_bin", "shelf_id, code"},
 		{"dc_temporary_location", "datacenter_id, code"}, {"ipam_network_scope", "code"}, {"ipam_security_zone", "datacenter_id, code"},
-		{"ipam_subnet", "network_scope_id, code"}, {"ipam_rack_subnet_binding", "rack_id, code"},
+		{"ipam_subnet", "network_scope_id, code"},
 		{"org_manufacturer", "code"}, {"org_vendor", "code"}, {"org_vendor_qualification", "vendor_id, code"},
 		{"org_contact_certification", "contact_id, code"},
 	}
@@ -46,8 +46,6 @@ func migrateLocationIPAMVendors(tx *gorm.DB) error {
 		"ALTER TABLE ipam_subnet ADD CONSTRAINT uq_ipam_subnet_scope UNIQUE (id, network_scope_id)",
 		"ALTER TABLE ipam_ip_address ADD CONSTRAINT fk_ipam_address_subnet_scope FOREIGN KEY (subnet_id, network_scope_id) REFERENCES ipam_subnet (id, network_scope_id) ON DELETE RESTRICT",
 		"CREATE INDEX idx_ipam_open_conflicts ON ipam_conflict (address_id) WHERE resolved_at IS NULL AND deleted_at IS NULL",
-		"CREATE UNIQUE INDEX uidx_ipam_rack_subnet_usage ON ipam_rack_subnet_binding (rack_id, subnet_id, usage_type)",
-		"CREATE UNIQUE INDEX uidx_ipam_rack_usage_default ON ipam_rack_subnet_binding (rack_id, usage_type) WHERE is_default AND status = 1",
 		"CREATE UNIQUE INDEX uidx_org_manufacturer_enterprise_oid ON org_manufacturer (enterprise_oid) WHERE enterprise_oid IS NOT NULL",
 		"CREATE UNIQUE INDEX uidx_org_vendor_credit_code ON org_vendor (credit_code)",
 		"CREATE UNIQUE INDEX uidx_org_contact_vendor_code ON org_contact (vendor_id, code) WHERE vendor_id IS NOT NULL",

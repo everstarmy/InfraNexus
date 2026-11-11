@@ -1,4 +1,3 @@
-import { ManagedTransferActions } from "@/components/managed/managed-transfer-actions"
 import { CertificationsSheet } from "./components/certifications-sheet"
 import { useState, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -489,7 +488,7 @@ export default function VendorManagementPage() {
         title="制造商与供应商"
         description="原厂设备制造商标准档案、第三方维保供应商资质与应急响应 SLA"
         icon={Building2}
-        actions={can(["vendor-management:contact-certifications:read", "vendor-management:contact-certifications:create", "vendor-management:contact-certifications:import", "vendor-management:contact-certifications:export"]) && (
+        actions={can(["vendor-management:contact-certifications:read", "vendor-management:contact-certifications:create"]) && (
           <Button variant="outline" size="sm" onClick={() => setCertificationsOpen(true)}>联系人证书</Button>
         )}
       />
@@ -547,7 +546,6 @@ export default function VendorManagementPage() {
             label="制造商列表"
             title={<DataTableTitle title="制造商档案" count={mfrTotal} />}
             actions={<>
-              <ManagedTransferActions permission="vendor-management:manufacturers" label="制造商" service={manufacturersService} filters={{ search: debouncedMfrSearch }} onImported={() => void queryClient.invalidateQueries({ queryKey: ["manufacturers"] })} />
               {can("vendor-management:manufacturers:create") && (
                 <Button
                   size="sm"
@@ -594,7 +592,6 @@ export default function VendorManagementPage() {
             label="供应商列表"
             title={<DataTableTitle title="供应商与服务商" count={vendorTotal} />}
             actions={<>
-              <ManagedTransferActions permission="vendor-management:vendors" label="供应商" service={vendorsService} filters={{ search: debouncedVendorSearch }} onImported={() => void queryClient.invalidateQueries({ queryKey: ["vendors"] })} />
               {can("vendor-management:vendors:create") && (
                 <Button
                   size="sm"

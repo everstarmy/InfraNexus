@@ -25,46 +25,63 @@ func managedCreate[T any](t *testing.T, app *fiber.App, bearer, path string, fie
 	return decode[T](t, res.Data)
 }
 
+func createTestLocation(t *testing.T, app *fiber.App, token, kind, name string, parent *uuid.UUID, ext map[string]any) domain.LocationNode {
+	t.Helper()
+	return managedCreate[domain.LocationNode](t, app, token, "/api/v1/locations/nodes", map[string]any{"name": name, "type": kind, "parent": parent, "ext": ext})
+}
+
 func TestManagementLocationsAndRolePermissions(t *testing.T) {
 	container, app, cleanup := setupTestApp(t)
 	defer cleanup()
 	admin := adminToken(t, app)
 	const locations = "/api/v1/locations"
-	center := managedCreate[domain.Datacenter](t, app, admin, locations+"/datacenters", map[string]any{"code": "dc-1", "name": "主中心", "kind": "primary"})
-	building := managedCreate[domain.Building](t, app, admin, locations+"/buildings", map[string]any{"code": "b1", "name": "一号楼", "datacenter_id": center.ID})
-	floor := managedCreate[domain.Floor](t, app, admin, locations+"/floors", map[string]any{"code": "f1", "name": "一层", "building_id": building.ID, "level": 1})
-	room := managedCreate[domain.Room](t, app, admin, locations+"/rooms", map[string]any{"code": "r1", "name": "一号机房", "floor_id": floor.ID})
-	if room.DatacenterID != center.ID {
-		t.Fatal("room datacenter was not derived from its parent")
-	}
-	row := managedCreate[domain.RackRow](t, app, admin, locations+"/rack-rows", map[string]any{"code": "a", "name": "A 列", "room_id": room.ID})
-	rackData := map[string]any{"code": "rk-01", "name": "一号机柜", "rack_row_id": row.ID, "units": 42}
-	rack := managedCreate[domain.Rack](t, app, admin, locations+"/racks", rackData)
-	rackURL := locations + "/racks/" + rack.ID.String()
+	center := createTestLocation(t, app, admin, "datacenter", "主中心", nil, map[string]any{"address": "测试地址", "contact": map[string]any{"name": "联系人"}})
+	building := createTestLocation(t, app, admin, "building", "一号楼", &center.UID, map[string]any{})
+	room := createTestLocation(t, app, admin, "room", "一号机房", &building.UID, map[string]any{"floor": 0})
+	rackExt := map[string]any{"row": "A", "column": 1, "height_u": 42}
+	rack := createTestLocation(t, app, admin, "rack", "一号机柜", &room.UID, rackExt)
+	rackURL := locations + "/nodes/" + rack.UID.String()
 	units := call(t, app, "GET", rackURL+"/units", admin, nil)
 	expectCode(t, units, 200, response.CodeSuccess)
 	view := decode[domain.RackUnitView](t, units.Data)
 	if len(view.Units) != 42 || view.Units[0].Unit != 42 || view.Units[0].State != "free" {
 		t.Fatalf("unexpected rack view: %+v", view)
 	}
-	occupied := domain.RackUnitAllocation{RackID: rack.ID, Unit: 42, SubjectID: uuid.New(), State: "reserved"}
+	occupied := domain.RackUnitAllocation{RackID: rack.UID, Unit: 42, SubjectID: uuid.New(), State: "reserved"}
 	if err := container.DB.Create(&occupied).Error; err != nil {
 		t.Fatal(err)
 	}
-	rackData["units"] = 40
-	expectCode(t, call(t, app, "PUT", rackURL, admin, map[string]any{"expected_version": 1, "data": rackData}), 409, response.CodeResourceConflict)
-	rackData["units"] = 48
-	expectCode(t, call(t, app, "PUT", rackURL, admin, map[string]any{"expected_version": 1, "data": rackData}), 200, response.CodeSuccess)
-	expectCode(t, call(t, app, "PUT", rackURL, admin, map[string]any{"expected_version": 1, "data": rackData}), 409, response.CodeResourceConflict)
-	centerURL := locations + "/datacenters/" + center.ID.String()
-	expectCode(t, call(t, app, "DELETE", centerURL+"?expected_version=1", admin, nil), 409, response.CodeResourceConflict)
-	expectCode(t, call(t, app, "PATCH", centerURL+"/status", admin, map[string]any{"expected_version": 1, "status": 2}), 409, response.CodeResourceConflict)
+	edit := map[string]any{"name": rack.Name, "version": 1, "ext": rackExt}
+	rackExt["height_u"] = 40
+	expectCode(t, call(t, app, "PUT", rackURL, admin, edit), 409, response.CodeResourceConflict)
+	rackExt["height_u"] = 48
+	expectCode(t, call(t, app, "PUT", rackURL, admin, edit), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "PUT", rackURL, admin, edit), 409, response.CodeResourceConflict)
+	centerURL := locations + "/nodes/" + center.UID.String()
+	expectCode(t, call(t, app, "DELETE", centerURL+"?version=1", admin, nil), 409, response.CodeResourceConflict)
+	expectCode(t, call(t, app, "PATCH", centerURL+"/status", admin, map[string]any{"version": 1, "status": 2}), 409, response.CodeResourceConflict)
 	history := call(t, app, "GET", rackURL+"/history", admin, nil)
 	expectCode(t, history, 200, response.CodeSuccess)
 	audit := decode[response.PageData[domain.ManagedAudit]](t, history.Data)
 	if audit.Total != 2 || audit.Items[0].After.Data().Version != 2 || audit.Items[0].ActorID == uuid.Nil || audit.Items[0].RequestID == "" {
 		t.Fatalf("unexpected rack audit: %+v", audit)
 	}
+
+	otherCenter := createTestLocation(t, app, admin, "datacenter", "异地中心", nil, map[string]any{"address": "地址", "contact": map[string]any{"name": "联系人"}})
+	otherBuilding := createTestLocation(t, app, admin, "building", "异地楼栋", &otherCenter.UID, map[string]any{})
+	expectCode(t, call(t, app, "PUT", locations+"/nodes/"+room.UID.String(), admin, map[string]any{"version": 1, "name": room.Name, "parent": otherBuilding.UID, "ext": map[string]int{"floor": 0}}), 400, response.CodeParamInvalid)
+	if err := container.DB.Model(&room).Update("parent", otherBuilding.UID).Error; err == nil {
+		t.Fatal("database allowed a location parent change")
+	}
+
+	zone := managedCreate[domain.SecurityZone](t, app, admin, "/api/v1/ipam/security-zones",
+		map[string]any{"name": "同中心安全域", "code": "same-center", "datacenter_id": center.UID})
+	otherZone := managedCreate[domain.SecurityZone](t, app, admin, "/api/v1/ipam/security-zones",
+		map[string]any{"name": "异地安全域", "code": "other-center", "datacenter_id": otherCenter.UID})
+	expectCode(t, call(t, app, "PUT", rackURL+"/security-zone", admin, map[string]any{"version": 2, "security_zone_id": otherZone.ID}), 409, response.CodeResourceConflict)
+	expectCode(t, call(t, app, "PUT", rackURL+"/security-zone", admin, map[string]any{"version": 2, "security_zone_id": zone.ID}), 200, response.CodeSuccess)
+	expectCode(t, call(t, app, "PATCH", "/api/v1/ipam/security-zones/"+zone.ID.String()+"/status", admin,
+		map[string]any{"expected_version": 1, "status": 2}), 409, response.CodeResourceConflict)
 
 	// Every registered route must have a built-in API permission on first boot.
 	routes, err := discoverAPIRoutes(app)
@@ -81,13 +98,24 @@ func TestManagementLocationsAndRolePermissions(t *testing.T) {
 		}
 	}
 	role := managedCreate[domain.Role](t, app, admin, "/api/v1/roles", map[string]any{"code": "dcim-reader", "name": "数据中心只读"})
-	read := permissionIDs(t, container, domain.APIPermissionCode("GET", locations+"/datacenters"), domain.APIPermissionCode("GET", "/api/v1/ipam/subnets"), domain.APIPermissionCode("GET", "/api/v1/vendor-management/manufacturers"))
+	read := permissionIDs(t, container, "locations:nodes:type:datacenter", domain.APIPermissionCode("GET", locations+"/nodes"), domain.APIPermissionCode("GET", "/api/v1/ipam/subnets"), domain.APIPermissionCode("GET", "/api/v1/vendor-management/manufacturers"))
 	expectCode(t, assignRolePermissions(t, app, admin, role.ID, read), 200, response.CodeSuccess)
 	createLocalUser(t, app, admin, "dcim-reader", map[string]any{"role_ids": []uuid.UUID{role.ID}})
 	reader := tokenFor(t, app, "dcim-reader", "Str0ng!pass")
-	for _, path := range []string{locations + "/datacenters", "/api/v1/ipam/subnets", "/api/v1/vendor-management/manufacturers"} {
+	for _, path := range []string{locations + "/nodes", "/api/v1/ipam/subnets", "/api/v1/vendor-management/manufacturers"} {
 		expectCode(t, call(t, app, "GET", path, reader, nil), 200, response.CodeSuccess)
 		expectCode(t, call(t, app, "POST", path, reader, map[string]any{}), 403, response.CodePermissionDenied)
+	}
+	readResult := call(t, app, "GET", locations+"/nodes/search", admin, nil)
+	expectCode(t, readResult, 200, response.CodeSuccess)
+	found := false
+	for _, node := range decode[response.PageData[domain.LocationNode]](t, readResult.Data).Items {
+		if node.UID == rack.UID && bytes.Contains(node.Path, []byte(center.Name)) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("rack search result is missing its ancestor path")
 	}
 	expectCode(t, call(t, app, "GET", rackURL+"/history", reader, nil), 403, response.CodePermissionDenied)
 }
@@ -97,8 +125,8 @@ func TestManagementIPAMIsolationReservationAndConflict(t *testing.T) {
 	defer cleanup()
 	admin := adminToken(t, app)
 	const ipam = "/api/v1/ipam"
-	center := managedCreate[domain.Datacenter](t, app, admin, "/api/v1/locations/datacenters", map[string]any{"code": "dc", "name": "机房", "kind": "primary"})
-	zone := managedCreate[domain.SecurityZone](t, app, admin, ipam+"/security-zones", map[string]any{"code": "prod", "name": "生产", "datacenter_id": center.ID})
+	center := createTestLocation(t, app, admin, "datacenter", "机房", nil, map[string]any{"address": "测试地址", "contact": map[string]any{"name": "联系人"}})
+	zone := managedCreate[domain.SecurityZone](t, app, admin, ipam+"/security-zones", map[string]any{"code": "prod", "name": "生产", "datacenter_id": center.UID})
 	scope := managedCreate[domain.NetworkScope](t, app, admin, ipam+"/network-scopes", map[string]any{"code": "vrf-a", "name": "VRF A"})
 	scopeB := managedCreate[domain.NetworkScope](t, app, admin, ipam+"/network-scopes", map[string]any{"code": "vrf-b", "name": "VRF B"})
 	fields := func(code, cidr string, id uuid.UUID) map[string]any {
@@ -195,7 +223,7 @@ func managedRequest(t *testing.T, app *fiber.App, path, bearer, key string, inpu
 	return apiResult{Status: resp.StatusCode, Code: env.Code, Message: env.Message, Data: env.Data}
 }
 
-func TestManagementOrganizationAndAtomicImport(t *testing.T) {
+func TestManagementOrganizationAndIdempotentCreate(t *testing.T) {
 	_, app, cleanup := setupTestApp(t)
 	defer cleanup()
 	admin := adminToken(t, app)
@@ -211,22 +239,6 @@ func TestManagementOrganizationAndAtomicImport(t *testing.T) {
 	}
 	data["name"] = "Different"
 	expectCode(t, managedRequest(t, app, org+"/manufacturers", admin, "mfr-a", data), 409, response.CodeResourceConflict)
-	batch := map[string]any{"items": []map[string]string{
-		{"code": "new-ok", "name": "合法"}, {"code": "mfr-a", "name": "重复"}, {"code": "bad", "name": "正则错误", "serial_number_pattern": "["},
-	}}
-	for _, endpoint := range []string{"/import/preview", "/import"} {
-		result := managedRequest(t, app, org+"/manufacturers"+endpoint, admin, "failed-import", batch)
-		expectCode(t, result, 200, response.CodeSuccess)
-		report := decode[domain.ManagedImportResult[domain.Manufacturer]](t, result.Data)
-		if len(report.Errors) != 2 || report.Errors[0].Row != 2 || report.Errors[1].Row != 3 || len(report.Items) != 0 {
-			t.Fatalf("wrong import report: %+v", report)
-		}
-	}
-	list := call(t, app, "GET", org+"/manufacturers?search=new-ok", admin, nil)
-	expectCode(t, list, 200, response.CodeSuccess)
-	if decode[response.PageData[domain.Manufacturer]](t, list.Data).Total != 0 {
-		t.Fatal("import left a partial record")
-	}
 	vendor := managedCreate[domain.Vendor](t, app, admin, org+"/vendors", map[string]any{"code": "vendor-a", "name": "供应商 A", "credit_code": "9131011571786564XW", "service_types": []string{"oem_service"}, "cooperation_status": "active"})
 	contact := map[string]any{"code": "support", "name": "技术支持", "vendor_id": vendor.ID, "roles": []string{"onsite_engineer"}, "id_document_type": "national_id", "masked_id": "310000199001011234"}
 	expectCode(t, call(t, app, "POST", org+"/contacts", admin, contact), 400, response.CodeParamInvalid)

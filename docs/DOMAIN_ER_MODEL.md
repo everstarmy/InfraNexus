@@ -115,22 +115,13 @@ erDiagram
 
 ### 模块 1：数据中心物理空间与 IPAM 网络空间底座
 
-#### 1.1 `dc_datacenter` (数据中心)
-`dc_datacenter` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
+#### 1.1 `dc_location`（四层位置树）
 
-空间层级补充 `dc_building`（id, datacenter_id, code, name）、`dc_floor`（id, building_id, code, name）、`dc_rack_row`（id, room_id, code, name），各父级/编码唯一；dc_room 引用 floor_id，dc_rack 引用 row_id，原 floor/row_name 作为展示投影。空间祖先必须同属数据中心，层级变更纳入位置/归属历史而非批量覆盖过去事实。
+位置使用 UUID 主键 `uid`，以及 `name/type/parent/ext/status/version/created_at/updated_at/deleted_at`。固定层级为数据中心 → 楼栋 → 机房 → 机柜。生成列 `parent_type` 和复合外键限制上级类型。根节点和同级节点各有名称唯一约束，机柜坐标在所属机房唯一。
 
-#### 1.2 `dc_room` (机房模块 / 机房)
-`dc_room` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
+`ext` 为 JSONB。数据中心包含地址和联系人，楼栋扩展属性为空对象，机房包含 -5～100 的整数楼层，机柜包含行、列、高度 U 数和可选功率 W。机柜安全域由 `dc_rack_security_zone` 独立关联，仓库、临时位置和安全域均引用数据中心 UID。
 
-> **复合唯一约束**：`uk_dc_room_dc_code (datacenter_id, code)`
-
-#### 1.3 `dc_rack` (机柜)
-`dc_rack` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
-
-> **复合唯一约束**：`uk_dc_rack_room_code (room_id, code)`
-
-#### 1.4 `dc_rack_unit_allocation` (机柜 U 位占用与预占明细)
+#### 1.2 `dc_rack_unit_allocation` (机柜 U 位占用与预占明细)
 `dc_rack_unit_allocation` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
 
 > **复合唯一约束（物理互斥）**：`uk_dc_ru_rack_pos (rack_id, u_position)`。仅存当前占用，释放时删除投影并追加位置事件；预留还需 reservation_id、expires_at、version。锁定机柜并校验高度边界，按 rack_id/u_position 稳定顺序锁定；同柜移动仅新增目标差集，保留自重叠区，不释放其他工单的预留。
@@ -173,9 +164,6 @@ erDiagram
 `ipam_ip_history` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
 
 同一动作、地址、事件种类建立唯一键防重放。事件不存需要事后回写的 released_at/duration；`ipam_occupancy_projection` 以 allocation_id、口径、区间段及更正版本生成起止和时长，可重建。formal 区间可结束旧行，field 区间依有效事件重建；投影不是不可变证据。索引覆盖 `(network_scope_id, ip_address_id, effective_at, recorded_at)`、`(subject_id, effective_at)`；历史查询按地址空间/IP、口径、时间过滤，缺口/多候选不返回确定归属。对更正前的“当时已知事实”查询按 recorded_at 截断重放。
-
-#### 1.10 `ipam_rack_subnet_binding`
-`id`, `rack_id` FK, `subnet_id` FK, `usage_type`, `is_default`, `created_at`。`(rack_id, subnet_id, usage_type)` 唯一，同机柜/用途至多一个有效默认；推荐仍须校验当前安全域、权限和可用状态，不代表自动获准。
 
 ---
 

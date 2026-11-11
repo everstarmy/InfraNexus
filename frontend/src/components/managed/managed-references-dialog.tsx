@@ -13,11 +13,8 @@ import type { ManagedReferenceCount } from "@/services/managed"
 import type { Envelope } from "@/services/types"
 
 const resourceLabels: Record<string, string> = {
-  dc_building: "建筑/楼栋",
-  dc_floor: "楼层",
-  dc_room: "机房",
-  dc_rack_row: "机柜列",
-  dc_rack: "机柜",
+  dc_location: "位置节点",
+  dc_rack_security_zone: "机柜安全域",
   dc_rack_unit_allocation: "机柜 U 位占用",
   dc_warehouse: "库房",
   dc_shelf: "货架",
@@ -25,7 +22,6 @@ const resourceLabels: Record<string, string> = {
   dc_temporary_location: "临时保管位置",
   ipam_security_zone: "安全域",
   ipam_subnet: "子网",
-  ipam_rack_subnet_binding: "机柜网段绑定",
   ipam_ip_address: "IP 地址记录",
   ipam_conflict: "IP 冲突事件",
   org_contact: "组织联系人",

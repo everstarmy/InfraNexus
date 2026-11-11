@@ -20,9 +20,9 @@ export const routePages = {
   // DCIM Foundation Modules
   "/vendor-management": preloadable(() => import("@/pages/vendor-management/index")),
   "/locations": preloadable(() => import("@/pages/locations/index")),
+  "/locations/topology": preloadable(() => import("@/pages/locations/index")),
   "/locations/warehouses": preloadable(() => import("@/pages/locations/warehouses")),
   "/ipam/subnets": preloadable(() => import("@/pages/ipam/index")),
-  "/ipam/rack-bindings": preloadable(() => import("@/pages/ipam/rack-bindings")),
 }
 
 export function preloadPage(pathname: string) {

@@ -51,7 +51,7 @@ export function IpamCatalogSheet({
                   required: true,
                   source: {
                     key: "datacenters",
-                    permission: "locations:datacenters:read",
+                    permission: "locations:nodes:type:datacenter",
                     list: datacentersService.list,
                   },
                 },

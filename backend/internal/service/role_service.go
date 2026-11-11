@@ -135,6 +135,7 @@ func (s *roleService) AssignPermissions(ctx context.Context, actorRoles []string
 	}
 	if !admin {
 		seen := make(map[uuid.UUID]struct{}, len(permissionIDs))
+		var effectiveCodes []string
 		for _, permissionID := range permissionIDs {
 			if _, exists := seen[permissionID]; exists {
 				continue
@@ -143,6 +144,17 @@ func (s *roleService) AssignPermissions(ctx context.Context, actorRoles []string
 			permission, err := s.authzPermission(ctx, permissionID)
 			if err != nil {
 				return err
+			}
+			if strings.HasPrefix(permission.Code, "locations:nodes:type:") {
+				if effectiveCodes == nil {
+					effectiveCodes, _, err = s.authz.EffectivePermissions(ctx, actorRoles)
+					if err != nil {
+						return err
+					}
+				}
+				if !slices.Contains(effectiveCodes, permission.Code) {
+					return coreerrors.ErrPermissionDenied
+				}
 			}
 			if permission.Type != domain.PermTypeAPI {
 				continue

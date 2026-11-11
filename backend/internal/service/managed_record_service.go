@@ -7,7 +7,6 @@ import (
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -19,9 +18,6 @@ import (
 	"infranexus/internal/core/validator"
 	"infranexus/internal/domain"
 )
-
-const managedImportLimit = 100
-const managedExportLimit = 1000
 
 type ManagedRule[T any] func(context.Context, *T, *T) error
 
@@ -263,81 +259,4 @@ func (s *managedService[T, P]) Delete(ctx context.Context, actor, id uuid.UUID, 
 		}
 		return writeManagedAudit(tx, s.uow, actor, s.table, id, "delete", auditValues(P(old).ManagedFields()), auditValues(nil))
 	})
-}
-
-var errManagedImportRollback = errors.New("rollback managed import preview")
-
-func (s *managedService[T, P]) Import(ctx context.Context, actor uuid.UUID, key string, items []T, preview bool) (out domain.ManagedImportResult[T], err error) {
-	if len(items) == 0 || len(items) > managedImportLimit {
-		return out, coreerrors.ErrParamInvalid.WithMessage("每批须包含 1 至 100 条记录")
-	}
-	if !preview && strings.TrimSpace(key) == "" {
-		return out, coreerrors.ErrParamInvalid.WithMessage("导入提交需要 Idempotency-Key")
-	}
-	err = s.uow.Write(ctx, func(tx context.Context) error {
-		run := func() (domain.ManagedImportResult[T], error) {
-			result := domain.ManagedImportResult[T]{Items: make([]T, 0, len(items)), Errors: []domain.ManagedImportError{}}
-			for i, item := range items {
-				var created *T
-				e := s.uow.Attempt(tx, func(row context.Context) error {
-					var rowErr error
-					created, rowErr = s.create(row, actor, item)
-					return rowErr
-				})
-				if e != nil {
-					message := managedImportMessage(e)
-					if message == "" {
-						return result, e
-					}
-					result.Errors = append(result.Errors, domain.ManagedImportError{Row: i + 1, Message: message})
-					continue
-				}
-				result.Items = append(result.Items, *created)
-			}
-			if len(result.Errors) != 0 {
-				result.Items = []T{}
-				return result, errManagedImportRollback
-			}
-			return result, nil
-		}
-		if preview {
-			out, err = run()
-			out.Items = []T{}
-			if err == nil {
-				return errManagedImportRollback
-			}
-		} else {
-			out, err = managedReplay(tx, s.uow, actor, s.table+":import", key, items, run)
-		}
-		return err
-	})
-	if errors.Is(err, errManagedImportRollback) {
-		err = nil
-	}
-	return out, err
-}
-
-func managedImportMessage(err error) string {
-	switch {
-	case errors.Is(err, gorm.ErrDuplicatedKey):
-		return "记录重复"
-	case errors.Is(err, domain.ErrManagedReference):
-		return "引用对象不存在、停用或已被使用"
-	}
-	if problem, ok := errors.AsType[*coreerrors.DomainError](err); ok && problem.HTTPStatus < 500 {
-		return problem.Message
-	}
-	return ""
-}
-
-func (s *managedService[T, P]) Export(ctx context.Context, q domain.ManagedQuery) ([]T, error) {
-	q.Page, q.PageSize = 1, managedExportLimit
-	out, total, err := s.repo.List(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	if total > managedExportLimit {
-		return nil, coreerrors.ErrParamInvalid.WithMessage(fmt.Sprintf("导出最多 %d 条，请缩小查询范围", managedExportLimit))
-	}
-	return out, nil
 }

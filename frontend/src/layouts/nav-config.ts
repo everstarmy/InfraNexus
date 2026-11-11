@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   MapPin,
   Network,
-  Server,
   ShieldCheck,
   Users,
   Waypoints,
@@ -44,14 +43,14 @@ export const navGroups: NavGroup[] = [
     items: [
       {
         title: "位置管理",
-        url: "/locations",
+        url: "/locations/topology",
         icon: MapPin,
         permission: "locations",
         description: "数据中心园区、机房空间拓扑与仓储库位",
         children: [
           {
             title: "空间拓扑与机柜",
-            url: "/locations",
+            url: "/locations/topology",
             icon: MapPin,
             permission: "locations",
             description: "数据中心、楼层机房树与机柜 U 位立面图",
@@ -71,22 +70,6 @@ export const navGroups: NavGroup[] = [
         icon: Network,
         permission: "ipam",
         description: "VRF 空间、子网 CIDR 与 IP 地址池生命周期",
-        children: [
-          {
-            title: "子网与地址池",
-            url: "/ipam/subnets",
-            icon: Network,
-            permission: "ipam",
-            description: "CIDR 划分、地址矩阵 5 态生命周期与冲突处置",
-          },
-          {
-            title: "机柜网段绑定",
-            url: "/ipam/rack-bindings",
-            icon: Server,
-            permission: "ipam",
-            description: "机柜与子网默认推荐绑定映射",
-          },
-        ],
       },
       {
         title: "制造商与供应商",
@@ -171,20 +154,52 @@ export const pageNavItems = navGroups.flatMap((group) =>
 )
 
 export function findNavByPath(pathname: string) {
+  const cleanPath = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname
+  const normalizedPath = cleanPath === "/locations" ? "/locations/topology" : cleanPath
+
+  // 1. Exact child match
   for (const group of navGroups) {
     for (const item of group.items) {
       if (item.children) {
-        const child = item.children.find(
-          (c) => pathname === c.url || pathname.startsWith(`${c.url}/`)
-        )
-        if (child) {
-          return { group, item: child, parent: item }
+        const exactChild = item.children.find((c) => normalizedPath === c.url)
+        if (exactChild) {
+          return { group, item: exactChild, parent: item }
         }
       }
-      if (pathname === item.url || pathname.startsWith(`${item.url}/`)) {
+    }
+  }
+
+  // 2. Exact parent/top-level match
+  for (const group of navGroups) {
+    for (const item of group.items) {
+      if (normalizedPath === item.url) {
         return { group, item }
       }
     }
   }
+
+  // 3. Longest prefix child match
+  for (const group of navGroups) {
+    for (const item of group.items) {
+      if (item.children) {
+        const matchingChild = [...item.children]
+          .filter((c) => normalizedPath.startsWith(`${c.url}/`))
+          .sort((a, b) => b.url.length - a.url.length)[0]
+        if (matchingChild) {
+          return { group, item: matchingChild, parent: item }
+        }
+      }
+    }
+  }
+
+  // 4. Longest prefix top-level match
+  for (const group of navGroups) {
+    for (const item of group.items) {
+      if (normalizedPath.startsWith(`${item.url}/`)) {
+        return { group, item }
+      }
+    }
+  }
+
   return undefined
 }
