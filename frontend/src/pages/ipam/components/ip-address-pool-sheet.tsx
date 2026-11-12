@@ -6,6 +6,8 @@ import {
   Lock,
   Unlock,
   Clock,
+  Maximize2,
+  Minimize2,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -35,6 +37,21 @@ import { notify } from "@/lib/notify"
 import { getErrorMessage } from "@/lib/api-error"
 import { newManagedIdempotencyKey } from "@/services/managed"
 import { subnetsService, type SubnetDTO, type IPAddressView, type IPConflict } from "@/services/ipam"
+import { cn } from "@/lib/utils"
+
+type SheetWidthMode = "standard" | "wide" | "full"
+
+const widthClasses: Record<SheetWidthMode, string> = {
+  standard: "data-[side=right]:!w-full data-[side=right]:sm:!max-w-3xl",
+  wide: "data-[side=right]:!w-full data-[side=right]:sm:!max-w-4xl data-[side=right]:xl:!max-w-5xl",
+  full: "data-[side=right]:!w-full data-[side=right]:!max-w-[95vw]",
+}
+
+const gridColsClasses: Record<SheetWidthMode, string> = {
+  standard: "grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2",
+  wide: "grid grid-cols-6 sm:grid-cols-8 md:grid-cols-12 lg:grid-cols-16 gap-2",
+  full: "grid grid-cols-8 sm:grid-cols-12 md:grid-cols-16 2xl:grid-cols-16 gap-2",
+}
 
 const reservationLabels = { none: "无", manual: "人工", network: "网络地址", broadcast: "广播地址", gateway: "网关" }
 
@@ -52,6 +69,7 @@ export function IPAddressPoolSheet({
   const canReserve = can("ipam:subnets:reserve")
   const canManageConflicts = can("ipam:subnets:conflicts")
   const canReadConflicts = can("ipam:subnets:history")
+  const [widthMode, setWidthMode] = useState<SheetWidthMode>("wide")
   const [page, setPage] = useState(1)
   const pageSize = 64
 
@@ -157,47 +175,107 @@ export function IPAddressPoolSheet({
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="flex flex-col gap-0 sm:max-w-2xl p-0">
-          <SheetHeader className="border-b px-6 py-4">
-            <div className="flex items-center justify-between">
+        <SheetContent
+          side="right"
+          className={cn(
+            "flex flex-col gap-0 p-0 transition-all duration-300",
+            widthClasses[widthMode]
+          )}
+        >
+          <SheetHeader className="border-b px-6 py-4 pr-12">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <Network className="size-5 text-primary" />
+                <Network className="size-5 text-primary shrink-0" />
                 <SheetTitle className="text-base font-semibold">
                   IP 地址池矩阵 ({subnet.cidr})
                 </SheetTitle>
               </div>
-              <Badge variant="outline" className="font-mono text-xs">
-                VLAN: {subnet.vlan_id ?? "未划定"}
-              </Badge>
+
+              {/* 宽度调节与 VLAN 状态栏 */}
+              <div className="flex items-center gap-2">
+                <div
+                  className="flex items-center rounded-lg border border-border/70 bg-muted/40 p-0.5 text-xs"
+                  role="group"
+                  aria-label="抽屉宽度调整"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setWidthMode("standard")}
+                    className={cn(
+                      "px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer",
+                      widthMode === "standard"
+                        ? "bg-background text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="标准宽度 (768px)"
+                  >
+                    标准
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWidthMode("wide")}
+                    className={cn(
+                      "px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer",
+                      widthMode === "wide"
+                        ? "bg-background text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="宽屏宽度 (1024px+)"
+                  >
+                    宽屏
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWidthMode("full")}
+                    className={cn(
+                      "px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer",
+                      widthMode === "full"
+                        ? "bg-background text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="超宽全屏 (95vw)"
+                  >
+                    超宽
+                  </button>
+                </div>
+
+                <Badge variant="outline" className="font-mono text-xs">
+                  VLAN: {subnet.vlan_id ?? "未划定"}
+                </Badge>
+              </div>
             </div>
-            <SheetDescription className="text-xs">
+
+            <SheetDescription className="text-xs mt-1">
               网关: {subnet.gateway || "无"} | 用途: {subnet.usage_type} | 规划总地址: {total} 个
             </SheetDescription>
           </SheetHeader>
 
-          {/* 5-State Legend */}
-          <div className="flex flex-wrap items-center justify-between border-b bg-muted/20 px-6 py-2.5 text-xs">
-            <div className="flex items-center gap-4">
-              <span className="flex items-center gap-1.5">
+          {/* 5-State Legend & Tip */}
+          <div className="flex flex-wrap items-center justify-between border-b bg-muted/20 px-6 py-2.5 text-xs gap-3">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+              <span className="flex items-center gap-1.5 shrink-0">
                 <span className="size-3 rounded-xs border border-emerald-500/40 bg-emerald-500/20" />
-                <span>空闲 (Free)</span>
+                <span className="whitespace-nowrap font-medium text-foreground/80">空闲 (Free)</span>
               </span>
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1.5 shrink-0">
                 <span className="size-3 rounded-xs border border-sky-500/50 bg-sky-500/20" />
-                <span>预留 (Reserved)</span>
+                <span className="whitespace-nowrap font-medium text-foreground/80">预留 (Reserved)</span>
               </span>
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1.5 shrink-0">
                 <span className="size-3 rounded-xs border border-zinc-700 bg-zinc-800" />
-                <span>在用 (In Use)</span>
+                <span className="whitespace-nowrap font-medium text-foreground/80">在用 (In Use)</span>
               </span>
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1.5 shrink-0">
                 <span className="size-3 rounded-xs border border-amber-500/50 bg-amber-500/20" />
-                <span>冷却 (Cooldown)</span>
+                <span className="whitespace-nowrap font-medium text-foreground/80">冷却 (Cooldown)</span>
               </span>
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1.5 shrink-0">
                 <span className="size-3 rounded-xs border border-destructive bg-destructive/30" />
-                <span>冲突 (Conflicted)</span>
+                <span className="whitespace-nowrap font-medium text-foreground/80">冲突 (Conflicted)</span>
               </span>
+            </div>
+            <div className="text-[11px] text-muted-foreground whitespace-nowrap hidden md:block">
+              提示：点击任意 IP 卡片可查看详情、执行人工预留或报告冲突
             </div>
           </div>
 
@@ -216,7 +294,7 @@ export function IPAddressPoolSheet({
                 当前网段未持久化或无需地址池生成
               </div>
             ) : (
-              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+              <div className={gridColsClasses[widthMode]}>
                 {addresses.map((ip) => {
                   const state = ip.allocation_state
                   const isConflicted = ip.conflicted
@@ -232,7 +310,8 @@ export function IPAddressPoolSheet({
                         setConflictPage(1)
                         setSelectedIP(ip)
                       }}
-                      className={`relative flex flex-col items-center justify-center p-2 rounded-md border text-center transition-all cursor-pointer hover:ring-2 hover:ring-primary/40 ${
+                      className={cn(
+                        "relative flex flex-col items-center justify-center min-h-[50px] py-1.5 px-1 rounded-md border text-center transition-all cursor-pointer hover:ring-2 hover:ring-primary/40 hover:scale-[1.04] hover:z-10 shadow-xs",
                         isConflicted
                           ? "bg-destructive/20 border-destructive text-destructive font-bold animate-pulse"
                           : isInUse
@@ -242,12 +321,12 @@ export function IPAddressPoolSheet({
                           : isCooldown
                           ? "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300"
                           : "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
-                      }`}
+                      )}
                     >
-                      <span className="font-mono text-[11px] truncate w-full">
+                      <span className="font-mono text-xs font-semibold tracking-tight truncate w-full">
                         .{ip.address.split(".").pop()}
                       </span>
-                      <span className="text-[9px] font-sans opacity-80 scale-90">
+                      <span className="text-[10px] font-sans opacity-85 leading-none whitespace-nowrap mt-1">
                         {isConflicted
                           ? "冲突"
                           : isInUse
@@ -259,7 +338,7 @@ export function IPAddressPoolSheet({
                           : "空闲"}
                       </span>
                       {isConflicted && (
-                        <AlertOctagon className="absolute top-1 right-1 size-2.5 text-destructive" />
+                        <AlertOctagon className="absolute top-1 right-1 size-3 text-destructive" />
                       )}
                     </button>
                   )

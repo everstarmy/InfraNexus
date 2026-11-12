@@ -39,6 +39,7 @@ export interface FixtureOptions {
   interactive?: boolean
   hideRefresh?: boolean
   hideViewOptions?: boolean
+  showViewOptions?: boolean
   hideSearch?: boolean
   slots?: boolean
   title?: boolean

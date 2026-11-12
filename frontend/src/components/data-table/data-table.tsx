@@ -142,9 +142,10 @@ export interface DataTableProps<TData extends RowData, TValue = unknown> {
   searchTrailing?: React.ReactNode
   /** Low-frequency actions collected with advanced query tools. */
   moreActions?: React.ReactNode
-  /** Hide built-in buttons independently (default: false). */
+  /** Hide built-in buttons independently (default: false for refresh; view options defaults to hidden unless enabled). */
   hideRefresh?: boolean
   hideViewOptions?: boolean
+  showViewOptions?: boolean
   /** Controls before refresh and column settings. */
   toolbarControls?: React.ReactNode
   /** Built-in group button slot for data export / download control */
@@ -349,6 +350,7 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
   moreActions,
   hideRefresh,
   hideViewOptions,
+  showViewOptions,
   toolbarControls,
   exportControl,
   selectionArea,
@@ -889,6 +891,13 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
     />
   )
 
+  const shouldShowViewOptions =
+    showViewOptions !== undefined
+      ? showViewOptions
+      : hideViewOptions !== undefined
+      ? !hideViewOptions
+      : Boolean(layoutControls?.columns)
+
   const content = (
     <div
       ref={rootRef}
@@ -1029,7 +1038,8 @@ function DataTableCore<TData extends RowData, TValue = unknown>({
           )
         }
         hideRefresh={hideRefresh}
-        hideViewOptions={hideViewOptions}
+        hideViewOptions={!shouldShowViewOptions}
+        showViewOptions={shouldShowViewOptions}
         toolbarControls={toolbarControls}
         exportControl={typeof exportControl === "function" ? exportControl(table) : exportControl}
         layoutButtons={[

@@ -238,7 +238,7 @@ export function ServerTable({ resourceKey, columns, loadPage }: ServerTableProps
 
 - `searchKey` 指定单列搜索；不设置时使用全局搜索。
 - `externalSearch` 让宿主拥有输入值；服务端搜索应使用此方式或外部共享搜索控件。
-- `hideSearch` 适合父页面已有搜索框；`hideRefresh` 和 `hideViewOptions` 分别隐藏内置刷新和列管理；显式开启的密度/全屏按钮仍在工具栏显示。
+- `hideSearch` 适合父页面已有搜索框；`hideRefresh` 隐藏内置刷新；“列设置”默认不显示，可通过 `showViewOptions={true}` 或 `layoutControls={{ columns: true }}` 开启；显式开启的密度/全屏按钮仍在工具栏显示。
 - 刷新按钮仅在提供 `onRefresh` 且未设置 `hideRefresh` 时出现；`isRefreshing` 禁用按钮并显示旋转图标。
 - 内置工具按钮多于一个时使用 Button Group，单个时独立显示；自定义 `toolbarControls`、`actions` 不自动并入按钮组。
 
@@ -687,7 +687,7 @@ exportLoadedRowsCSV(table, { filename: 'members.csv' }) // 浏览器下载
 | `toolbarControls` | 第一行内置按钮前的控制区 |
 | `exportControl` | `ReactNode \| ((table: Table<TData>) => ReactNode)`；工具栏导出控件插槽，宿主负责下载和权限 |
 | `actions` | 第一行业务操作按钮 |
-| `hideRefresh` / `hideViewOptions` | 默认不隐藏，分别控制两个内置按钮 |
+| `hideRefresh` / `hideViewOptions` / `showViewOptions` | 刷新默认不隐藏；列设置默认隐藏，可通过 `showViewOptions={true}` 或 `layoutControls.columns` 显式开启 |
 | `onRefresh` / `isRefreshing` | 刷新回调与进行中状态，后者默认 `false` |
 | `columnLabels` | 列 ID → 友好名称 |
 | `enableColumnResizing` | `false`，开启调宽 |
@@ -821,7 +821,7 @@ interface TableViewSnapshot {
 | `table` | `Table<TData>`，必填 |
 | `searchKey? / searchPlaceholder?` | 单列搜索字段／占位文案 |
 | `externalSearch?` | `{value:string,onChange:(value:string)=>void}`，受控搜索 |
-| `hideSearch? / hideRefresh? / hideViewOptions?` | 独立隐藏搜索、刷新、列管理 |
+| `hideSearch? / hideRefresh? / hideViewOptions? / showViewOptions?` | 独立控制搜索、刷新、列管理（列设置默认隐藏） |
 | `facetedFilters?` | `FacetedFilterConfig[]`，见筛选配方 |
 | `externalDateRange?` | `{value:DateRange|undefined,onChange,title?}`，受控日期 |
 | `dateRangeKey? / dateRangeTitle?` | 本地日期字段／筛选标题 |

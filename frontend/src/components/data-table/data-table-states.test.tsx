@@ -70,3 +70,43 @@ it("deduplicates aria-sort and resize handles on grouped placeholder headers and
   expect(html).toContain('data-pinned-edge="start"')
   expect(html).toContain('data-pinned-edge="end"')
 })
+it("hides column view options button by default and allows explicit opt-in", () => {
+  // 1. By default, view options button (表格设置) is NOT rendered
+  const defaultHtml = renderToStaticMarkup(<DataTable columns={columns} data={[]} />)
+  expect(defaultHtml).not.toContain('aria-label="表格设置"')
+
+  // 2. Only density & fullscreen in layoutControls does NOT render view options
+  const densityOnlyHtml = renderToStaticMarkup(
+    <DataTable columns={columns} data={[]} layoutControls={{ density: true, fullscreen: true }} />,
+  )
+  expect(densityOnlyHtml).not.toContain('aria-label="表格设置"')
+
+  // 3. Explicit layoutControls.columns = true renders view options
+  const withColumnsHtml = renderToStaticMarkup(
+    <DataTable columns={columns} data={[]} layoutControls={{ columns: true }} />,
+  )
+  expect(withColumnsHtml).toContain('aria-label="表格设置"')
+
+  // 4. Explicit showViewOptions = true renders view options
+  const explicitShowHtml = renderToStaticMarkup(
+    <DataTable columns={columns} data={[]} showViewOptions={true} />,
+  )
+  expect(explicitShowHtml).toContain('aria-label="表格设置"')
+
+  // 5. Explicit hideViewOptions = true overrides layoutControls.columns
+  const overriddenHtml = renderToStaticMarkup(
+    <DataTable
+      columns={columns}
+      data={[]}
+      layoutControls={{ columns: true }}
+      hideViewOptions={true}
+    />,
+  )
+  expect(overriddenHtml).not.toContain('aria-label="表格设置"')
+
+  // 6. Explicit hideViewOptions = false displays view options
+  const unhiddenHtml = renderToStaticMarkup(
+    <DataTable columns={columns} data={[]} hideViewOptions={false} />,
+  )
+  expect(unhiddenHtml).toContain('aria-label="表格设置"')
+})

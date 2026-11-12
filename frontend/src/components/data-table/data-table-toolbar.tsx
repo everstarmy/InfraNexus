@@ -38,6 +38,7 @@ export interface DataTableToolbarProps<TData extends RowData> {
   searchTrailing?: React.ReactNode
   hideRefresh?: boolean
   hideViewOptions?: boolean
+  showViewOptions?: boolean
   settingsControls?: React.ReactNode
   exportControl?: React.ReactNode
   layoutButtons?: React.ReactNode[]
@@ -72,7 +73,8 @@ export function DataTableToolbar<TData extends RowData>({
   searchLeading,
   searchTrailing,
   hideRefresh = false,
-  hideViewOptions = false,
+  hideViewOptions,
+  showViewOptions,
   toolbarControls,
   exportControl,
   layoutButtons = [],
@@ -154,6 +156,13 @@ export function DataTableToolbar<TData extends RowData>({
   const heading = toolbarTitle ?? toolbarLeading
   const hasContent = (node: React.ReactNode) =>
     React.Children.toArray(node).some((child) => child !== "")
+  const shouldShowViewOptions =
+    showViewOptions !== undefined
+      ? showViewOptions
+      : hideViewOptions !== undefined
+      ? !hideViewOptions
+      : false
+
   const builtInButtons = [
     ...layoutButtons,
     exportControl ? (
@@ -172,9 +181,9 @@ export function DataTableToolbar<TData extends RowData>({
       </Button>
     ) : null,
 
-    !hideViewOptions || settingsControls ? (
+    shouldShowViewOptions || settingsControls ? (
       <DataTableViewOptions key="settings"
-        hideColumns={hideViewOptions}
+        hideColumns={!shouldShowViewOptions}
         extraControls={settingsControls}
         enableColumnPinning={enableColumnPinning}
         enhanced={columnManagement}
