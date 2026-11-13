@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { AlertCircle, Building2, Cpu, DoorClosed, Loader2, Server } from "lucide-react"
+import { AlertCircle, Loader2 } from "lucide-react"
+import { z } from "zod"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -11,24 +12,144 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { FieldGroup } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { useConfirm } from "@/components/common/confirm-dialog"
+import { FormField, useAppForm } from "@/components/form"
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
-import { getErrorMessage } from "@/lib/api-error"
 import { notify } from "@/lib/notify"
 import { newManagedIdempotencyKey } from "@/services/managed"
 import {
   locationsService,
   type DatacenterContact,
-  type DatacenterExt,
   type LocationNode,
   type LocationType,
-  type RackExt,
-  type RoomExt,
 } from "@/services/locations"
 import { locationTypeLabels } from "./location-tree"
 
 const ROW_PATTERN = /^(?:[A-Za-z]|[1-9]|1[0-9]|2[0-5])$/
+
+type LocationFormValues = {
+  name: string
+  address: string
+  contactName: string
+  contactPhone: string
+  contactEmail: string
+  floor: string
+  row: string
+  column: string
+  heightU: string
+  powerW: string
+}
+
+const createLocationSchema = (type: LocationType) => {
+  const base = {
+    name: z
+      .string()
+      .trim()
+      .min(1, "名称必须在 1 到 128 个字符之间")
+      .max(128, "名称必须在 1 到 128 个字符之间"),
+  }
+
+  if (type === "datacenter") {
+    return z.object({
+      ...base,
+      address: z
+        .string()
+        .trim()
+        .min(1, "地址必须在 1 到 512 个字符之间")
+        .max(512, "地址必须在 1 到 512 个字符之间"),
+      contactName: z
+        .string()
+        .trim()
+        .min(1, "联系人姓名必须在 1 到 128 个字符之间")
+        .max(128, "联系人姓名必须在 1 到 128 个字符之间"),
+      contactPhone: z.string().trim().max(64, "联系人电话不能超过 64 个字符"),
+      contactEmail: z
+        .string()
+        .trim()
+        .refine((val) => !val || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val), "请输入合法的邮箱地址"),
+      floor: z.string(),
+      row: z.string(),
+      column: z.string(),
+      heightU: z.string(),
+      powerW: z.string(),
+    })
+  }
+
+  if (type === "room") {
+    return z.object({
+      ...base,
+      address: z.string(),
+      contactName: z.string(),
+      contactPhone: z.string(),
+      contactEmail: z.string(),
+      floor: z
+        .string()
+        .trim()
+        .refine((val) => {
+          const num = Number(val)
+          return val !== "" && Number.isInteger(num) && num >= -5 && num <= 100
+        }, "楼层必须为 -5 到 100 之间的整数"),
+      row: z.string(),
+      column: z.string(),
+      heightU: z.string(),
+      powerW: z.string(),
+    })
+  }
+
+  if (type === "rack") {
+    return z.object({
+      ...base,
+      address: z.string(),
+      contactName: z.string(),
+      contactPhone: z.string(),
+      contactEmail: z.string(),
+      floor: z.string(),
+      row: z
+        .string()
+        .trim()
+        .toUpperCase()
+        .refine((val) => ROW_PATTERN.test(val), "机柜行必须为 A–Z 或 1–25"),
+      column: z
+        .string()
+        .trim()
+        .refine((val) => {
+          const num = Number(val)
+          return Number.isInteger(num) && num >= 1 && num <= 9999
+        }, "机柜列必须为 1 到 9999 之间的整数"),
+      heightU: z
+        .string()
+        .trim()
+        .refine((val) => {
+          const num = Number(val)
+          return Number.isInteger(num) && num >= 1 && num <= 100
+        }, "机柜高度必须为 1 到 100 U 之间的整数"),
+      powerW: z
+        .string()
+        .trim()
+        .refine((val) => {
+          if (!val) return true
+          const num = Number(val)
+          return Number.isInteger(num) && num > 0
+        }, "承载功率必须为大于 0 的整数（瓦特 W）"),
+    })
+  }
+
+  // building
+  return z.object({
+    ...base,
+    address: z.string(),
+    contactName: z.string(),
+    contactPhone: z.string(),
+    contactEmail: z.string(),
+    floor: z.string(),
+    row: z.string(),
+    column: z.string(),
+    heightU: z.string(),
+    powerW: z.string(),
+  })
+}
 
 interface LocationFormDialogProps {
   open: boolean
@@ -48,177 +169,89 @@ export function LocationFormDialog({
   onSuccess,
 }: LocationFormDialogProps) {
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
   const isEditing = Boolean(node)
 
-  // Common field
-  const [name, setName] = useState("")
+  const locationSchema = useMemo(() => createLocationSchema(type), [type])
 
-  // Datacenter fields
-  const [address, setAddress] = useState("")
-  const [contactName, setContactName] = useState("")
-  const [contactPhone, setContactPhone] = useState("")
-  const [contactEmail, setContactEmail] = useState("")
-
-  // Room fields
-  const [floor, setFloor] = useState<string>("1")
-
-  // Rack fields
-  const [row, setRow] = useState("A")
-  const [column, setColumn] = useState<string>("1")
-  const [heightU, setHeightU] = useState<string>("42")
-  const [powerW, setPowerW] = useState<string>("")
-
-  const [error, setError] = useState("")
-
-  useEffect(() => {
-    if (!open) return
-    setError("")
+  const defaultValues = useMemo<LocationFormValues>(() => {
     if (node) {
-      setName(node.name)
       const ext = (node.ext ?? {}) as Record<string, any>
-      if (node.type === "datacenter") {
-        setAddress(String(ext.address ?? ""))
-        const contact = (ext.contact ?? {}) as DatacenterContact
-        setContactName(String(contact.name ?? ""))
-        setContactPhone(String(contact.phone ?? ""))
-        setContactEmail(String(contact.email ?? ""))
-      } else if (node.type === "room") {
-        setFloor(ext.floor != null ? String(ext.floor) : "1")
-      } else if (node.type === "rack") {
-        setRow(String(ext.row ?? "A"))
-        setColumn(ext.column != null ? String(ext.column) : "1")
-        setHeightU(ext.height_u != null ? String(ext.height_u) : "42")
-        setPowerW(ext.power_capacity_w != null ? String(ext.power_capacity_w) : "")
-      }
-    } else {
-      setName("")
-      setAddress("")
-      setContactName("")
-      setContactPhone("")
-      setContactEmail("")
-      setFloor("1")
-      setRow("A")
-      setColumn("1")
-      setHeightU("42")
-      setPowerW("")
-    }
-  }, [open, node])
-
-  const isDirty =
-    open &&
-    (isEditing
-      ? name !== node?.name
-      : Boolean(name || address || contactName || (type === "rack" && row !== "A")))
-
-  useUnsavedChanges(isDirty, "位置表单尚未保存，关闭后更改将丢失。")
-
-  const validate = (): string | null => {
-    const trimmedName = name.trim()
-    if (!trimmedName || trimmedName.length > 128) {
-      return "名称必须在 1 到 128 个字符之间"
-    }
-
-    if (type === "datacenter") {
-      const trimmedAddress = address.trim()
-      if (!trimmedAddress || trimmedAddress.length > 512) {
-        return "地址必须在 1 到 512 个字符之间"
-      }
-      const trimmedContact = contactName.trim()
-      if (!trimmedContact || trimmedContact.length > 128) {
-        return "联系人姓名必须在 1 到 128 个字符之间"
-      }
-      if (contactPhone.trim().length > 64) {
-        return "联系人电话不能超过 64 个字符"
-      }
-      if (contactEmail.trim()) {
-        const email = contactEmail.trim()
-        if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-          return "请输入合法的邮箱地址"
-        }
+      const contact = (ext.contact ?? {}) as DatacenterContact
+      return {
+        name: node.name ?? "",
+        address: String(ext.address ?? ""),
+        contactName: String(contact.name ?? ""),
+        contactPhone: String(contact.phone ?? ""),
+        contactEmail: String(contact.email ?? ""),
+        floor: ext.floor != null ? String(ext.floor) : "1",
+        row: String(ext.row ?? "A"),
+        column: ext.column != null ? String(ext.column) : "1",
+        heightU: ext.height_u != null ? String(ext.height_u) : "42",
+        powerW: ext.power_capacity_w != null ? String(ext.power_capacity_w) : "",
       }
     }
-
-    if (type === "room") {
-      const parsedFloor = Number(floor)
-      if (isNaN(parsedFloor) || !Number.isInteger(parsedFloor) || parsedFloor < -5 || parsedFloor > 100) {
-        return "楼层必须为 -5 到 100 之间的整数"
-      }
+    return {
+      name: "",
+      address: "",
+      contactName: "",
+      contactPhone: "",
+      contactEmail: "",
+      floor: "1",
+      row: "A",
+      column: "1",
+      heightU: "42",
+      powerW: "",
     }
-
-    if (type === "rack") {
-      const upperRow = row.trim().toUpperCase()
-      if (!ROW_PATTERN.test(upperRow)) {
-        return "机柜行必须为 A–Z 或 1–25"
-      }
-      const parsedCol = Number(column)
-      if (isNaN(parsedCol) || !Number.isInteger(parsedCol) || parsedCol < 1 || parsedCol > 9999) {
-        return "机柜列必须为 1 到 9999 之间的整数"
-      }
-      const parsedHeight = Number(heightU)
-      if (isNaN(parsedHeight) || !Number.isInteger(parsedHeight) || parsedHeight < 1 || parsedHeight > 100) {
-        return "机柜高度必须为 1 到 100 U 之间的整数"
-      }
-      if (powerW.trim()) {
-        const parsedPower = Number(powerW)
-        if (isNaN(parsedPower) || !Number.isInteger(parsedPower) || parsedPower <= 0) {
-          return "承载功率必须为大于 0 的整数（瓦特 W）"
-        }
-      }
-    }
-
-    return null
-  }
+  }, [node])
 
   const mutation = useMutation({
-    mutationFn: async () => {
-      const validationError = validate()
-      if (validationError) throw new Error(validationError)
-
+    mutationFn: async (values: LocationFormValues) => {
       let extPayload: Record<string, unknown> = {}
       if (type === "datacenter") {
         extPayload = {
-          address: address.trim(),
+          address: values.address.trim(),
           contact: {
-            name: contactName.trim(),
-            phone: contactPhone.trim() || undefined,
-            email: contactEmail.trim() || undefined,
+            name: values.contactName.trim(),
+            phone: values.contactPhone.trim() || undefined,
+            email: values.contactEmail.trim() || undefined,
           },
         }
       } else if (type === "building") {
         extPayload = {}
       } else if (type === "room") {
         extPayload = {
-          floor: Number(floor),
+          floor: Number(values.floor),
         }
       } else if (type === "rack") {
-        const upperRow = row.trim().toUpperCase()
+        const upperRow = values.row.trim().toUpperCase()
         extPayload = {
           row: upperRow,
-          column: Number(column),
-          height_u: Number(heightU),
-          power_capacity_w: powerW.trim() ? Number(powerW) : null,
+          column: Number(values.column),
+          height_u: Number(values.heightU),
+          power_capacity_w: values.powerW.trim() ? Number(values.powerW) : null,
         }
       }
 
       if (isEditing && node) {
         const res = await locationsService.update(node.uid, {
-          name: name.trim(),
+          name: values.name.trim(),
           ext: extPayload,
           version: node.version,
         })
         return res.data
-      } else {
-        const res = await locationsService.create(
-          {
-            name: name.trim(),
-            type,
-            parent: parent?.uid ?? null,
-            ext: extPayload,
-          },
-          newManagedIdempotencyKey(),
-        )
-        return res.data
       }
+
+      const res = await locationsService.create(
+        {
+          name: values.name.trim(),
+          type,
+          parent: parent?.uid ?? null,
+          ext: extPayload,
+        },
+        newManagedIdempotencyKey(),
+      )
+      return res.data
     },
     onSuccess: (saved) => {
       notify.success(
@@ -230,175 +263,45 @@ export function LocationFormDialog({
       onSuccess?.(saved)
       onOpenChange(false)
     },
-    onError: (err) => {
-      setError(getErrorMessage(err, isEditing ? "更新位置失败" : "新建位置失败"))
-    },
   })
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    mutation.mutate()
-  }
+  const { form, formError, formRef, submit, hasChanges } = useAppForm<LocationFormValues>({
+    defaultValues,
+    resetKey: node?.uid ?? `create:${type}:${parent?.uid ?? ""}`,
+    schema: locationSchema,
+    serverFieldNames: {
+      "ext.address": "address",
+      "ext.contact.name": "contactName",
+      "ext.contact.phone": "contactPhone",
+      "ext.contact.email": "contactEmail",
+      "ext.floor": "floor",
+      "ext.row": "row",
+      "ext.column": "column",
+      "ext.height_u": "heightU",
+      "ext.power_capacity_w": "powerW",
+    },
+    open,
+    onSubmit: async (values) => {
+      await mutation.mutateAsync(values)
+    },
+    fallbackErrorMessage: `${isEditing ? "保存" : "创建"}${locationTypeLabels[type]}失败`,
+  })
 
-  const renderTypeFields = () => {
-    switch (type) {
-      case "datacenter":
-        return (
-          <>
-            <Field>
-              <FieldLabel>
-                机房物理地址 <span className="text-destructive">*</span>
-              </FieldLabel>
-              <Input
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="例如：北京市海淀区中关村南大街 1 号"
-                maxLength={512}
-                required
-              />
-              <FieldDescription>详细物理位置，用于运维及巡检调度</FieldDescription>
-            </Field>
+  const isDirty = open && hasChanges
+  useUnsavedChanges(isDirty, "位置表单尚未保存，关闭后更改将丢失。")
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field>
-                <FieldLabel>
-                  中心现场联系人 <span className="text-destructive">*</span>
-                </FieldLabel>
-                <Input
-                  value={contactName}
-                  onChange={(e) => setContactName(e.target.value)}
-                  placeholder="例如：张工"
-                  maxLength={128}
-                  required
-                />
-              </Field>
-
-              <Field>
-                <FieldLabel>联系电话</FieldLabel>
-                <Input
-                  value={contactPhone}
-                  onChange={(e) => setContactPhone(e.target.value)}
-                  placeholder="手机或值班座机"
-                  maxLength={64}
-                />
-              </Field>
-            </div>
-
-            <Field>
-              <FieldLabel>联系邮箱</FieldLabel>
-              <Input
-                type="email"
-                value={contactEmail}
-                onChange={(e) => setContactEmail(e.target.value)}
-                placeholder="noc@example.com"
-                maxLength={254}
-              />
-              <FieldDescription>接收现场工单与告警通知的联络邮箱</FieldDescription>
-            </Field>
-          </>
-        )
-
-      case "building":
-        return (
-          <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-            楼栋节点无需额外扩展字段，仅需填写规范的楼栋名称。
-          </div>
-        )
-
-      case "room":
-        return (
-          <Field>
-            <FieldLabel>
-              所在楼层 <span className="text-destructive">*</span>
-            </FieldLabel>
-            <Input
-              type="number"
-              min={-5}
-              max={100}
-              step={1}
-              value={floor}
-              onChange={(e) => setFloor(e.target.value)}
-              placeholder="3"
-              required
-            />
-            <FieldDescription>
-              整数：-5 到 100（正数表示地上楼层如 3F，负数表示地下楼层如 -1 表示 B1F）
-            </FieldDescription>
-          </Field>
-        )
-
-      case "rack":
-        return (
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field>
-                <FieldLabel>
-                  机柜排/行 (Row) <span className="text-destructive">*</span>
-                </FieldLabel>
-                <Input
-                  value={row}
-                  onChange={(e) => setRow(e.target.value.toUpperCase())}
-                  placeholder="A 或 1"
-                  maxLength={2}
-                  required
-                />
-                <FieldDescription>单字母 A–Z 或数字 1–25</FieldDescription>
-              </Field>
-
-              <Field>
-                <FieldLabel>
-                  机柜列号 (Column) <span className="text-destructive">*</span>
-                </FieldLabel>
-                <Input
-                  type="number"
-                  min={1}
-                  max={9999}
-                  step={1}
-                  value={column}
-                  onChange={(e) => setColumn(e.target.value)}
-                  placeholder="1"
-                  required
-                />
-                <FieldDescription>1 到 9999 之间的列号</FieldDescription>
-              </Field>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field>
-                <FieldLabel>
-                  机柜高度 (U) <span className="text-destructive">*</span>
-                </FieldLabel>
-                <Input
-                  type="number"
-                  min={1}
-                  max={100}
-                  step={1}
-                  value={heightU}
-                  onChange={(e) => setHeightU(e.target.value)}
-                  placeholder="42"
-                  required
-                />
-                <FieldDescription>标准机柜通常为 42U（范围 1–100U）</FieldDescription>
-              </Field>
-
-              <Field>
-                <FieldLabel>设计承载功率 (W)</FieldLabel>
-                <Input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={powerW}
-                  onChange={(e) => setPowerW(e.target.value)}
-                  placeholder="8000"
-                />
-                <FieldDescription>
-                  可选整数（瓦特），{powerW ? `${(Number(powerW) / 1000).toFixed(2)} kW` : "如 8000 W = 8 kW"}
-                </FieldDescription>
-              </Field>
-            </div>
-          </div>
-        )
+  const requestClose = async () => {
+    if (mutation.isPending) return
+    if (isDirty) {
+      const discard = await confirm({
+        tone: "default",
+        title: "放弃更改？",
+        description: "当前表单尚未保存，离开后未保存的更改将丢失。",
+        confirmText: "放弃更改",
+      })
+      if (!discard) return
     }
+    onOpenChange(false)
   }
 
   const titleText = isEditing
@@ -406,9 +309,24 @@ export function LocationFormDialog({
     : `新建${locationTypeLabels[type]}`
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) void requestClose()
+        else onOpenChange(true)
+      }}
+    >
       <DialogContent className="max-w-lg sm:max-w-lg">
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form
+          ref={formRef}
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            void submit()
+          }}
+          className="space-y-4"
+        >
           <DialogHeader>
             <DialogTitle>{titleText}</DialogTitle>
             <DialogDescription>
@@ -425,45 +343,307 @@ export function LocationFormDialog({
             </DialogDescription>
           </DialogHeader>
 
-          {error && (
+          {formError && (
             <Alert variant="destructive" className="py-2 text-xs">
               <AlertCircle className="size-4" />
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{formError}</AlertDescription>
             </Alert>
           )}
 
           <FieldGroup className="space-y-3">
-            <Field>
-              <FieldLabel>
-                {locationTypeLabels[type]}名称 <span className="text-destructive">*</span>
-              </FieldLabel>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={`请输入${locationTypeLabels[type]}名称`}
-                maxLength={128}
-                required
-                autoFocus
-              />
-              <FieldDescription>同级名称不可重复，最多 128 个字符</FieldDescription>
-            </Field>
+            <form.Field name="name">
+              {(field) => (
+                <FormField
+                  field={field}
+                  label={`${locationTypeLabels[type]}名称`}
+                  required
+                  description="同级名称不可重复，最多 128 个字符"
+                  idPrefix="location"
+                >
+                  {(props) => (
+                    <Input
+                      {...props}
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      placeholder={`请输入${locationTypeLabels[type]}名称`}
+                      maxLength={128}
+                      disabled={mutation.isPending}
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            {renderTypeFields()}
+            {type === "datacenter" && (
+              <>
+                <form.Field name="address">
+                  {(field) => (
+                    <FormField
+                      field={field}
+                      label="机房物理地址"
+                      required
+                      description="详细物理位置，用于运维及巡检调度"
+                      idPrefix="location"
+                    >
+                      {(props) => (
+                        <Input
+                          {...props}
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          onBlur={field.handleBlur}
+                          placeholder="例如：北京市海淀区中关村南大街 1 号"
+                          maxLength={512}
+                          disabled={mutation.isPending}
+                        />
+                      )}
+                    </FormField>
+                  )}
+                </form.Field>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <form.Field name="contactName">
+                    {(field) => (
+                      <FormField
+                        field={field}
+                        label="中心现场联系人"
+                        required
+                        idPrefix="location"
+                      >
+                        {(props) => (
+                          <Input
+                            {...props}
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                            placeholder="例如：张工"
+                            maxLength={128}
+                            disabled={mutation.isPending}
+                          />
+                        )}
+                      </FormField>
+                    )}
+                  </form.Field>
+
+                  <form.Field name="contactPhone">
+                    {(field) => (
+                      <FormField
+                        field={field}
+                        label="联系电话"
+                        idPrefix="location"
+                      >
+                        {(props) => (
+                          <Input
+                            {...props}
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                            placeholder="手机或值班座机"
+                            maxLength={64}
+                            disabled={mutation.isPending}
+                          />
+                        )}
+                      </FormField>
+                    )}
+                  </form.Field>
+                </div>
+
+                <form.Field name="contactEmail">
+                  {(field) => (
+                    <FormField
+                      field={field}
+                      label="联系邮箱"
+                      description="接收现场工单与告警通知的联络邮箱"
+                      idPrefix="location"
+                    >
+                      {(props) => (
+                        <Input
+                          {...props}
+                          type="email"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          onBlur={field.handleBlur}
+                          placeholder="noc@example.com"
+                          maxLength={254}
+                          disabled={mutation.isPending}
+                        />
+                      )}
+                    </FormField>
+                  )}
+                </form.Field>
+              </>
+            )}
+
+            {type === "building" && (
+              <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+                楼栋节点无需额外扩展字段，仅需填写规范的楼栋名称。
+              </div>
+            )}
+
+            {type === "room" && (
+              <form.Field name="floor">
+                {(field) => (
+                  <FormField
+                    field={field}
+                    label="所在楼层"
+                    required
+                    description="整数：-5 到 100（正数表示地上楼层如 3F，负数表示地下楼层如 -1 表示 B1F）"
+                    idPrefix="location"
+                  >
+                    {(props) => (
+                      <Input
+                        {...props}
+                        type="number"
+                        min={-5}
+                        max={100}
+                        step={1}
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                        placeholder="3"
+                        disabled={mutation.isPending}
+                      />
+                    )}
+                  </FormField>
+                )}
+              </form.Field>
+            )}
+
+            {type === "rack" && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <form.Field name="row">
+                    {(field) => (
+                      <FormField
+                        field={field}
+                        label="机柜排/行 (Row)"
+                        required
+                        description="单字母 A–Z 或数字 1–25"
+                        idPrefix="location"
+                      >
+                        {(props) => (
+                          <Input
+                            {...props}
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value.toUpperCase())}
+                            onBlur={field.handleBlur}
+                            placeholder="A 或 1"
+                            maxLength={2}
+                            disabled={mutation.isPending}
+                          />
+                        )}
+                      </FormField>
+                    )}
+                  </form.Field>
+
+                  <form.Field name="column">
+                    {(field) => (
+                      <FormField
+                        field={field}
+                        label="机柜列号 (Column)"
+                        required
+                        description="1 到 9999 之间的列号"
+                        idPrefix="location"
+                      >
+                        {(props) => (
+                          <Input
+                            {...props}
+                            type="number"
+                            min={1}
+                            max={9999}
+                            step={1}
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                            placeholder="1"
+                            disabled={mutation.isPending}
+                          />
+                        )}
+                      </FormField>
+                    )}
+                  </form.Field>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <form.Field name="heightU">
+                    {(field) => (
+                      <FormField
+                        field={field}
+                        label="机柜高度 (U)"
+                        required
+                        description="标准机柜通常为 42U（范围 1–100U）"
+                        idPrefix="location"
+                      >
+                        {(props) => (
+                          <Input
+                            {...props}
+                            type="number"
+                            min={1}
+                            max={100}
+                            step={1}
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                            placeholder="42"
+                            disabled={mutation.isPending}
+                          />
+                        )}
+                      </FormField>
+                    )}
+                  </form.Field>
+
+                  <form.Field name="powerW">
+                    {(field) => (
+                      <FormField
+                        field={field}
+                        label="设计承载功率 (W)"
+                        description={
+                          field.state.value
+                            ? `${(Number(field.state.value) / 1000).toFixed(2)} kW`
+                            : "可选整数（瓦特），如 8000 W = 8 kW"
+                        }
+                        idPrefix="location"
+                      >
+                        {(props) => (
+                          <Input
+                            {...props}
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                            placeholder="8000"
+                            disabled={mutation.isPending}
+                          />
+                        )}
+                      </FormField>
+                    )}
+                  </form.Field>
+                </div>
+              </div>
+            )}
           </FieldGroup>
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={() => void requestClose()}
               disabled={mutation.isPending}
             >
               取消
             </Button>
-            <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending && <Loader2 className="mr-1.5 size-4 animate-spin" />}
-              {isEditing ? "保存变更" : "确认创建"}
-            </Button>
+            <form.Subscribe selector={(state) => [state.isSubmitting]}>
+              {([isSubmitting]) => (
+                <Button type="submit" disabled={isSubmitting || mutation.isPending}>
+                  {(isSubmitting || mutation.isPending) && (
+                    <Loader2 className="mr-1.5 size-4 animate-spin" />
+                  )}
+                  {isEditing ? "保存变更" : "确认创建"}
+                </Button>
+              )}
+            </form.Subscribe>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -106,7 +106,6 @@ function TreeBranch({
   const items = data?.pages.flatMap((page) => page.data.items) ?? []
   const isRootLevel = !parent
   const isRootSelected = selectedUid === null || selectedUid === "root" || selectedUid === undefined
-  const canAddDatacenter = can("locations:nodes:create") && can("locations:nodes:type:datacenter")
 
   if (query.isPending && !data) {
     return (
@@ -177,23 +176,7 @@ function TreeBranch({
               <span className="truncate">全部数据中心</span>
             </button>
 
-            <div className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/tree-row:opacity-100 group-focus-within/tree-row:opacity-100">
-              {canAddDatacenter && (
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                  title="新建数据中心"
-                  aria-label="新建数据中心"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onAddChild?.(null)
-                  }}
-                >
-                  <Plus className="size-3" />
-                </Button>
-              )}
-            </div>
+            {/* No duplicate root-row create icon; header + button owns datacenter creation */}
           </div>
         </li>
       )}

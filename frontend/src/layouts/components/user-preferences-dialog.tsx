@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from "react"
-import { Clock, Palette, Save, ShieldCheck } from "lucide-react"
+import { useMemo } from "react"
+import { useStore } from "@tanstack/react-form"
+import { AlertCircle, Clock, Palette, Save, ShieldCheck } from "lucide-react"
+import { z } from "zod"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Dialog,
   DialogContent,
@@ -8,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import {
   Select,
   SelectContent,
@@ -17,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
+import { FormField, useAppForm } from "@/components/form"
 import { useAuth } from "@/stores/auth-context"
 import { usersService } from "@/services/users"
 import { notify } from "@/lib/notify"
@@ -36,44 +39,63 @@ const TIMEOUT_OPTIONS = [
   { value: "28800", label: "8 小时 (一个工作日)" },
   { value: "86400", label: "24 小时 (1 天)" },
   { value: "604800", label: "7 天 (绝对上限)" },
-]
+] as const
 
 const THEME_OPTIONS = [
   { value: "system", label: "跟随系统" },
   { value: "light", label: "明亮浅色" },
   { value: "dark", label: "沉浸深色" },
-]
+] as const
+
+const preferencesSchema = z.object({
+  timeoutSec: z.string().refine(
+    (v) => TIMEOUT_OPTIONS.some((opt) => opt.value === v),
+    "请选择有效的会话空闲超时时间",
+  ),
+  theme: z.enum(["system", "light", "dark"], "请选择有效的界面主题"),
+})
+
+interface PreferencesFormValues {
+  timeoutSec: string
+  theme: "system" | "light" | "dark"
+}
 
 export function UserPreferencesDialog({ open, onOpenChange }: UserPreferencesDialogProps) {
   const { user, updateUserPreferences } = useAuth()
-  const [submitting, setSubmitting] = useState(false)
-  const [timeoutSec, setTimeoutSec] = useState<string>("0")
-  const [theme, setTheme] = useState<string>("system")
 
-  useEffect(() => {
-    if (!open) return
+  const defaultValues = useMemo<PreferencesFormValues>(() => {
     const current = user?.preferences
-    setTimeoutSec(String(current?.session_timeout ?? 0))
-    setTheme(current?.theme || "system")
-  }, [open, user])
+    const rawTheme = current?.theme
+    const theme: "system" | "light" | "dark" =
+      rawTheme === "light" || rawTheme === "dark" ? rawTheme : "system"
+    const rawTimeout = String(current?.session_timeout ?? 0)
+    const timeoutSec = TIMEOUT_OPTIONS.some((opt) => opt.value === rawTimeout) ? rawTimeout : "0"
+    return { timeoutSec, theme }
+  }, [user?.preferences])
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitting(true)
-    try {
-      const parsedTimeout = Math.max(0, parseInt(timeoutSec, 10) || 0)
+  const { form, formRef, submit, formError, hasChanges } = useAppForm<PreferencesFormValues>({
+    open,
+    resetKey: user?.id ?? "prefs",
+    defaultValues,
+    schema: preferencesSchema,
+    serverFieldNames: {
+      session_timeout: "timeoutSec",
+      theme: "theme",
+    },
+    fallbackErrorMessage: "保存偏好设置失败",
+    onSubmit: async (values) => {
+      const parsedTimeout = Math.max(0, parseInt(values.timeoutSec, 10) || 0)
       const newPrefs = {
         ...(user?.preferences || {}),
-        theme,
+        theme: values.theme,
         session_timeout: parsedTimeout,
       }
       await usersService.updateMyPreferences(newPrefs)
       updateUserPreferences(newPrefs)
 
-      // 应用主题切换
-      if (theme === "dark") {
+      if (values.theme === "dark") {
         document.documentElement.classList.add("dark")
-      } else if (theme === "light") {
+      } else if (values.theme === "light") {
         document.documentElement.classList.remove("dark")
       } else {
         const dark = window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -82,15 +104,13 @@ export function UserPreferencesDialog({ open, onOpenChange }: UserPreferencesDia
 
       notify.success("偏好设置已更新", "会话空闲超时与界面偏好已立即生效")
       onOpenChange(false)
-    } catch (err) {
-      notify.apiError(err, "保存偏好设置失败")
-    } finally {
-      setSubmitting(false)
-    }
-  }
+    },
+  })
+
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => !isSubmitting && onOpenChange(next)}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -102,53 +122,95 @@ export function UserPreferencesDialog({ open, onOpenChange }: UserPreferencesDia
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSave} className="space-y-4 py-1">
-          <Field>
-            <FieldLabel htmlFor="pref-session-timeout" className="flex items-center gap-1.5">
-              <Clock className="size-4 text-muted-foreground" />
-              会话空闲超时时间
-            </FieldLabel>
-            <Select
-              value={timeoutSec}
-              onValueChange={(val) => val && setTimeoutSec(String(val))}
-            >
-              <SelectTrigger id="pref-session-timeout" className="w-full">
-                <SelectValue placeholder="请选择超时时间" />
-              </SelectTrigger>
-              <SelectContent>
-                {TIMEOUT_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FieldDescription className="text-[11px] leading-relaxed">
-              离开电脑无任何操作达到该时间后系统自动退出；在持续操作期间会自动无感延期。
-            </FieldDescription>
-          </Field>
+        <form
+          ref={formRef}
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            void submit()
+          }}
+          className="space-y-4 py-1"
+        >
+          {formError && (
+            <Alert variant="destructive" role="alert">
+              <AlertCircle />
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
 
-          <Field>
-            <FieldLabel htmlFor="pref-theme" className="flex items-center gap-1.5">
-              <Palette className="size-4 text-muted-foreground" />
-              界面主题外观
-            </FieldLabel>
-            <Select
-              value={theme}
-              onValueChange={(val) => val && setTheme(String(val))}
-            >
-              <SelectTrigger id="pref-theme" className="w-full">
-                <SelectValue placeholder="请选择主题" />
-              </SelectTrigger>
-              <SelectContent>
-                {THEME_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+          <form.Field name="timeoutSec">
+            {(field) => (
+              <FormField
+                field={field}
+                id="pref-session-timeout"
+                label={
+                  <span className="flex items-center gap-1.5">
+                    <Clock className="size-4 text-muted-foreground" />
+                    会话空闲超时时间
+                  </span>
+                }
+                description="离开电脑无任何操作达到该时间后系统自动退出；在持续操作期间会自动无感延期。"
+              >
+                {(inputProps) => (
+                  <Select
+                    value={field.state.value}
+                    disabled={isSubmitting}
+                    onValueChange={(val) => val && field.handleChange(String(val))}
+                  >
+                    <SelectTrigger id={inputProps.id} className="w-full" aria-invalid={inputProps["aria-invalid"]}>
+                      <SelectValue placeholder="请选择超时时间" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIMEOUT_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </FormField>
+            )}
+          </form.Field>
+
+          <form.Field name="theme">
+            {(field) => (
+              <FormField
+                field={field}
+                id="pref-theme"
+                label={
+                  <span className="flex items-center gap-1.5">
+                    <Palette className="size-4 text-muted-foreground" />
+                    界面主题外观
+                  </span>
+                }
+              >
+                {(inputProps) => (
+                  <Select
+                    value={field.state.value}
+                    disabled={isSubmitting}
+                    onValueChange={(val) => {
+                      if (val === "system" || val === "light" || val === "dark") {
+                        field.handleChange(val)
+                      }
+                    }}
+                  >
+                    <SelectTrigger id={inputProps.id} className="w-full" aria-invalid={inputProps["aria-invalid"]}>
+                      <SelectValue placeholder="请选择主题" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {THEME_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </FormField>
+            )}
+          </form.Field>
 
           <div className="rounded-lg border border-border/60 bg-muted/20 p-2.5 text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5 font-medium text-foreground">
@@ -165,13 +227,13 @@ export function UserPreferencesDialog({ open, onOpenChange }: UserPreferencesDia
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
-              disabled={submitting}
+              disabled={isSubmitting}
             >
               取消
             </Button>
-            <Button type="submit" disabled={submitting}>
+            <Button type="submit" disabled={isSubmitting || !hasChanges}>
               <Save />
-              {submitting ? "正在保存…" : "保存偏好"}
+              {isSubmitting ? "正在保存…" : "保存偏好"}
             </Button>
           </DialogFooter>
         </form>

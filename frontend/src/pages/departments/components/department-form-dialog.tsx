@@ -1,22 +1,70 @@
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { FolderPlus, FolderPen, Info } from "lucide-react"
+import { z } from "zod"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { DepartmentSelect, departmentPathLabel } from "@/components/common/department-select"
 import { UserPicker } from "@/components/common/user-picker"
 import { useConfirm } from "@/components/common/confirm-dialog"
+import { FormField, useAppForm } from "@/components/form"
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
-import { getErrorMessage, getFieldErrors } from "@/lib/api-error"
 import { notify } from "@/lib/notify"
 import { departmentsService, type DepartmentNode } from "@/services/departments"
 
 const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
+
+type DepartmentFormValues = {
+  parent: string | null
+  name: string
+  code: string
+  sortOrder: string
+  leaderId: string | null
+  leaderLabel: string
+  phone: string
+  email: string
+  enabled: boolean
+}
+
+const createDepartmentSchema = (editing: boolean) =>
+  z.object({
+    parent: z.string().nullable(),
+    name: z
+      .string()
+      .trim()
+      .min(1, "请输入有效的部门名称")
+      .max(64, "部门名称不能超过 64 个字符"),
+    code: editing
+      ? z.string()
+      : z
+          .string()
+          .trim()
+          .min(2, "部门编码至少 2 个字符")
+          .max(64, "部门编码不能超过 64 个字符")
+          .regex(CODE_PATTERN, "以字母开头，仅含字母、数字及 _ . : -"),
+    leaderId: z.string().nullable(),
+    leaderLabel: z.string(),
+    phone: z.string().trim().max(32, "联系电话不能超过 32 个字符"),
+    email: z
+      .string()
+      .trim()
+      .max(128, "邮箱不能超过 128 个字符")
+      .refine((val) => !val || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val), "邮箱格式不正确"),
+    sortOrder: z
+      .string()
+      .trim()
+      .refine((val) => {
+        if (!val) return false
+        const num = Number(val)
+        return Number.isInteger(num) && num >= 0 && num <= 100000
+      }, "排序值必须为 0-100000 的整数"),
+    enabled: z.boolean(),
+  })
 
 export function DepartmentFormDialog({
   open,
@@ -38,53 +86,37 @@ export function DepartmentFormDialog({
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const editing = !!department
-  const [parent, setParent] = useState<string | null>(null)
-  const [name, setName] = useState("")
-  const [code, setCode] = useState("")
-  const [sortOrder, setSortOrder] = useState("0")
-  const [leaderId, setLeaderId] = useState<string | null>(null)
-  const [leaderLabel, setLeaderLabel] = useState("")
-  const [phone, setPhone] = useState("")
-  const [email, setEmail] = useState("")
-  const [enabled, setEnabled] = useState(true)
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-  const [formError, setFormError] = useState("")
 
-  useEffect(() => {
-    if (!open) return
-    setParent(department ? department.parent_id : (parentId ?? null))
-    setName(department?.name ?? "")
-    setCode(department?.code ?? "")
-    setSortOrder(String(department?.sort_order ?? 0))
-    setLeaderId(department?.leader_id ?? null)
-    setLeaderLabel(department?.leader_name ?? "")
-    setPhone(department?.phone ?? "")
-    setEmail(department?.email ?? "")
-    setEnabled((department?.status ?? 1) === 1)
-    setFieldErrors({})
-    setFormError("")
-  }, [open, department, parentId])
-
-  const codeInvalid = code.length > 0 && !CODE_PATTERN.test(code)
-  const canSubmit = name.trim().length > 0 && code.trim().length >= 2 && !codeInvalid
-  const initial = [department ? department.parent_id : (parentId ?? null), department?.name ?? "", department?.code ?? "", String(department?.sort_order ?? 0), department?.leader_id ?? null, department?.phone ?? "", department?.email ?? "", (department?.status ?? 1) === 1]
-  const isDirty = open && JSON.stringify([parent, name, code, sortOrder, leaderId, phone, email, enabled]) !== JSON.stringify(initial)
-  useUnsavedChanges(isDirty, "部门表单尚未保存。离开后这些更改将丢失。")
+  const departmentSchema = useMemo(() => createDepartmentSchema(editing), [editing])
+  const defaultValues = useMemo<DepartmentFormValues>(
+    () => ({
+      parent: department ? department.parent_id : (parentId ?? null),
+      name: department?.name ?? "",
+      code: department?.code ?? "",
+      sortOrder: String(department?.sort_order ?? 0),
+      leaderId: department?.leader_id ?? null,
+      leaderLabel: department?.leader_name ?? "",
+      phone: department?.phone ?? "",
+      email: department?.email ?? "",
+      enabled: (department?.status ?? 1) === 1,
+    }),
+    [department, parentId],
+  )
 
   const mutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (values: DepartmentFormValues) => {
       const payload = {
         expected_revision: treeRevision,
-        name: name.trim(),
-        code: code.trim(),
-        sort_order: Number(sortOrder) || 0,
-        leader_id: leaderId,
-        phone: phone.trim(),
-        email: email.trim(),
-        status: enabled ? 1 : 2,
+        name: values.name.trim(),
+        code: values.code.trim(),
+        sort_order: Number(values.sortOrder) || 0,
+        leader_id: values.leaderId,
+        phone: values.phone.trim(),
+        email: values.email.trim(),
+        status: values.enabled ? 1 : 2,
       }
       if (editing && department) return departmentsService.update(department.id, payload)
-      return departmentsService.create({ ...payload, parent_id: parent })
+      return departmentsService.create({ ...payload, parent_id: values.parent })
     },
     onSuccess: (res) => {
       notify.success(editing ? "部门已更新" : "部门已创建", res.data.name)
@@ -95,11 +127,26 @@ export function DepartmentFormDialog({
       onSaved?.(res.data.id)
       onOpenChange(false)
     },
-    onError: (error) => {
-      setFieldErrors(getFieldErrors(error))
-      setFormError(getErrorMessage(error, editing ? "更新部门失败" : "创建部门失败"))
-    },
   })
+
+  const { form, formError, formRef, submit, hasChanges } = useAppForm<DepartmentFormValues>({
+    defaultValues,
+    resetKey: department?.id ?? `create:${parentId ?? ""}`,
+    schema: departmentSchema,
+    serverFieldNames: {
+      parent_id: "parent",
+      leader_id: "leaderId",
+      sort_order: "sortOrder",
+    },
+    open,
+    onSubmit: async (values) => {
+      await mutation.mutateAsync(values)
+    },
+    fallbackErrorMessage: editing ? "更新部门失败" : "创建部门失败",
+  })
+
+  const isDirty = open && hasChanges
+  useUnsavedChanges(isDirty, "部门表单尚未保存。离开后这些更改将丢失。")
 
   const requestClose = async () => {
     if (mutation.isPending) return
@@ -116,22 +163,26 @@ export function DepartmentFormDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => next ? onOpenChange(true) : void requestClose()}>
+    <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : void requestClose())}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {editing ? <FolderPen className="size-4.5 text-primary" /> : <FolderPlus className="size-4.5 text-primary" />}
-            {editing ? "编辑部门" : parent ? "新增子部门" : "新建部门"}
+            {editing ? "编辑部门" : parentId ? "新增子部门" : "新建部门"}
           </DialogTitle>
           <DialogDescription>
             {editing ? `部门路径：${departmentPathLabel(departments, department?.id)}` : "部门编码全局唯一，用于系统集成与目录同步映射"}
           </DialogDescription>
         </DialogHeader>
+
         <form
+          ref={formRef}
+          noValidate
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault()
-            if (canSubmit) mutation.mutate()
+            e.stopPropagation()
+            void submit()
           }}
         >
           {formError && (
@@ -140,75 +191,176 @@ export function DepartmentFormDialog({
               <AlertDescription>{formError}</AlertDescription>
             </Alert>
           )}
+
           {editing && department?.source === "ldap" && (
             <Alert>
               <Info />
               <AlertDescription>该部门由目录同步自动创建，重命名不会影响同步映射（按 OU 标识匹配）。</AlertDescription>
             </Alert>
           )}
+
           <FieldGroup className="gap-4">
             {!editing && (
-              <Field>
-                <FieldLabel htmlFor="dept-parent">上级部门</FieldLabel>
-                <DepartmentSelect id="dept-parent" nodes={departments} value={parent} onChange={setParent} placeholder="无（作为顶级部门）" allowClear />
-              </Field>
+              <form.Field name="parent">
+                {(field) => (
+                  <FormField field={field} label="上级部门" idPrefix="dept">
+                    {(props) => (
+                      <DepartmentSelect
+                        {...props}
+                        id="dept-parent"
+                        nodes={departments}
+                        value={field.state.value}
+                        onChange={(val) => field.handleChange(val)}
+                        placeholder="无（作为顶级部门）"
+                        allowClear
+                      />
+                    )}
+                  </FormField>
+                )}
+              </form.Field>
             )}
+
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field data-invalid={!!fieldErrors.name || undefined}>
-                <FieldLabel htmlFor="dept-name">部门名称</FieldLabel>
-                <Input id="dept-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="如 研发中心" aria-invalid={!!fieldErrors.name || undefined} aria-describedby={fieldErrors.name ? "dept-name-error" : undefined} />
-                {fieldErrors.name && <FieldError id="dept-name-error">请输入有效的部门名称</FieldError>}
-              </Field>
-              <Field data-invalid={codeInvalid || !!fieldErrors.code || undefined}>
-                <FieldLabel htmlFor="dept-code">部门编码</FieldLabel>
-                <Input id="dept-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="如 rd-center" className="font-mono" aria-invalid={codeInvalid || !!fieldErrors.code || undefined} aria-describedby={codeInvalid || fieldErrors.code ? "dept-code-error" : undefined} />
-                {(codeInvalid || fieldErrors.code) && <FieldError id="dept-code-error">{codeInvalid ? "以字母开头，仅含字母、数字及 _ . : -" : "该部门编码不可用"}</FieldError>}
-              </Field>
+              <form.Field name="name">
+                {(field) => (
+                  <FormField field={field} label="部门名称" required idPrefix="dept">
+                    {(props) => (
+                      <Input
+                        {...props}
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                        placeholder="如 研发中心"
+                      />
+                    )}
+                  </FormField>
+                )}
+              </form.Field>
+
+              <form.Field name="code">
+                {(field) => (
+                  <FormField
+                    field={field}
+                    label="部门编码"
+                    required
+                    description="以字母开头，仅含字母、数字及 _ . : -"
+                    idPrefix="dept"
+                  >
+                    {(props) => (
+                      <Input
+                        {...props}
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                        placeholder="如 rd-center"
+                        className="font-mono"
+                      />
+                    )}
+                  </FormField>
+                )}
+              </form.Field>
             </div>
-            <Field>
-              <FieldLabel htmlFor="dept-leader">部门负责人</FieldLabel>
-              <UserPicker
-                id="dept-leader"
-                value={leaderId}
-                valueLabel={leaderLabel}
-                onChange={(id, label) => {
-                  setLeaderId(id)
-                  setLeaderLabel(label ?? "")
-                }}
-                placeholder="未指定负责人"
-              />
-            </Field>
+
+            <form.Field name="leaderId">
+              {(field) => (
+                <FormField field={field} label="部门负责人" idPrefix="dept">
+                  {(props) => (
+                    <UserPicker
+                      {...props}
+                      id="dept-leader"
+                      value={field.state.value}
+                      valueLabel={form.getFieldValue("leaderLabel")}
+                      onChange={(id, label) => {
+                        field.handleChange(id)
+                        form.setFieldValue("leaderLabel", label ?? "")
+                      }}
+                      placeholder="未指定负责人"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
+
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field>
-                <FieldLabel htmlFor="dept-phone">联系电话</FieldLabel>
-                <Input id="dept-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="选填" />
-              </Field>
-              <Field data-invalid={!!fieldErrors.email || undefined}>
-                <FieldLabel htmlFor="dept-email">部门邮箱</FieldLabel>
-                <Input id="dept-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="选填" aria-invalid={!!fieldErrors.email || undefined} aria-describedby={fieldErrors.email ? "dept-email-error" : undefined} />
-                {fieldErrors.email && <FieldError id="dept-email-error">邮箱格式不正确</FieldError>}
-              </Field>
+              <form.Field name="phone">
+                {(field) => (
+                  <FormField field={field} label="联系电话" idPrefix="dept">
+                    {(props) => (
+                      <Input
+                        {...props}
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                        placeholder="选填"
+                      />
+                    )}
+                  </FormField>
+                )}
+              </form.Field>
+
+              <form.Field name="email">
+                {(field) => (
+                  <FormField field={field} label="部门邮箱" idPrefix="dept">
+                    {(props) => (
+                      <Input
+                        {...props}
+                        type="email"
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                        placeholder="选填"
+                      />
+                    )}
+                  </FormField>
+                )}
+              </form.Field>
             </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field>
-                <FieldLabel htmlFor="dept-sort">排序值</FieldLabel>
-                <Input id="dept-sort" type="number" min={0} value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} />
-                <FieldDescription>数值越小越靠前</FieldDescription>
-              </Field>
-              <Field orientation="horizontal" className="items-center justify-between rounded-lg border px-3 py-2 sm:mt-6 sm:h-fit">
-                <FieldLabel htmlFor="dept-enabled">启用部门</FieldLabel>
-                <Switch id="dept-enabled" checked={enabled} onCheckedChange={setEnabled} />
-              </Field>
+              <form.Field name="sortOrder">
+                {(field) => (
+                  <FormField field={field} label="排序值" description="数值越小越靠前" idPrefix="dept">
+                    {(props) => (
+                      <Input
+                        {...props}
+                        type="number"
+                        min={0}
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                      />
+                    )}
+                  </FormField>
+                )}
+              </form.Field>
+
+              <form.Field name="enabled">
+                {(field) => (
+                  <Field orientation="horizontal" className="items-center justify-between rounded-lg border px-3 py-2 sm:mt-6 sm:h-fit">
+                    <FieldLabel htmlFor="dept-enabled">启用部门</FieldLabel>
+                    <Switch
+                      id="dept-enabled"
+                      checked={field.state.value}
+                      onCheckedChange={(checked) => field.handleChange(checked)}
+                    />
+                  </Field>
+                )}
+              </form.Field>
             </div>
           </FieldGroup>
+
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => void requestClose()} disabled={mutation.isPending}>
               取消
             </Button>
-            <Button type="submit" disabled={!canSubmit || mutation.isPending}>
-              {mutation.isPending && <Spinner />}
-              {editing ? "保存修改" : "创建部门"}
-            </Button>
+            <form.Subscribe selector={(state) => [state.isSubmitting]}>
+              {([isSubmitting]) => (
+                <Button type="submit" disabled={isSubmitting || mutation.isPending}>
+                  {(isSubmitting || mutation.isPending) && <Spinner />}
+                  {editing ? "保存修改" : "创建部门"}
+                </Button>
+              )}
+            </form.Subscribe>
           </DialogFooter>
         </form>
       </DialogContent>

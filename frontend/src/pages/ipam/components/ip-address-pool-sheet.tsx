@@ -1,7 +1,9 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useStore } from "@tanstack/react-form"
 import {
   Network,
+  AlertCircle,
   AlertOctagon,
   Lock,
   Unlock,
@@ -9,6 +11,8 @@ import {
   Maximize2,
   Minimize2,
 } from "lucide-react"
+import { z } from "zod"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,15 +30,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Field, FieldLabel } from "@/components/ui/field"
+import { FieldGroup } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/stores/auth-context"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { formatDateTime } from "@/lib/format"
 import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/ui/spinner"
+import { FormField, useAppForm } from "@/components/form"
 import { notify } from "@/lib/notify"
-import { getErrorMessage } from "@/lib/api-error"
 import { newManagedIdempotencyKey } from "@/services/managed"
 import { subnetsService, type SubnetDTO, type IPAddressView, type IPConflict } from "@/services/ipam"
 import { cn } from "@/lib/utils"
@@ -76,16 +80,11 @@ export function IPAddressPoolSheet({
   // Selected IP for actions
   const [selectedIP, setSelectedIP] = useState<IPAddressView | null>(null)
   const [reserveModalOpen, setReserveModalOpen] = useState(false)
-  const [reserveReason, setReserveReason] = useState("")
 
   const [resolvingConflict, setResolvingConflict] = useState<IPConflict | null>(null)
   const [conflictPage, setConflictPage] = useState(1)
   const [reportOpen, setReportOpen] = useState(false)
-  const [observedIdentity, setObservedIdentity] = useState("")
-  const [evidenceRef, setEvidenceRef] = useState("")
-  const [observedAt, setObservedAt] = useState("")
   const [reportKey, setReportKey] = useState("")
-  const [resolveReason, setResolveReason] = useState("")
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["subnets", "addresses", subnet?.id, page, pageSize],
@@ -111,64 +110,6 @@ export function IPAddressPoolSheet({
     void queryClient.invalidateQueries({ queryKey: ["subnets", "conflicts", subnet?.id] })
     void queryClient.invalidateQueries({ queryKey: ["subnets", "address-history", subnet?.id] })
   }
-
-  // Reservation Mutation
-  const reserveMutation = useMutation({
-    mutationFn: () => {
-      const isReserved = selectedIP?.reservation_kind === "manual"
-      return subnetsService.reserveAddress(
-        subnet!.id,
-        selectedIP!.address,
-        selectedIP!.version,
-        !isReserved,
-        reserveReason.trim()
-      )
-    },
-    onSuccess: (res) => {
-      notify.success("IP 状态已变更", `${res.data.address} 人工预留已更新`)
-      refreshAddress()
-      setReserveModalOpen(false)
-      setSelectedIP(null)
-      setReserveReason("")
-    },
-    onError: (err) =>
-      notify.error("变更预留状态失败", getErrorMessage(err)),
-  })
-
-  // Conflict Resolve Mutation
-  const resolveMutation = useMutation({
-    mutationFn: () =>
-      subnetsService.resolveConflict(
-        subnet!.id,
-        selectedIP!.address,
-        resolvingConflict!.id,
-        resolveReason.trim()
-      ),
-    onSuccess: () => {
-      notify.success("冲突已解除", `${selectedIP!.address} 冲突已解除并归档`)
-      refreshAddress()
-      setResolvingConflict(null)
-      setSelectedIP(null)
-      setResolveReason("")
-    },
-    onError: (err) =>
-      notify.error("解除冲突失败", getErrorMessage(err)),
-  })
-
-  const reportMutation = useMutation({
-    mutationFn: () => subnetsService.reportConflict(subnet!.id, selectedIP!.address, {
-      observed_identity: observedIdentity.trim(),
-      evidence_ref: evidenceRef.trim(),
-      observed_at: new Date(observedAt).toISOString(),
-    }, reportKey),
-    onSuccess: () => {
-      refreshAddress()
-      setReportOpen(false)
-      setSelectedIP(null)
-      notify.success("已报告 IP 冲突")
-    },
-    onError: (error) => notify.error("报告冲突失败", getErrorMessage(error)),
-  })
 
   if (!subnet) return null
 
@@ -429,10 +370,7 @@ export function IPAddressPoolSheet({
                         <p className="break-all font-medium">{conflict.observed_identity}</p>
                         <p className="break-all text-muted-foreground">{conflict.evidence_ref} · {formatDateTime(conflict.observed_at)}</p>
                         {conflict.resolved_at ? <p>已解除：{conflict.resolution_reason}</p> : canManageConflicts && (
-                          <Button size="xs" variant="outline" onClick={() => {
-                            setResolveReason("")
-                            setResolvingConflict(conflict)
-                          }}>解除此冲突</Button>
+                          <Button size="xs" variant="outline" onClick={() => setResolvingConflict(conflict)}>解除此冲突</Button>
                         )}
                       </div>
                     ))}
@@ -456,18 +394,12 @@ export function IPAddressPoolSheet({
               </Button>
               {canManageConflicts && (
                 <Button variant="outline" size="sm" onClick={() => {
-                  setObservedIdentity("")
-                  setEvidenceRef("")
-                  setObservedAt("")
                   setReportKey(newManagedIdempotencyKey())
                   setReportOpen(true)
                 }}>报告冲突</Button>
               )}
               {canChangeReservation && (
-                <Button size="sm" variant={selectedIsManual ? "secondary" : "default"} onClick={() => {
-                  setReserveReason("")
-                  setReserveModalOpen(true)
-                }}>
+                <Button size="sm" variant={selectedIsManual ? "secondary" : "default"} onClick={() => setReserveModalOpen(true)}>
                   {selectedIsManual ? <Unlock className="size-3.5" /> : <Lock className="size-3.5" />}
                   {selectedIsManual ? "取消人工保留" : "设定人工保留"}
                 </Button>
@@ -478,138 +410,433 @@ export function IPAddressPoolSheet({
       )}
 
       {/* Set/Cancel Reservation Modal */}
-      {reserveModalOpen && selectedIP && (
-        <Dialog open={reserveModalOpen} onOpenChange={(open) => !reserveMutation.isPending && setReserveModalOpen(open)}>
-          <DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="text-base font-semibold">
-                {selectedIsManual ? "取消人工保留" : "设置人工预留"} ({selectedIP.address})
-              </DialogTitle>
-              <DialogDescription className="text-xs">
-                预留后该 IP 将被锁定，防止自动化上架与工单系统自动占用分配
-              </DialogDescription>
-            </DialogHeader>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                reserveMutation.mutate()
-              }}
-              className="space-y-3 py-2"
-            >
-              <Field>
-                <FieldLabel className="text-xs">变更原因与业务依据 *</FieldLabel>
-                <Textarea
-                  placeholder="如: 预留给数据库高可用 VIP / 专线网关路由..."
-                  value={reserveReason}
-                  onChange={(e) => setReserveReason(e.target.value)}
-                  disabled={reserveMutation.isPending}
-                  maxLength={256}
-                  required
-                  rows={3}
-                  className="text-xs"
-                />
-              </Field>
-
-              <DialogFooter className="pt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setReserveModalOpen(false)}
-                  disabled={reserveMutation.isPending}
-                >
-                  取消
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={!reserveReason.trim() || reserveMutation.isPending}
-                >
-                  {reserveMutation.isPending ? <Spinner className="size-4" /> : "确认提交"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      )}
+      <ReserveIPModal
+        open={reserveModalOpen && Boolean(selectedIP)}
+        subnetId={subnet.id}
+        selectedIP={selectedIP}
+        selectedIsManual={selectedIsManual}
+        onOpenChange={setReserveModalOpen}
+        onSuccess={() => {
+          refreshAddress()
+          setReserveModalOpen(false)
+          setSelectedIP(null)
+        }}
+      />
 
       {/* Resolve Conflict Modal */}
-      {resolvingConflict && selectedIP && (
-        <Dialog open onOpenChange={(open) => !open && !resolveMutation.isPending && setResolvingConflict(null)}>
-          <DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="text-base font-semibold">
-                解除 IP 冲突 ({selectedIP.address})
-              </DialogTitle>
-              <DialogDescription className="text-xs">
-                处置冲突事件并归档，解除后原有人工保留或占用状态仍按规则生效
-              </DialogDescription>
-            </DialogHeader>
+      <ResolveIPConflictModal
+        open={Boolean(resolvingConflict && selectedIP)}
+        subnetId={subnet.id}
+        selectedIP={selectedIP}
+        conflict={resolvingConflict}
+        onOpenChange={(next) => {
+          if (!next) setResolvingConflict(null)
+        }}
+        onSuccess={() => {
+          refreshAddress()
+          setResolvingConflict(null)
+          setSelectedIP(null)
+        }}
+      />
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                resolveMutation.mutate()
-              }}
-              className="space-y-3 py-2"
-            >
-              <Field>
-                <FieldLabel className="text-xs">冲突处置处置原因说明 *</FieldLabel>
-                <Textarea
-                  placeholder="如: 现场已拔除非法私接设备网线，已确认恢复单节点占用..."
-                  value={resolveReason}
-                  onChange={(e) => setResolveReason(e.target.value)}
-                  disabled={resolveMutation.isPending}
-                  maxLength={256}
-                  required
-                  rows={3}
-                  className="text-xs"
-                />
-              </Field>
-
-              <DialogFooter className="pt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setResolvingConflict(null)}
-                  disabled={resolveMutation.isPending}
-                >
-                  取消
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  variant="destructive"
-                  disabled={!resolveReason.trim() || resolveMutation.isPending}
-                >
-                  {resolveMutation.isPending ? <Spinner className="size-4" /> : "确认解除冲突"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      )}
-      {reportOpen && selectedIP && (
-        <Dialog open onOpenChange={(open) => !open && !reportMutation.isPending && setReportOpen(false)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>报告 IP 冲突</DialogTitle>
-              <DialogDescription>{selectedIP.address}</DialogDescription>
-            </DialogHeader>
-            <form className="space-y-3" onSubmit={(event) => {
-              event.preventDefault()
-              if (!reportMutation.isPending) reportMutation.mutate()
-            }}>
-              <Field><FieldLabel htmlFor="ip-conflict-identity">观测到的标识</FieldLabel><Input id="ip-conflict-identity" required maxLength={128} value={observedIdentity} onChange={(event) => setObservedIdentity(event.target.value)} /></Field>
-              <Field><FieldLabel htmlFor="ip-conflict-evidence">证据引用</FieldLabel><Input id="ip-conflict-evidence" required maxLength={256} value={evidenceRef} onChange={(event) => setEvidenceRef(event.target.value)} /></Field>
-              <Field><FieldLabel htmlFor="ip-conflict-time">观测时间</FieldLabel><Input id="ip-conflict-time" required type="datetime-local" value={observedAt} onChange={(event) => setObservedAt(event.target.value)} /></Field>
-              <DialogFooter><Button type="submit" disabled={reportMutation.isPending || !observedIdentity.trim() || !evidenceRef.trim() || !observedAt}>提交冲突报告</Button></DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      )}
+      {/* Report Conflict Modal */}
+      <ReportIPConflictModal
+        open={reportOpen && Boolean(selectedIP)}
+        subnetId={subnet.id}
+        selectedIP={selectedIP}
+        idempotencyKey={reportKey}
+        onOpenChange={setReportOpen}
+        onSuccess={() => {
+          refreshAddress()
+          setReportOpen(false)
+          setSelectedIP(null)
+        }}
+      />
     </>
+  )
+}
+
+const reasonSchema = z.object({
+  reason: z.string().trim().min(1, "请填写原因说明").max(256, "原因说明不能超过 256 个字符"),
+})
+
+const reportConflictSchema = z.object({
+  observedIdentity: z.string().trim().min(1, "请输入观测到的标识").max(128, "标识长度不能超过 128 个字符"),
+  evidenceRef: z.string().trim().min(1, "请输入证据引用").max(256, "证据引用不能超过 256 个字符"),
+  observedAt: z
+    .string()
+    .trim()
+    .min(1, "请选择观测时间")
+    .refine((v) => !Number.isNaN(new Date(v).getTime()), "请选择有效的观测时间"),
+})
+
+function ReserveIPModal({
+  open,
+  subnetId,
+  selectedIP,
+  selectedIsManual,
+  onOpenChange,
+  onSuccess,
+}: {
+  open: boolean
+  subnetId: string
+  selectedIP: IPAddressView | null
+  selectedIsManual: boolean
+  onOpenChange: (open: boolean) => void
+  onSuccess: () => void
+}) {
+  const defaultValues = useMemo(() => ({ reason: "" }), [])
+  const mutation = useMutation({
+    mutationFn: ({ reason }: { reason: string }) =>
+      subnetsService.reserveAddress(
+        subnetId,
+        selectedIP!.address,
+        selectedIP!.version,
+        !selectedIsManual,
+        reason.trim(),
+      ),
+    onSuccess: (res) => {
+      notify.success("IP 状态已变更", `${res.data.address} 人工预留已更新`)
+      onSuccess()
+    },
+  })
+
+  const { form, formRef, submit, formError } = useAppForm({
+    open,
+    resetKey: selectedIP?.address ?? "none",
+    defaultValues,
+    schema: reasonSchema,
+    serverFieldNames: { reason: "reason" },
+    fallbackErrorMessage: "变更预留状态失败",
+    onSubmit: async (values) => {
+      await mutation.mutateAsync(values)
+    },
+  })
+
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
+  const busy = mutation.isPending || isSubmitting
+
+  if (!open || !selectedIP) return null
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
+      <DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-base font-semibold">
+            {selectedIsManual ? "取消人工保留" : "设置人工预留"} ({selectedIP.address})
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            预留后该 IP 将被锁定，防止自动化上架与工单系统自动占用分配
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          ref={formRef}
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            void submit()
+          }}
+          className="space-y-3 py-2"
+        >
+          {formError && (
+            <Alert variant="destructive" role="alert">
+              <AlertCircle />
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
+          <form.Field name="reason">
+            {(field) => (
+              <FormField field={field} label="变更原因与业务依据" idPrefix="ip-reserve" required>
+                {(inputProps) => (
+                  <Textarea
+                    {...inputProps}
+                    placeholder="如: 预留给数据库高可用 VIP / 专线网关路由..."
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                    disabled={busy}
+                    maxLength={256}
+                    rows={3}
+                    className="text-xs"
+                  />
+                )}
+              </FormField>
+            )}
+          </form.Field>
+
+          <DialogFooter className="pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              disabled={busy}
+            >
+              取消
+            </Button>
+            <Button type="submit" size="sm" disabled={busy}>
+              {busy ? <Spinner className="size-4" /> : "确认提交"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ResolveIPConflictModal({
+  open,
+  subnetId,
+  selectedIP,
+  conflict,
+  onOpenChange,
+  onSuccess,
+}: {
+  open: boolean
+  subnetId: string
+  selectedIP: IPAddressView | null
+  conflict: IPConflict | null
+  onOpenChange: (open: boolean) => void
+  onSuccess: () => void
+}) {
+  const defaultValues = useMemo(() => ({ reason: "" }), [])
+  const mutation = useMutation({
+    mutationFn: ({ reason }: { reason: string }) =>
+      subnetsService.resolveConflict(subnetId, selectedIP!.address, conflict!.id, reason.trim()),
+    onSuccess: () => {
+      notify.success("冲突已解除", `${selectedIP!.address} 冲突已解除并归档`)
+      onSuccess()
+    },
+  })
+
+  const { form, formRef, submit, formError } = useAppForm({
+    open,
+    resetKey: conflict?.id ?? "none",
+    defaultValues,
+    schema: reasonSchema,
+    serverFieldNames: { reason: "reason" },
+    fallbackErrorMessage: "解除冲突失败",
+    onSubmit: async (values) => {
+      await mutation.mutateAsync(values)
+    },
+  })
+
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
+  const busy = mutation.isPending || isSubmitting
+
+  if (!open || !selectedIP || !conflict) return null
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
+      <DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-base font-semibold">
+            解除 IP 冲突 ({selectedIP.address})
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            处置冲突事件并归档，解除后原有人工保留或占用状态仍按规则生效
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          ref={formRef}
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            void submit()
+          }}
+          className="space-y-3 py-2"
+        >
+          {formError && (
+            <Alert variant="destructive" role="alert">
+              <AlertCircle />
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
+          <form.Field name="reason">
+            {(field) => (
+              <FormField field={field} label="冲突处置原因说明" idPrefix="ip-resolve" required>
+                {(inputProps) => (
+                  <Textarea
+                    {...inputProps}
+                    placeholder="如: 现场已拔除非法私接设备网线，已确认恢复单节点占用..."
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                    disabled={busy}
+                    maxLength={256}
+                    rows={3}
+                    className="text-xs"
+                  />
+                )}
+              </FormField>
+            )}
+          </form.Field>
+
+          <DialogFooter className="pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              disabled={busy}
+            >
+              取消
+            </Button>
+            <Button type="submit" size="sm" variant="destructive" disabled={busy}>
+              {busy ? <Spinner className="size-4" /> : "确认解除冲突"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ReportIPConflictModal({
+  open,
+  subnetId,
+  selectedIP,
+  idempotencyKey,
+  onOpenChange,
+  onSuccess,
+}: {
+  open: boolean
+  subnetId: string
+  selectedIP: IPAddressView | null
+  idempotencyKey: string
+  onOpenChange: (open: boolean) => void
+  onSuccess: () => void
+}) {
+  const defaultValues = useMemo(
+    () => ({ observedIdentity: "", evidenceRef: "", observedAt: "" }),
+    [],
+  )
+  const mutation = useMutation({
+    mutationFn: (values: { observedIdentity: string; evidenceRef: string; observedAt: string }) =>
+      subnetsService.reportConflict(
+        subnetId,
+        selectedIP!.address,
+        {
+          observed_identity: values.observedIdentity.trim(),
+          evidence_ref: values.evidenceRef.trim(),
+          observed_at: new Date(values.observedAt).toISOString(),
+        },
+        idempotencyKey,
+      ),
+    onSuccess: () => {
+      notify.success("已报告 IP 冲突")
+      onSuccess()
+    },
+  })
+
+  const { form, formRef, submit, formError } = useAppForm({
+    open,
+    resetKey: idempotencyKey || "report",
+    defaultValues,
+    schema: reportConflictSchema,
+    serverFieldNames: {
+      observed_identity: "observedIdentity",
+      evidence_ref: "evidenceRef",
+      observed_at: "observedAt",
+    },
+    fallbackErrorMessage: "报告冲突失败",
+    onSubmit: async (values) => {
+      await mutation.mutateAsync(values)
+    },
+  })
+
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
+  const busy = mutation.isPending || isSubmitting
+
+  if (!open || !selectedIP) return null
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>报告 IP 冲突</DialogTitle>
+          <DialogDescription>{selectedIP.address}</DialogDescription>
+        </DialogHeader>
+        <form
+          ref={formRef}
+          noValidate
+          className="space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void submit()
+          }}
+        >
+          {formError && (
+            <Alert variant="destructive" role="alert">
+              <AlertCircle />
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
+          <FieldGroup className="gap-3">
+            <form.Field name="observedIdentity">
+              {(field) => (
+                <FormField field={field} label="观测到的标识" id="ip-conflict-identity" required>
+                  {(inputProps) => (
+                    <Input
+                      {...inputProps}
+                      maxLength={128}
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={busy}
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
+            <form.Field name="evidenceRef">
+              {(field) => (
+                <FormField field={field} label="证据引用" id="ip-conflict-evidence" required>
+                  {(inputProps) => (
+                    <Input
+                      {...inputProps}
+                      maxLength={256}
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={busy}
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
+            <form.Field name="observedAt">
+              {(field) => (
+                <FormField field={field} label="观测时间" id="ip-conflict-time" required>
+                  {(inputProps) => (
+                    <Input
+                      {...inputProps}
+                      type="datetime-local"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={busy}
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
+          </FieldGroup>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={busy}>
+              取消
+            </Button>
+            <Button type="submit" disabled={busy}>
+              {busy ? <Spinner className="size-4" /> : "提交冲突报告"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }

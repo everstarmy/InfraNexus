@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Building2 } from "lucide-react"
+import { z } from "zod"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -11,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { FieldGroup } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
@@ -21,8 +22,8 @@ import {
   NativeSelectOption,
 } from "@/components/ui/native-select"
 import { useConfirm } from "@/components/common/confirm-dialog"
+import { FormField, useAppForm } from "@/components/form"
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
-import { getErrorMessage } from "@/lib/api-error"
 import { notify } from "@/lib/notify"
 import {
   vendorsService,
@@ -31,6 +32,8 @@ import {
   type CooperationStatus,
 } from "@/services/vendor-management"
 
+const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
+
 const SERVICE_TYPE_OPTIONS: { id: VendorServiceType; label: string }[] = [
   { id: "hardware_supplier", label: "硬件供货商" },
   { id: "oem_service", label: "原厂维保服务" },
@@ -38,6 +41,92 @@ const SERVICE_TYPE_OPTIONS: { id: VendorServiceType; label: string }[] = [
   { id: "spare_parts", label: "备件备件库" },
   { id: "data_destruction", label: "介质数据销毁" },
 ]
+
+const createVendorSchema = (editing: boolean) =>
+  z.object({
+    code: editing
+      ? z.string()
+      : z
+          .string()
+          .trim()
+          .min(2, "供应商编码至少 2 个字符")
+          .max(64, "供应商编码不能超过 64 个字符")
+          .regex(CODE_PATTERN, "以字母开头，仅含字母、数字及 _ . : -"),
+    name: z
+      .string()
+      .trim()
+      .min(2, "供应商全称至少 2 个字符")
+      .max(128, "供应商全称不能超过 128 个字符"),
+    shortName: z.string().trim().max(128, "简称不能超过 128 个字符"),
+    creditCode: z
+      .string()
+      .trim()
+      .regex(/^[0-9A-HJ-NPQRTUWXY]{18}$/, "统一社会信用代码必须为 18 位大写字母或数字"),
+    serviceTypes: z
+      .array(
+        z.enum([
+          "hardware_supplier",
+          "oem_service",
+          "third_party_maintenance",
+          "spare_parts",
+          "data_destruction",
+        ]),
+      )
+      .min(1, "至少勾选一种服务类别"),
+    cooperationStatus: z.enum(["active", "suspended", "terminated"]),
+    emergencyPhone: z.string().trim().max(64, "紧急热线不能超过 64 个字符"),
+    dispatchEmail: z
+      .string()
+      .trim()
+      .max(128, "派单邮箱不能超过 128 个字符")
+      .refine((val) => !val || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val), "派单邮箱格式不正确"),
+    dispatchUrl: z
+      .string()
+      .trim()
+      .max(512, "派单平台链接不能超过 512 个字符")
+      .refine((val) => !val || /^https?:\/\/.+/.test(val), "派单平台链接必须为合法的 http(s) URL"),
+    emergencyMinutes: z
+      .string()
+      .trim()
+      .refine((val) => {
+        if (!val) return false
+        const num = Number(val)
+        return Number.isInteger(num) && num >= 0 && num <= 525600
+      }, "应急时限必须为 0-525600 的整数"),
+    partsMinutes: z
+      .string()
+      .trim()
+      .refine((val) => {
+        if (!val) return false
+        const num = Number(val)
+        return Number.isInteger(num) && num >= 0 && num <= 525600
+      }, "备件时限必须为 0-525600 的整数"),
+    engineerMinutes: z
+      .string()
+      .trim()
+      .refine((val) => {
+        if (!val) return false
+        const num = Number(val)
+        return Number.isInteger(num) && num >= 0 && num <= 525600
+      }, "工程师到场时限必须为 0-525600 的整数"),
+    description: z.string().max(1024, "说明不能超过 1024 个字符"),
+  })
+
+type VendorFormValues = {
+  code: string
+  name: string
+  shortName: string
+  creditCode: string
+  serviceTypes: VendorServiceType[]
+  cooperationStatus: CooperationStatus
+  emergencyPhone: string
+  dispatchEmail: string
+  dispatchUrl: string
+  emergencyMinutes: string
+  partsMinutes: string
+  engineerMinutes: string
+  description: string
+}
 
 export function VendorFormDialog({
   open,
@@ -52,120 +141,100 @@ export function VendorFormDialog({
   const confirm = useConfirm()
   const editing = Boolean(vendor)
 
-  const [code, setCode] = useState("")
-  const [name, setName] = useState("")
-  const [shortName, setShortName] = useState("")
-  const [creditCode, setCreditCode] = useState("")
-  const [serviceTypes, setServiceTypes] = useState<VendorServiceType[]>([
-    "hardware_supplier",
-  ])
-  const [cooperationStatus, setCooperationStatus] =
-    useState<CooperationStatus>("active")
-  const [emergencyPhone, setEmergencyPhone] = useState("")
-  const [dispatchEmail, setDispatchEmail] = useState("")
-  const [dispatchUrl, setDispatchUrl] = useState("")
-  const [emergencyMinutes, setEmergencyMinutes] = useState("120")
-  const [partsMinutes, setPartsMinutes] = useState("240")
-  const [engineerMinutes, setEngineerMinutes] = useState("240")
-  const [description, setDescription] = useState("")
-  const [error, setError] = useState("")
-
-  useEffect(() => {
-    if (!open) return
-    setCode(vendor?.code ?? "")
-    setName(vendor?.name ?? "")
-    setShortName(vendor?.short_name ?? "")
-    setCreditCode(vendor?.credit_code ?? "")
-    setServiceTypes(vendor?.service_types ?? ["hardware_supplier"])
-    setCooperationStatus(vendor?.cooperation_status ?? "active")
-    setEmergencyPhone(vendor?.emergency_phone ?? "")
-    setDispatchEmail(vendor?.dispatch_email ?? "")
-    setDispatchUrl(vendor?.dispatch_url ?? "")
-    setEmergencyMinutes(
-      vendor?.emergency_response_minutes !== undefined
-        ? String(vendor.emergency_response_minutes)
-        : "120"
-    )
-    setPartsMinutes(
-      vendor?.parts_response_minutes !== undefined
-        ? String(vendor.parts_response_minutes)
-        : "240"
-    )
-    setEngineerMinutes(
-      vendor?.engineer_response_minutes !== undefined
-        ? String(vendor.engineer_response_minutes)
-        : "240"
-    )
-    setDescription(vendor?.description ?? "")
-    setError("")
-  }, [open, vendor])
-
-  const isDirty =
-    open &&
-    (code !== (vendor?.code ?? "") ||
-      name !== (vendor?.name ?? "") ||
-      shortName !== (vendor?.short_name ?? "") ||
-      creditCode !== (vendor?.credit_code ?? "") ||
-      cooperationStatus !== (vendor?.cooperation_status ?? "active") ||
-      emergencyPhone !== (vendor?.emergency_phone ?? "") ||
-      dispatchEmail !== (vendor?.dispatch_email ?? "") ||
-      dispatchUrl !== (vendor?.dispatch_url ?? "") ||
-      description !== (vendor?.description ?? ""))
-
-  useUnsavedChanges(isDirty, "供应商信息尚未保存，关闭后这些更改将丢失。")
-
-  const toggleServiceType = (st: VendorServiceType) => {
-    setServiceTypes((current) =>
-      current.includes(st)
-        ? current.filter((s) => s !== st)
-        : [...current, st]
-    )
-  }
-
-  const creditCodeValid = creditCode.trim().length === 18
-  const canSubmit =
-    name.trim().length >= 2 &&
-    creditCodeValid &&
-    serviceTypes.length > 0 &&
-    (editing || code.trim().length >= 2)
+  const vendorSchema = useMemo(() => createVendorSchema(editing), [editing])
+  const defaultValues = useMemo<VendorFormValues>(
+    () => ({
+      code: vendor?.code ?? "",
+      name: vendor?.name ?? "",
+      shortName: vendor?.short_name ?? "",
+      creditCode: vendor?.credit_code ?? "",
+      serviceTypes: vendor?.service_types ?? ["hardware_supplier"],
+      cooperationStatus: vendor?.cooperation_status ?? "active",
+      emergencyPhone: vendor?.emergency_phone ?? "",
+      dispatchEmail: vendor?.dispatch_email ?? "",
+      dispatchUrl: vendor?.dispatch_url ?? "",
+      emergencyMinutes:
+        vendor?.emergency_response_minutes !== undefined
+          ? String(vendor.emergency_response_minutes)
+          : "120",
+      partsMinutes:
+        vendor?.parts_response_minutes !== undefined
+          ? String(vendor.parts_response_minutes)
+          : "240",
+      engineerMinutes:
+        vendor?.engineer_response_minutes !== undefined
+          ? String(vendor.engineer_response_minutes)
+          : "240",
+      description: vendor?.description ?? "",
+    }),
+    [vendor],
+  )
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (values: VendorFormValues) => {
       const payload: Partial<VendorDTO> = {
-        name: name.trim(),
-        short_name: shortName.trim() || undefined,
-        credit_code: creditCode.trim(),
-        service_types: serviceTypes,
-        cooperation_status: cooperationStatus,
-        emergency_phone: emergencyPhone.trim() || undefined,
-        dispatch_email: dispatchEmail.trim() || undefined,
-        dispatch_url: dispatchUrl.trim() || undefined,
-        emergency_response_minutes: Number(emergencyMinutes) || 0,
-        parts_response_minutes: Number(partsMinutes) || 0,
-        engineer_response_minutes: Number(engineerMinutes) || 0,
-        description: description.trim() || undefined,
+        name: values.name.trim(),
+        short_name: values.shortName.trim() || undefined,
+        credit_code: values.creditCode.trim() || undefined,
+        service_types: values.serviceTypes,
+        cooperation_status: values.cooperationStatus,
+        emergency_phone: values.emergencyPhone.trim() || undefined,
+        dispatch_email: values.dispatchEmail.trim() || undefined,
+        dispatch_url: values.dispatchUrl.trim() || undefined,
+        emergency_response_minutes: values.emergencyMinutes
+          ? Number(values.emergencyMinutes)
+          : undefined,
+        parts_response_minutes: values.partsMinutes
+          ? Number(values.partsMinutes)
+          : undefined,
+        engineer_response_minutes: values.engineerMinutes
+          ? Number(values.engineerMinutes)
+          : undefined,
+        description: values.description.trim() || undefined,
       }
       if (editing && vendor) {
         return vendorsService.update(vendor, payload)
       }
       return vendorsService.create({
         ...payload,
-        code: code.trim(),
+        code: values.code.trim(),
       })
     },
     onSuccess: (res) => {
       notify.success(
-        editing ? "供应商已更新" : "供应商已创建",
+        editing ? "供应商已更新" : "供应商已录入",
         res.data.name
       )
       void queryClient.invalidateQueries({ queryKey: ["vendors"] })
       onOpenChange(false)
     },
-    onError: (err) =>
-      setError(
-        getErrorMessage(err, editing ? "更新供应商失败" : "创建供应商失败")
-      ),
   })
+
+  const { form, formError, formRef, submit, hasChanges } = useAppForm<VendorFormValues>({
+    defaultValues,
+    resetKey: vendor?.id,
+    schema: vendorSchema,
+    serverFieldNames: {
+      short_name: "shortName",
+      credit_code: "creditCode",
+      service_types: "serviceTypes",
+      cooperation_status: "cooperationStatus",
+      emergency_phone: "emergencyPhone",
+      dispatch_email: "dispatchEmail",
+      dispatch_url: "dispatchUrl",
+      emergency_response_minutes: "emergencyMinutes",
+      parts_response_minutes: "partsMinutes",
+      engineer_response_minutes: "engineerMinutes",
+    },
+    open,
+    onSubmit: async (values) => {
+      await mutation.mutateAsync(values)
+    },
+    fallbackErrorMessage: editing ? "更新供应商失败" : "创建供应商失败",
+  })
+
+  const isDirty = open && hasChanges
+  useUnsavedChanges(isDirty, "供应商信息尚未保存，关闭后这些更改将丢失。")
 
   const requestClose = async () => {
     if (mutation.isPending) return
@@ -194,200 +263,296 @@ export function VendorFormDialog({
           <div className="flex items-center gap-2">
             <Building2 className="size-5 text-primary" />
             <DialogTitle className="text-base font-semibold">
-              {editing ? "编辑供应商/服务商" : "新建供应商/服务商"}
+              {editing ? "编辑供应商档案" : "录入新供应商档案"}
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs">
-            维护采购供应商、原厂/第三方维保合同服务商及响应时效
+            维保服务商、备件供货商统一档案与应急响应服务等级 (SLA)
           </DialogDescription>
         </DialogHeader>
 
-        {error && (
+        {formError && (
           <Alert variant="destructive" className="py-2 text-xs">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{formError}</AlertDescription>
           </Alert>
         )}
 
         <form
+          ref={formRef}
+          noValidate
           onSubmit={(e) => {
             e.preventDefault()
-            if (canSubmit) mutation.mutate()
+            e.stopPropagation()
+            void submit()
           }}
-          className="space-y-4 py-2"
+          className="space-y-3 py-2"
         >
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">供应商编码 *</FieldLabel>
-              <Input
-                placeholder="如: vendor-digital-china"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                disabled={editing || mutation.isPending}
-                className="h-8 text-xs font-mono"
-                required
-              />
-            </Field>
+            <form.Field name="code">
+              {(field) => (
+                <FormField field={field} label="供应商编码" required={!editing} idPrefix="vendor">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: vendor-inspur"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={editing || mutation.isPending}
+                      className="h-8 text-xs font-mono"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">统一社会信用代码 (18位) *</FieldLabel>
-              <Input
-                placeholder="91110000..."
-                value={creditCode}
-                onChange={(e) => setCreditCode(e.target.value.toUpperCase())}
-                disabled={mutation.isPending}
-                maxLength={18}
-                className="h-8 text-xs font-mono"
-                required
-              />
-            </Field>
+            <form.Field name="name">
+              {(field) => (
+                <FormField field={field} label="供应商全称" required idPrefix="vendor">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: 浪潮电子信息产业股份有限公司"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
           </FieldGroup>
 
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">公司全称 *</FieldLabel>
-              <Input
-                placeholder="如: 神州数码系统服务有限公司"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-                required
-              />
-            </Field>
+            <form.Field name="shortName">
+              {(field) => (
+                <FormField field={field} label="商务简称" idPrefix="vendor">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: 浪潮信息"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">企业简称</FieldLabel>
-              <Input
-                placeholder="如: 神州数码"
-                value={shortName}
-                onChange={(e) => setShortName(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              />
-            </Field>
+            <form.Field name="creditCode">
+              {(field) => (
+                <FormField field={field} label="统一社会信用代码" required idPrefix="vendor">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="18 位统一代码"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value.toUpperCase())}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs font-mono"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
+          </FieldGroup>
+
+          <form.Field name="serviceTypes">
+            {(field) => (
+              <FormField field={field} label="服务类别 (多选)" required idPrefix="vendor">
+                {() => (
+                  <div className="grid grid-cols-3 gap-2 rounded-md border p-2">
+                    {SERVICE_TYPE_OPTIONS.map((opt) => {
+                      const checked = field.state.value.includes(opt.id)
+                      return (
+                        <label
+                          key={opt.id}
+                          className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer select-none"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => {
+                              const next = checked
+                                ? field.state.value.filter((x) => x !== opt.id)
+                                : [...field.state.value, opt.id]
+                              field.handleChange(next)
+                            }}
+                            disabled={mutation.isPending}
+                          />
+                          <span>{opt.label}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </FormField>
+            )}
+          </form.Field>
+
+          <FieldGroup className="grid grid-cols-2 gap-3">
+            <form.Field name="cooperationStatus">
+              {(field) => (
+                <FormField field={field} label="合作状态" required idPrefix="vendor">
+                  {(props) => (
+                    <NativeSelect
+                      {...props}
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value as CooperationStatus)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    >
+                      <NativeSelectOption value="active">正常服务 (Active)</NativeSelectOption>
+                      <NativeSelectOption value="suspended">合作暂停 (Suspended)</NativeSelectOption>
+                      <NativeSelectOption value="terminated">合作终止 (Terminated)</NativeSelectOption>
+                    </NativeSelect>
+                  )}
+                </FormField>
+              )}
+            </form.Field>
+
+            <form.Field name="emergencyPhone">
+              {(field) => (
+                <FormField field={field} label="7×24 紧急响应电话" idPrefix="vendor">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="400-xxx-xxxx"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
           </FieldGroup>
 
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">合作状态</FieldLabel>
-              <NativeSelect
-                value={cooperationStatus}
-                onChange={(e) =>
-                  setCooperationStatus(e.target.value as CooperationStatus)
-                }
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              >
-                <NativeSelectOption value="active">正常合作 (Active)</NativeSelectOption>
-                <NativeSelectOption value="suspended">暂停合作 (Suspended)</NativeSelectOption>
-                <NativeSelectOption value="terminated">已终止 (Terminated)</NativeSelectOption>
-              </NativeSelect>
-            </Field>
+            <form.Field name="dispatchEmail">
+              {(field) => (
+                <FormField field={field} label="工单派发邮箱" idPrefix="vendor">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      type="email"
+                      placeholder="support@vendor.com"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">24小时紧急报修电话</FieldLabel>
-              <Input
-                placeholder="400-xxx-xxxx"
-                value={emergencyPhone}
-                onChange={(e) => setEmergencyPhone(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              />
-            </Field>
+            <form.Field name="dispatchUrl">
+              {(field) => (
+                <FormField field={field} label="服务工单平台链接" idPrefix="vendor">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      type="url"
+                      placeholder="https://service.vendor.com"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
           </FieldGroup>
 
-          <Field>
-            <FieldLabel className="text-xs">服务能力类型 (可多选) *</FieldLabel>
-            <div className="flex flex-wrap gap-4 pt-1">
-              {SERVICE_TYPE_OPTIONS.map((opt) => (
-                <label
-                  key={opt.id}
-                  className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer"
-                >
-                  <Checkbox
-                    checked={serviceTypes.includes(opt.id)}
-                    onCheckedChange={() => toggleServiceType(opt.id)}
+          <FieldGroup className="grid grid-cols-3 gap-3">
+            <form.Field name="emergencyMinutes">
+              {(field) => (
+                <FormField field={field} label="应急电话响应 (分)" idPrefix="vendor">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      type="number"
+                      min={0}
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs font-mono"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
+
+            <form.Field name="partsMinutes">
+              {(field) => (
+                <FormField field={field} label="备件到场时限 (分)" idPrefix="vendor">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      type="number"
+                      min={0}
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs font-mono"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
+
+            <form.Field name="engineerMinutes">
+              {(field) => (
+                <FormField field={field} label="工程师到场 (分)" idPrefix="vendor">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      type="number"
+                      min={0}
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs font-mono"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
+          </FieldGroup>
+
+          <form.Field name="description">
+            {(field) => (
+              <FormField field={field} label="说明与备忘录" idPrefix="vendor">
+                {(props) => (
+                  <Textarea
+                    {...props}
+                    placeholder="合同编号、服务窗口说明..."
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
                     disabled={mutation.isPending}
+                    rows={2}
+                    className="text-xs"
                   />
-                  <span>{opt.label}</span>
-                </label>
-              ))}
-            </div>
-          </Field>
-
-          <div className="rounded-md border bg-muted/20 p-3 space-y-3">
-            <h4 className="text-xs font-semibold text-foreground/80">SLA 响应承诺 (分钟)</h4>
-            <div className="grid grid-cols-3 gap-3">
-              <Field>
-                <FieldLabel className="text-[11px] text-muted-foreground">紧急响应 (分钟)</FieldLabel>
-                <Input
-                  type="number"
-                  value={emergencyMinutes}
-                  onChange={(e) => setEmergencyMinutes(e.target.value)}
-                  disabled={mutation.isPending}
-                  className="h-7 text-xs font-mono"
-                />
-              </Field>
-              <Field>
-                <FieldLabel className="text-[11px] text-muted-foreground">备件到达 (分钟)</FieldLabel>
-                <Input
-                  type="number"
-                  value={partsMinutes}
-                  onChange={(e) => setPartsMinutes(e.target.value)}
-                  disabled={mutation.isPending}
-                  className="h-7 text-xs font-mono"
-                />
-              </Field>
-              <Field>
-                <FieldLabel className="text-[11px] text-muted-foreground">工程师到场 (分钟)</FieldLabel>
-                <Input
-                  type="number"
-                  value={engineerMinutes}
-                  onChange={(e) => setEngineerMinutes(e.target.value)}
-                  disabled={mutation.isPending}
-                  className="h-7 text-xs font-mono"
-                />
-              </Field>
-            </div>
-          </div>
-
-          <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">派单接收邮箱</FieldLabel>
-              <Input
-                type="email"
-                placeholder="dispatch@vendor.com"
-                value={dispatchEmail}
-                onChange={(e) => setDispatchEmail(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              />
-            </Field>
-
-            <Field>
-              <FieldLabel className="text-xs">派单系统对接 URL</FieldLabel>
-              <Input
-                type="url"
-                placeholder="https://..."
-                value={dispatchUrl}
-                onChange={(e) => setDispatchUrl(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              />
-            </Field>
-          </FieldGroup>
-
-          <Field>
-            <FieldLabel className="text-xs">备注与合作说明</FieldLabel>
-            <Textarea
-              placeholder="合同编号、服务范围补充..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={mutation.isPending}
-              rows={2}
-              className="text-xs"
-            />
-          </Field>
+                )}
+              </FormField>
+            )}
+          </form.Field>
 
           <DialogFooter className="pt-2">
             <Button
@@ -399,13 +564,23 @@ export function VendorFormDialog({
             >
               取消
             </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={!canSubmit || mutation.isPending}
-            >
-              {mutation.isPending ? <Spinner className="size-4" /> : editing ? "保存更改" : "创建供应商"}
-            </Button>
+            <form.Subscribe selector={(state) => [state.isSubmitting]}>
+              {([isSubmitting]) => (
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={isSubmitting || mutation.isPending}
+                >
+                  {isSubmitting || mutation.isPending ? (
+                    <Spinner className="size-4" />
+                  ) : editing ? (
+                    "保存更改"
+                  ) : (
+                    "创建供应商"
+                  )}
+                </Button>
+              )}
+            </form.Subscribe>
           </DialogFooter>
         </form>
       </DialogContent>

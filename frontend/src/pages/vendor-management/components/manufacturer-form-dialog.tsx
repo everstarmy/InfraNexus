@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Building2 } from "lucide-react"
+import { z } from "zod"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -11,14 +12,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { FieldGroup } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useConfirm } from "@/components/common/confirm-dialog"
+import { FormField, useAppForm } from "@/components/form"
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
-import { getErrorMessage } from "@/lib/api-error"
 import { notify } from "@/lib/notify"
 import {
   manufacturersService,
@@ -26,12 +27,79 @@ import {
   type ProtocolType,
 } from "@/services/vendor-management"
 
+const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
+
 const PROTOCOL_OPTIONS: { id: ProtocolType; label: string }[] = [
   { id: "redfish", label: "Redfish" },
   { id: "rest", label: "REST API" },
   { id: "snmpv2c", label: "SNMP v2c" },
   { id: "snmpv3", label: "SNMP v3" },
 ]
+
+const createManufacturerSchema = (editing: boolean) =>
+  z.object({
+    code: editing
+      ? z.string()
+      : z
+          .string()
+          .trim()
+          .min(2, "制造商编码至少 2 个字符")
+          .max(64, "制造商编码不能超过 64 个字符")
+          .regex(CODE_PATTERN, "以字母开头，仅含字母、数字及 _ . : -"),
+    name: z
+      .string()
+      .trim()
+      .min(2, "制造商名称至少 2 个字符")
+      .max(128, "制造商名称不能超过 128 个字符"),
+    englishName: z.string().trim().max(128, "英文名不能超过 128 个字符"),
+    website: z
+      .string()
+      .trim()
+      .max(512, "官方网站不能超过 512 个字符")
+      .refine((val) => !val || /^https?:\/\/.+/.test(val), "官方网站必须为合法的 http(s) 链接"),
+    supportUrl: z
+      .string()
+      .trim()
+      .max(512, "技术支持链接不能超过 512 个字符")
+      .refine((val) => !val || /^https?:\/\/.+/.test(val), "技术支持链接必须为合法的 http(s) 链接"),
+    supportPhone: z.string().trim().max(64, "支持热线不能超过 64 个字符"),
+    enterpriseOid: z
+      .string()
+      .trim()
+      .refine((val) => {
+        if (!val) return true
+        const num = Number(val)
+        return Number.isInteger(num) && num >= 1 && num <= 4294967295
+      }, "企业私有 OID 必须为 1-4294967295 的整数"),
+    serialNumberPattern: z
+      .string()
+      .trim()
+      .max(512, "匹配规则不能超过 512 个字符")
+      .refine((val) => {
+        if (!val) return true
+        try {
+          new RegExp(val)
+          return true
+        } catch {
+          return false
+        }
+      }, "序列号匹配规则必须为合法正则表达式"),
+    protocols: z.array(z.enum(["redfish", "rest", "snmpv2c", "snmpv3"])),
+    description: z.string().max(1024, "说明不能超过 1024 个字符"),
+  })
+
+type ManufacturerFormValues = {
+  code: string
+  name: string
+  englishName: string
+  website: string
+  supportUrl: string
+  supportPhone: string
+  enterpriseOid: string
+  serialNumberPattern: string
+  protocols: ProtocolType[]
+  description: string
+}
 
 export function ManufacturerFormDialog({
   open,
@@ -46,96 +114,74 @@ export function ManufacturerFormDialog({
   const confirm = useConfirm()
   const editing = Boolean(manufacturer)
 
-  const [code, setCode] = useState("")
-  const [name, setName] = useState("")
-  const [englishName, setEnglishName] = useState("")
-  const [website, setWebsite] = useState("")
-  const [supportUrl, setSupportUrl] = useState("")
-  const [supportPhone, setSupportPhone] = useState("")
-  const [enterpriseOid, setEnterpriseOid] = useState<string>("")
-  const [serialNumberPattern, setSerialNumberPattern] = useState("")
-  const [protocols, setProtocols] = useState<ProtocolType[]>([])
-  const [description, setDescription] = useState("")
-  const [error, setError] = useState("")
-
-  useEffect(() => {
-    if (!open) return
-    setCode(manufacturer?.code ?? "")
-    setName(manufacturer?.name ?? "")
-    setEnglishName(manufacturer?.english_name ?? "")
-    setWebsite(manufacturer?.website ?? "")
-    setSupportUrl(manufacturer?.support_url ?? "")
-    setSupportPhone(manufacturer?.support_phone ?? "")
-    setEnterpriseOid(
-      manufacturer?.enterprise_oid ? String(manufacturer.enterprise_oid) : ""
-    )
-    setSerialNumberPattern(manufacturer?.serial_number_pattern ?? "")
-    setProtocols(manufacturer?.protocols ?? [])
-    setDescription(manufacturer?.description ?? "")
-    setError("")
-  }, [open, manufacturer])
-
-  const isDirty =
-    open &&
-    (code !== (manufacturer?.code ?? "") ||
-      name !== (manufacturer?.name ?? "") ||
-      englishName !== (manufacturer?.english_name ?? "") ||
-      website !== (manufacturer?.website ?? "") ||
-      supportUrl !== (manufacturer?.support_url ?? "") ||
-      supportPhone !== (manufacturer?.support_phone ?? "") ||
-      enterpriseOid !== (manufacturer?.enterprise_oid ? String(manufacturer.enterprise_oid) : "") ||
-      serialNumberPattern !== (manufacturer?.serial_number_pattern ?? "") ||
-      JSON.stringify(protocols) !== JSON.stringify(manufacturer?.protocols ?? []) ||
-      description !== (manufacturer?.description ?? ""))
-
-  useUnsavedChanges(isDirty, "制造商信息尚未保存，关闭后这些更改将丢失。")
-
-  const toggleProtocol = (proto: ProtocolType) => {
-    setProtocols((current) =>
-      current.includes(proto)
-        ? current.filter((p) => p !== proto)
-        : [...current, proto]
-    )
-  }
-
-  const canSubmit =
-    name.trim().length >= 2 &&
-    (editing || code.trim().length >= 2)
+  const manufacturerSchema = useMemo(() => createManufacturerSchema(editing), [editing])
+  const defaultValues = useMemo<ManufacturerFormValues>(
+    () => ({
+      code: manufacturer?.code ?? "",
+      name: manufacturer?.name ?? "",
+      englishName: manufacturer?.english_name ?? "",
+      website: manufacturer?.website ?? "",
+      supportUrl: manufacturer?.support_url ?? "",
+      supportPhone: manufacturer?.support_phone ?? "",
+      enterpriseOid: manufacturer?.enterprise_oid ? String(manufacturer.enterprise_oid) : "",
+      serialNumberPattern: manufacturer?.serial_number_pattern ?? "",
+      protocols: manufacturer?.protocols ?? [],
+      description: manufacturer?.description ?? "",
+    }),
+    [manufacturer],
+  )
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (values: ManufacturerFormValues) => {
       const payload: Partial<ManufacturerDTO> = {
-        name: name.trim(),
-        english_name: englishName.trim() || undefined,
-        website: website.trim() || undefined,
-        support_url: supportUrl.trim() || undefined,
-        support_phone: supportPhone.trim() || undefined,
-        enterprise_oid: enterpriseOid ? Number(enterpriseOid) : undefined,
-        serial_number_pattern: serialNumberPattern.trim() || undefined,
-        protocols: protocols.length > 0 ? protocols : undefined,
-        description: description.trim() || undefined,
+        name: values.name.trim(),
+        english_name: values.englishName.trim() || undefined,
+        website: values.website.trim() || undefined,
+        support_url: values.supportUrl.trim() || undefined,
+        support_phone: values.supportPhone.trim() || undefined,
+        enterprise_oid: values.enterpriseOid ? Number(values.enterpriseOid) : undefined,
+        serial_number_pattern: values.serialNumberPattern.trim() || undefined,
+        protocols: values.protocols,
+        description: values.description.trim() || undefined,
       }
       if (editing && manufacturer) {
         return manufacturersService.update(manufacturer, payload)
       }
       return manufacturersService.create({
         ...payload,
-        code: code.trim(),
+        code: values.code.trim(),
       })
     },
     onSuccess: (res) => {
       notify.success(
-        editing ? "制造商已更新" : "制造商已创建",
+        editing ? "制造商已更新" : "制造商已录入",
         res.data.name
       )
       void queryClient.invalidateQueries({ queryKey: ["manufacturers"] })
       onOpenChange(false)
     },
-    onError: (err) =>
-      setError(
-        getErrorMessage(err, editing ? "更新制造商失败" : "创建制造商失败")
-      ),
   })
+
+  const { form, formError, formRef, submit, hasChanges } = useAppForm<ManufacturerFormValues>({
+    defaultValues,
+    resetKey: manufacturer?.id,
+    schema: manufacturerSchema,
+    serverFieldNames: {
+      english_name: "englishName",
+      support_url: "supportUrl",
+      support_phone: "supportPhone",
+      enterprise_oid: "enterpriseOid",
+      serial_number_pattern: "serialNumberPattern",
+    },
+    open,
+    onSubmit: async (values) => {
+      await mutation.mutateAsync(values)
+    },
+    fallbackErrorMessage: editing ? "更新制造商失败" : "创建制造商失败",
+  })
+
+  const isDirty = open && hasChanges
+  useUnsavedChanges(isDirty, "制造商信息尚未保存，关闭后这些更改将丢失。")
 
   const requestClose = async () => {
     if (mutation.isPending) return
@@ -159,163 +205,240 @@ export function ManufacturerFormDialog({
         else onOpenChange(true)
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <Building2 className="size-5 text-primary" />
             <DialogTitle className="text-base font-semibold">
-              {editing ? "编辑制造商" : "新建制造商"}
+              {editing ? "编辑硬件制造商档案" : "录入新硬件制造商"}
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs">
-            维护硬件与设备制造商的原厂信息、采集协议及技术支持渠道
+            用于机架服务器、网络交换机、存储阵列的品牌元数据与带外接口规范
           </DialogDescription>
         </DialogHeader>
 
-        {error && (
+        {formError && (
           <Alert variant="destructive" className="py-2 text-xs">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{formError}</AlertDescription>
           </Alert>
         )}
 
         <form
+          ref={formRef}
+          noValidate
           onSubmit={(e) => {
             e.preventDefault()
-            if (canSubmit) mutation.mutate()
+            e.stopPropagation()
+            void submit()
           }}
-          className="space-y-4 py-2"
+          className="space-y-3 py-2"
         >
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">厂商编码 (Code) *</FieldLabel>
-              <Input
-                placeholder="如: cisco, dell, huawei"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                disabled={editing || mutation.isPending}
-                className="h-8 text-xs font-mono"
-                required
-              />
-            </Field>
+            <form.Field name="code">
+              {(field) => (
+                <FormField field={field} label="制造商编码" required={!editing} idPrefix="mfr">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: cisco"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={editing || mutation.isPending}
+                      className="h-8 text-xs font-mono"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">中文/通用名称 *</FieldLabel>
-              <Input
-                placeholder="如: 华为技术 / Cisco"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-                required
-              />
-            </Field>
+            <form.Field name="name">
+              {(field) => (
+                <FormField field={field} label="中文品牌 / 厂商名" required idPrefix="mfr">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: 思科系统"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
           </FieldGroup>
 
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">英文官方名称</FieldLabel>
-              <Input
-                placeholder="如: Huawei Technologies"
-                value={englishName}
-                onChange={(e) => setEnglishName(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              />
-            </Field>
+            <form.Field name="englishName">
+              {(field) => (
+                <FormField field={field} label="英文名称 (English Name)" idPrefix="mfr">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: Cisco Systems, Inc."
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">Enterprise OID (SNMP)</FieldLabel>
-              <Input
-                type="number"
-                placeholder="如: 2011, 9, 674"
-                value={enterpriseOid}
-                onChange={(e) => setEnterpriseOid(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs font-mono"
-              />
-            </Field>
+            <form.Field name="supportPhone">
+              {(field) => (
+                <FormField field={field} label="官方技术支持热线" idPrefix="mfr">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="400-xxx-xxxx"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
           </FieldGroup>
 
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">官方网站</FieldLabel>
-              <Input
-                type="url"
-                placeholder="https://..."
-                value={website}
-                onChange={(e) => setWebsite(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              />
-            </Field>
+            <form.Field name="website">
+              {(field) => (
+                <FormField field={field} label="官方门户网址" idPrefix="mfr">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      type="url"
+                      placeholder="https://www.cisco.com"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">支持与报修电话</FieldLabel>
-              <Input
-                placeholder="400-xxx-xxxx"
-                value={supportPhone}
-                onChange={(e) => setSupportPhone(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              />
-            </Field>
+            <form.Field name="supportUrl">
+              {(field) => (
+                <FormField field={field} label="驱动/固件下载与支持中心" idPrefix="mfr">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      type="url"
+                      placeholder="https://support.cisco.com"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
           </FieldGroup>
 
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">支持门户 URL</FieldLabel>
-              <Input
-                type="url"
-                placeholder="https://support...."
-                value={supportUrl}
-                onChange={(e) => setSupportUrl(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              />
-            </Field>
+            <form.Field name="enterpriseOid">
+              {(field) => (
+                <FormField field={field} label="SNMP Enterprise OID (IANA)" idPrefix="mfr">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      type="number"
+                      placeholder="如: 9 (Cisco)"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs font-mono"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">序列号正则规则</FieldLabel>
-              <Input
-                placeholder="如: ^[A-Z0-9]{10,14}$"
-                value={serialNumberPattern}
-                onChange={(e) => setSerialNumberPattern(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs font-mono"
-              />
-            </Field>
+            <form.Field name="serialNumberPattern">
+              {(field) => (
+                <FormField field={field} label="序列号正则 (Serial Pattern)" idPrefix="mfr">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: ^FOC[0-9A-Z]{8}$"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs font-mono"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
           </FieldGroup>
 
-          <Field>
-            <FieldLabel className="text-xs">支持的采集协议</FieldLabel>
-            <div className="flex flex-wrap gap-4 pt-1">
-              {PROTOCOL_OPTIONS.map((opt) => (
-                <label
-                  key={opt.id}
-                  className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer"
-                >
-                  <Checkbox
-                    checked={protocols.includes(opt.id)}
-                    onCheckedChange={() => toggleProtocol(opt.id)}
+          <form.Field name="protocols">
+            {(field) => (
+              <FormField field={field} label="支持的设备带外/发现协议" idPrefix="mfr">
+                {() => (
+                  <div className="grid grid-cols-4 gap-2 rounded-md border p-2">
+                    {PROTOCOL_OPTIONS.map((opt) => {
+                      const checked = field.state.value.includes(opt.id)
+                      return (
+                        <label
+                          key={opt.id}
+                          className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer select-none"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => {
+                              const next = checked
+                                ? field.state.value.filter((p) => p !== opt.id)
+                                : [...field.state.value, opt.id]
+                              field.handleChange(next)
+                            }}
+                            disabled={mutation.isPending}
+                          />
+                          <span>{opt.label}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </FormField>
+            )}
+          </form.Field>
+
+          <form.Field name="description">
+            {(field) => (
+              <FormField field={field} label="说明与备忘录" idPrefix="mfr">
+                {(props) => (
+                  <Textarea
+                    {...props}
+                    placeholder="厂商产线特点、主流型号说明..."
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
                     disabled={mutation.isPending}
+                    rows={2}
+                    className="text-xs"
                   />
-                  <span>{opt.label}</span>
-                </label>
-              ))}
-            </div>
-          </Field>
-
-          <Field>
-            <FieldLabel className="text-xs">备注与描述</FieldLabel>
-            <Textarea
-              placeholder="厂商档案补充说明..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={mutation.isPending}
-              rows={2}
-              className="text-xs"
-            />
-          </Field>
+                )}
+              </FormField>
+            )}
+          </form.Field>
 
           <DialogFooter className="pt-2">
             <Button
@@ -327,13 +450,23 @@ export function ManufacturerFormDialog({
             >
               取消
             </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={!canSubmit || mutation.isPending}
-            >
-              {mutation.isPending ? <Spinner className="size-4" /> : editing ? "保存更改" : "创建制造商"}
-            </Button>
+            <form.Subscribe selector={(state) => [state.isSubmitting]}>
+              {([isSubmitting]) => (
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={isSubmitting || mutation.isPending}
+                >
+                  {isSubmitting || mutation.isPending ? (
+                    <Spinner className="size-4" />
+                  ) : editing ? (
+                    "保存更改"
+                  ) : (
+                    "录入制造商"
+                  )}
+                </Button>
+              )}
+            </form.Subscribe>
           </DialogFooter>
         </form>
       </DialogContent>

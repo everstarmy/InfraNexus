@@ -1,25 +1,68 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { useStore } from "@tanstack/react-form"
 import { AlertCircle, ArrowRight, Layers, ShieldCheck } from "lucide-react"
+import { z } from "zod"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { FormField, useAppForm } from "@/components/form"
 import { getErrorMessage, getErrorStatus } from "@/lib/api-error"
 import { notify } from "@/lib/notify"
+import { meetsPolicy } from "@/lib/password"
 import { authService } from "@/services/auth"
 import { useAuth } from "@/stores/auth-context"
+
+const setupSchema = z
+  .object({
+    password: z
+      .string()
+      .min(1, "请输入初始密码")
+      .refine((v) => new TextEncoder().encode(v).length <= 72, "密码不能超过 72 字节")
+      .refine(meetsPolicy, "至少 8 位，包含大写字母、小写字母、数字、符号中的 3 类"),
+    confirmation: z.string().min(1, "请再次输入确认密码"),
+  })
+  .refine((data) => data.password === data.confirmation, {
+    message: "两次输入的密码不一致",
+    path: ["confirmation"],
+  })
 
 export default function SetupPage() {
   const navigate = useNavigate()
   const { checkSetup } = useAuth()
   const [checking, setChecking] = useState(true)
-  const [password, setPassword] = useState("")
-  const [confirmation, setConfirmation] = useState("")
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState("")
-  const [mismatch, setMismatch] = useState(false)
+  const [setupError, setSetupError] = useState("")
+
+  const defaultValues = useMemo(() => ({ password: "", confirmation: "" }), [])
+
+  const { form, formRef, submit, formError } = useAppForm({
+    open: !checking,
+    resetKey: "setup",
+    defaultValues,
+    schema: setupSchema,
+    serverFieldNames: { password: "password" },
+    fallbackErrorMessage: "初始化失败，请稍后重试",
+    onSubmit: async (values) => {
+      setSetupError("")
+      await authService.initialize(values.password)
+      form.reset(defaultValues)
+      notify.success("管理员初始化成功", "请使用 admin 和刚设置的密码登录")
+      // Synchronize the global gate before leaving setup. On a read failure it
+      // shows the retry screen instead of allowing another initialization.
+      if ((await checkSetup()) === true) navigate("/login", { replace: true })
+    },
+    onError: async (err) => {
+      if (getErrorStatus(err) === 403) {
+        if ((await checkSetup()) === false) {
+          setSetupError(getErrorMessage(err, "初始化请求被拒绝"))
+        }
+      }
+    },
+  })
+
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
 
   useEffect(() => {
     let active = true
@@ -32,34 +75,7 @@ export default function SetupPage() {
     }
   }, [checkSetup])
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    setError("")
-    setMismatch(password !== confirmation)
-    if (password !== confirmation) return
-    if (new TextEncoder().encode(password).length > 72) {
-      setError("密码不能超过 72 字节")
-      return
-    }
-    setSubmitting(true)
-    try {
-      await authService.initialize(password)
-      setPassword("")
-      setConfirmation("")
-      notify.success("管理员初始化成功", "请使用 admin 和刚设置的密码登录")
-      // Synchronize the global gate before leaving setup. On a read failure it
-      // shows the retry screen instead of allowing another initialization.
-      if ((await checkSetup()) === true) navigate("/login", { replace: true })
-    } catch (err) {
-      if (getErrorStatus(err) === 403) {
-        if ((await checkSetup()) === false) setError(getErrorMessage(err, "初始化请求被拒绝"))
-      } else {
-        setError(getErrorMessage(err, "初始化失败，请稍后重试"))
-      }
-    } finally {
-      setSubmitting(false)
-    }
-  }
+  const visibleError = setupError || formError
 
   return (
     <div className="grid min-h-svh grid-cols-12 bg-background">
@@ -95,12 +111,20 @@ export default function SetupPage() {
               正在检查初始化状态…
             </div>
           ) : (
-            <form onSubmit={submit}>
+            <form
+              ref={formRef}
+              noValidate
+              onSubmit={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void submit()
+              }}
+            >
               <FieldGroup>
-                {error && (
+                {visibleError && (
                   <Alert variant="destructive" role="alert">
                     <AlertCircle />
-                    <AlertDescription>{error}</AlertDescription>
+                    <AlertDescription>{visibleError}</AlertDescription>
                   </Alert>
                 )}
                 <Field>
@@ -108,48 +132,61 @@ export default function SetupPage() {
                   <Input id="setup-username" value="admin" readOnly autoComplete="username" />
                   <FieldDescription>内置管理员账号，用于管理系统和分配权限。</FieldDescription>
                 </Field>
-                <Field>
-                  <FieldLabel htmlFor="setup-password">初始密码</FieldLabel>
-                  <Input
-                    id="setup-password"
-                    type="password"
-                    autoComplete="new-password"
-                    autoFocus
-                    required
-                    minLength={8}
-                    maxLength={72}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={submitting}
-                    aria-describedby="setup-password-description"
-                  />
-                  <FieldDescription id="setup-password-description">
-                    至少 8 位，包含大写字母、小写字母、数字、符号中的 3 类。
-                  </FieldDescription>
-                </Field>
-                <Field data-invalid={mismatch || undefined}>
-                  <FieldLabel htmlFor="setup-confirmation">确认密码</FieldLabel>
-                  <Input
-                    id="setup-confirmation"
-                    type="password"
-                    autoComplete="new-password"
-                    required
-                    value={confirmation}
-                    onChange={(e) => {
-                      setConfirmation(e.target.value)
-                      setMismatch(false)
-                    }}
-                    disabled={submitting}
-                    aria-invalid={mismatch || undefined}
-                    aria-describedby={mismatch ? "setup-confirmation-error" : undefined}
-                  />
-                  {mismatch && (
-                    <FieldError id="setup-confirmation-error">两次输入的密码不一致</FieldError>
+                <form.Field name="password">
+                  {(field) => (
+                    <FormField
+                      field={field}
+                      label="初始密码"
+                      idPrefix="setup"
+                      required
+                      description="至少 8 位，包含大写字母、小写字母、数字、符号中的 3 类。"
+                    >
+                      {(inputProps) => (
+                        <Input
+                          {...inputProps}
+                          type="password"
+                          autoComplete="new-password"
+                          autoFocus
+                          value={field.state.value}
+                          onChange={(e) => {
+                            if (setupError) setSetupError("")
+                            field.handleChange(e.target.value)
+                          }}
+                          onBlur={field.handleBlur}
+                          disabled={isSubmitting}
+                        />
+                      )}
+                    </FormField>
                   )}
-                </Field>
-                <Button type="submit" size="lg" className="w-full" disabled={submitting}>
-                  {submitting ? <Spinner /> : <ArrowRight data-icon="inline-start" />}
-                  {submitting ? "正在初始化…" : "创建管理员"}
+                </form.Field>
+                <form.Field name="confirmation">
+                  {(field) => (
+                    <FormField
+                      field={field}
+                      label="确认密码"
+                      idPrefix="setup"
+                      required
+                    >
+                      {(inputProps) => (
+                        <Input
+                          {...inputProps}
+                          type="password"
+                          autoComplete="new-password"
+                          value={field.state.value}
+                          onChange={(e) => {
+                            if (setupError) setSetupError("")
+                            field.handleChange(e.target.value)
+                          }}
+                          onBlur={field.handleBlur}
+                          disabled={isSubmitting}
+                        />
+                      )}
+                    </FormField>
+                  )}
+                </form.Field>
+                <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+                  {isSubmitting ? <Spinner /> : <ArrowRight data-icon="inline-start" />}
+                  {isSubmitting ? "正在初始化…" : "创建管理员"}
                 </Button>
               </FieldGroup>
             </form>

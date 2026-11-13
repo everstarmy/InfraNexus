@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useStore } from "@tanstack/react-form";
 import {
   Info,
   Copy,
@@ -8,6 +9,7 @@ import {
   UserPlus,
   UserRoundPen,
 } from "lucide-react";
+import { z } from "zod";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -20,11 +22,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Field,
   FieldDescription,
-  FieldError,
   FieldGroup,
-  FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -37,11 +36,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { DepartmentSelect } from "@/components/common/department-select";
 import { useConfirm } from "@/components/common/confirm-dialog";
 import { PasswordStrength } from "@/components/common/password-strength";
-import {
-  getErrorMessage,
-  getErrorStatus,
-  getFieldErrors,
-} from "@/lib/api-error";
+import { FormField, useAppForm } from "@/components/form";
+import { getErrorStatus } from "@/lib/api-error";
 import { notify } from "@/lib/notify";
 import { generatePassword, meetsPolicy } from "@/lib/password";
 import { cn } from "@/lib/utils";
@@ -61,6 +57,44 @@ interface UserFormDialogProps {
   defaultDepartmentId?: string | null;
 }
 
+interface UserFormValues {
+  username: string;
+  email: string;
+  nickname: string;
+  password: string;
+  departmentId: string | null;
+  roleIds: string[];
+}
+
+function createUserFormSchema(editing: boolean) {
+  return z.object({
+    username: editing
+      ? z.string()
+      : z
+          .string()
+          .trim()
+          .min(3, "用户名需为 3-32 个字符")
+          .max(32, "用户名需为 3-32 个字符"),
+    nickname: z.string().trim().max(64, "姓名 / 昵称不能超过 64 个字符"),
+    email: z
+      .string()
+      .trim()
+      .min(1, "请输入有效的邮箱地址")
+      .email("请输入有效的邮箱地址")
+      .max(128, "邮箱长度不能超过 128 个字符"),
+    password: editing
+      ? z.string()
+      : z
+          .string()
+          .max(128, "密码不能超过 128 个字符")
+          .refine(meetsPolicy, "密码强度不足，请按上方规则调整或使用随机生成"),
+    departmentId: z.string().nullable(),
+    roleIds: editing
+      ? z.array(z.string())
+      : z.array(z.string()).max(50, "最多只能分配 50 个初始角色"),
+  });
+}
+
 export function UserFormDialog({
   open,
   onOpenChange,
@@ -74,81 +108,40 @@ export function UserFormDialog({
   const { can } = useAuth();
   const confirm = useConfirm();
   const editing = !!user;
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [nickname, setNickname] = useState("");
-  const [password, setPassword] = useState("");
-  const [departmentId, setDepartmentId] = useState<string | null>(null);
-  const [roleIds, setRoleIds] = useState<string[]>([]);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [formError, setFormError] = useState("");
   const [editRevision, setEditRevision] = useState(0);
-  const [baseline, setBaseline] = useState({
-    username: "",
-    email: "",
-    nickname: "",
-    departmentId: null as string | null,
-  });
   const [conflictUser, setConflictUser] = useState<UserDTO | null>(null);
-  const initializedUserRef = useRef<string | null | undefined>(undefined);
+  const [conflictDismissed, setConflictDismissed] = useState(false);
   const formErrorRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) {
-      initializedUserRef.current = undefined;
-      return;
-    }
-    const userID = user?.id ?? null;
-    if (initializedUserRef.current === userID) return;
-    initializedUserRef.current = userID;
-    const initial = {
+  const defaultValues = useMemo<UserFormValues>(
+    () => ({
       username: user?.username ?? "",
       email: user?.email ?? "",
       nickname: user?.nickname ?? "",
+      password: "",
       departmentId: user
         ? (user.department_id ?? null)
         : (defaultDepartmentId ?? null),
-    };
-    setBaseline(initial);
-    setUsername(initial.username);
-    setEmail(initial.email);
-    setNickname(initial.nickname);
-    setPassword("");
-    setDepartmentId(initial.departmentId);
-    setRoleIds([]);
-    setFieldErrors({});
-    setFormError("");
-    setConflictUser(null);
-    setEditRevision(user?.edit_revision ?? 0);
-  }, [open, user?.id, defaultDepartmentId]);
+      roleIds: [],
+    }),
+    [user, defaultDepartmentId],
+  );
+
+  const schema = useMemo(() => createUserFormSchema(editing), [editing]);
 
   useEffect(() => {
-    if (formError) formErrorRef.current?.focus();
-  }, [formError]);
-
-  const isDirty =
-    open &&
-    (username !== baseline.username ||
-      email.trim() !== baseline.email ||
-      nickname.trim() !== baseline.nickname ||
-      (!editing &&
-        (password !== "" ||
-          departmentId !== baseline.departmentId ||
-          roleIds.length > 0)));
-  const conflictDifferences = conflictUser
-    ? [
-        {
-          label: "昵称",
-          draft: nickname.trim(),
-          current: conflictUser.nickname ?? "",
-        },
-        { label: "邮箱", draft: email.trim(), current: conflictUser.email },
-      ].filter((item) => item.draft !== item.current)
-    : [];
-  useUnsavedChanges(isDirty, "用户资料尚未保存。离开后这些更改将丢失。");
+    if (!open) {
+      setConflictUser(null);
+      setConflictDismissed(false);
+      return;
+    }
+    setEditRevision(user?.edit_revision ?? 0);
+    setConflictUser(null);
+    setConflictDismissed(false);
+  }, [open, user?.id, user?.edit_revision]);
 
   const mutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (values: UserFormValues) => {
       if (editing && user) {
         const payload: {
           nickname?: string;
@@ -157,19 +150,22 @@ export function UserFormDialog({
         } = {
           expected_revision: editRevision,
         };
-        if (email.trim() !== baseline.email) payload.email = email.trim();
-        if (nickname.trim() !== baseline.nickname)
-          payload.nickname = nickname.trim();
+        if (values.email.trim() !== (user.email ?? "")) {
+          payload.email = values.email.trim();
+        }
+        if (values.nickname.trim() !== (user.nickname ?? "")) {
+          payload.nickname = values.nickname.trim();
+        }
         return usersService.update(user.id, payload);
       }
       return usersService.create({
-        username: username.trim(),
-        email: email.trim(),
-        password,
-        nickname: nickname.trim() || undefined,
+        username: values.username.trim(),
+        email: values.email.trim(),
+        password: values.password,
+        nickname: values.nickname.trim() || undefined,
         expected_revision: treeRevision,
-        ...(can("users:move") && { department_id: departmentId }),
-        ...(can("users:assign-roles") && { role_ids: roleIds }),
+        ...(can("users:move") && { department_id: values.departmentId }),
+        ...(can("users:assign-roles") && { role_ids: values.roleIds }),
       });
     },
     onSuccess: (res) => {
@@ -184,19 +180,29 @@ export function UserFormDialog({
         void queryClient.invalidateQueries({ queryKey: ["departments"] });
         void queryClient.invalidateQueries({ queryKey: ["roles"] });
       }
-      setBaseline({
-        username: res.data.username,
-        email: res.data.email,
-        nickname: res.data.nickname ?? "",
-        departmentId: res.data.department_id ?? null,
-      });
       onOpenChange(false);
     },
+  });
+
+  const { form, formRef, submit, hasChanges, formError } = useAppForm<UserFormValues>({
+    open,
+    resetKey: user?.id ?? "new",
+    defaultValues,
+    schema,
+    serverFieldNames: {
+      username: "username",
+      email: "email",
+      nickname: "nickname",
+      password: "password",
+      department_id: "departmentId",
+      role_ids: "roleIds",
+    },
+    fallbackErrorMessage: editing ? "更新用户失败" : "创建用户失败",
+    onSubmit: async (values) => {
+      setConflictDismissed(false);
+      await mutation.mutateAsync(values);
+    },
     onError: (error) => {
-      setFieldErrors(getFieldErrors(error));
-      setFormError(
-        getErrorMessage(error, editing ? "更新用户失败" : "创建用户失败"),
-      );
       if (editing && user && getErrorStatus(error) === 409) {
         void usersService
           .get(user.id)
@@ -206,30 +212,43 @@ export function UserFormDialog({
     },
   });
 
+  const draftEmail = useStore(form.store, (state) => state.values.email);
+  const draftNickname = useStore(form.store, (state) => state.values.nickname);
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting);
+  const busy = mutation.isPending || isSubmitting;
+
+  const visibleFormError = conflictDismissed ? undefined : formError;
+
+  useEffect(() => {
+    if (visibleFormError) formErrorRef.current?.focus();
+  }, [visibleFormError]);
+
+  const conflictDifferences = conflictUser
+    ? [
+        {
+          label: "昵称",
+          draft: draftNickname.trim(),
+          current: conflictUser.nickname ?? "",
+        },
+        {
+          label: "邮箱",
+          draft: draftEmail.trim(),
+          current: conflictUser.email,
+        },
+      ].filter((item) => item.draft !== item.current)
+    : [];
+
+  useUnsavedChanges(
+    open && hasChanges,
+    "用户资料尚未保存。离开后这些更改将丢失。",
+  );
+
   const directoryManaged = editing && user?.auth_type !== "local";
-  const canSubmit = editing
-    ? editRevision > 0 && !!email.trim() && isDirty && !mutation.isPending
-    : true;
-  const clearFieldError = (field: string) =>
-    setFieldErrors((prev) => {
-      if (!prev[field]) return prev;
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
-  // Creation keeps the submit button available and explains what is missing,
-  // instead of a silently disabled button.
-  const validateCreate = () => {
-    const errors: Record<string, string> = {};
-    const name = username.trim();
-    if (name.length < 3 || name.length > 32) errors.username = "invalid";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) errors.email = "invalid";
-    if (!meetsPolicy(password)) errors.password = "weak";
-    return errors;
-  };
+  const canSubmit = editing ? editRevision > 0 && hasChanges && !busy : !busy;
+
   const requestClose = async () => {
-    if (mutation.isPending) return;
-    if (isDirty) {
+    if (busy) return;
+    if (hasChanges) {
       const discard = await confirm({
         tone: "default",
         title: "放弃用户更改？",
@@ -264,22 +283,18 @@ export function UserFormDialog({
         </DialogHeader>
 
         <form
+          ref={formRef}
+          noValidate
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!editing) {
-              const errors = validateCreate();
-              const first = (["username", "email", "password"] as const).find((field) => errors[field]);
-              if (first) {
-                setFieldErrors(errors);
-                document.getElementById(`user-${first}`)?.focus();
-                return;
-              }
+            e.stopPropagation();
+            if (!editing || canSubmit) {
+              void submit();
             }
-            if (canSubmit) mutation.mutate();
           }}
         >
-          {formError && (
+          {visibleFormError && (
             <Alert
               ref={formErrorRef}
               tabIndex={-1}
@@ -288,7 +303,7 @@ export function UserFormDialog({
               variant="destructive"
             >
               <Info />
-              <AlertDescription>{formError}</AlertDescription>
+              <AlertDescription>{visibleFormError}</AlertDescription>
             </Alert>
           )}
           {conflictUser && (
@@ -315,7 +330,7 @@ export function UserFormDialog({
                   onClick={() => {
                     setEditRevision(conflictUser.edit_revision);
                     setConflictUser(null);
-                    setFormError("");
+                    setConflictDismissed(true);
                   }}
                 >
                   确认保留草稿并继续编辑
@@ -335,167 +350,181 @@ export function UserFormDialog({
 
           <FieldGroup className="gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field data-invalid={!!fieldErrors.username || undefined}>
-                <FieldLabel htmlFor="user-username">用户名</FieldLabel>
-                <Input
-                  id="user-username"
-                  value={username}
-                  onChange={(e) => {
-                    setUsername(e.target.value);
-                    clearFieldError("username");
-                  }}
-                  placeholder="如 zhangsan"
-                  disabled={editing}
-                  autoComplete="off"
-                  aria-invalid={!!fieldErrors.username || undefined}
-                  aria-describedby={
-                    fieldErrors.username ? "user-username-error" : undefined
-                  }
-                />
-                {fieldErrors.username && (
-                  <FieldError id="user-username-error">
-                    用户名需为 3-32 个字符
-                  </FieldError>
+              <form.Field name="username">
+                {(field) => (
+                  <FormField field={field} label="用户名" idPrefix="user" required={!editing}>
+                    {(inputProps) => (
+                      <Input
+                        {...inputProps}
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                        placeholder="如 zhangsan"
+                        disabled={editing || busy}
+                        autoComplete="off"
+                      />
+                    )}
+                  </FormField>
                 )}
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="user-nickname">姓名 / 昵称</FieldLabel>
-                <Input
-                  id="user-nickname"
-                  value={nickname}
-                  onChange={(e) => setNickname(e.target.value)}
-                  placeholder="如 张三"
-                />
-              </Field>
+              </form.Field>
+              <form.Field name="nickname">
+                {(field) => (
+                  <FormField field={field} label="姓名 / 昵称" idPrefix="user">
+                    {(inputProps) => (
+                      <Input
+                        {...inputProps}
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        onBlur={field.handleBlur}
+                        placeholder="如 张三"
+                        disabled={busy}
+                      />
+                    )}
+                  </FormField>
+                )}
+              </form.Field>
             </div>
-            <Field data-invalid={!!fieldErrors.email || undefined}>
-              <FieldLabel htmlFor="user-email">电子邮箱</FieldLabel>
-              <Input
-                id="user-email"
-                type="email"
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  clearFieldError("email");
-                }}
-                placeholder="name@company.com"
-                aria-invalid={!!fieldErrors.email || undefined}
-                aria-describedby={
-                  fieldErrors.email ? "user-email-error" : undefined
-                }
-              />
-              {fieldErrors.email && (
-                <FieldError id="user-email-error">
-                  请输入有效的邮箱地址
-                </FieldError>
+            <form.Field name="email">
+              {(field) => (
+                <FormField field={field} label="电子邮箱" idPrefix="user" required>
+                  {(inputProps) => (
+                    <Input
+                      {...inputProps}
+                      type="email"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      placeholder="name@company.com"
+                      disabled={busy}
+                    />
+                  )}
+                </FormField>
               )}
-            </Field>
+            </form.Field>
             {!editing && can("users:move") && (
-              <Field>
-                <FieldLabel htmlFor="user-department">所属部门</FieldLabel>
-                <DepartmentSelect
-                  id="user-department"
-                  nodes={departments}
-                  value={departmentId}
-                  onChange={setDepartmentId}
-                  placeholder="暂不分配部门"
-                  allowClear
-                />
-              </Field>
+              <form.Field name="departmentId">
+                {(field) => (
+                  <FormField field={field} label="所属部门" id="user-department" idPrefix="user">
+                    {(inputProps) => (
+                      <DepartmentSelect
+                        id={inputProps.id}
+                        nodes={departments}
+                        value={field.state.value}
+                        onChange={(val) => field.handleChange(val)}
+                        placeholder="暂不分配部门"
+                        allowClear
+                      />
+                    )}
+                  </FormField>
+                )}
+              </form.Field>
             )}
 
             {!editing && (
               <>
-                <Field data-invalid={!!fieldErrors.password || undefined}>
-                  <FieldLabel htmlFor="user-password">初始密码</FieldLabel>
-                  <InputGroup>
-                    <InputGroupInput
-                      id="user-password"
-                      type="text"
-                      value={password}
-                      onChange={(e) => {
-                        setPassword(e.target.value);
-                        clearFieldError("password");
-                      }}
-                      placeholder="至少 8 位，含 3 类字符"
-                      autoComplete="new-password"
-                      spellCheck={false}
-                      className="font-mono placeholder:font-sans"
-                      aria-invalid={!!fieldErrors.password || undefined}
-                      aria-describedby={fieldErrors.password ? "user-password-error" : undefined}
-                    />
-                    <InputGroupAddon align="inline-end">
-                      {password && (
-                        <InputGroupButton
-                          size="icon-xs"
-                          aria-label="复制密码"
-                          title="复制密码"
-                          onClick={() => {
-                            void navigator.clipboard
-                              ?.writeText(password)
-                              .then(() => notify.success("初始密码已复制"))
-                              .catch(() => notify.error("复制失败", "请手动选择密码文本复制"));
-                          }}
-                        >
-                          <Copy />
-                        </InputGroupButton>
+                <form.Field name="password">
+                  {(field) => (
+                    <FormField
+                      field={field}
+                      label="初始密码"
+                      idPrefix="user"
+                      required
+                    >
+                      {(inputProps) => (
+                        <>
+                          <InputGroup>
+                            <InputGroupInput
+                              {...inputProps}
+                              type="text"
+                              value={field.state.value}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                              onBlur={field.handleBlur}
+                              placeholder="至少 8 位，含 3 类字符"
+                              autoComplete="new-password"
+                              spellCheck={false}
+                              disabled={busy}
+                              className="font-mono placeholder:font-sans"
+                            />
+                            <InputGroupAddon align="inline-end">
+                              {field.state.value && (
+                                <InputGroupButton
+                                  size="icon-xs"
+                                  aria-label="复制密码"
+                                  title="复制密码"
+                                  onClick={() => {
+                                    void navigator.clipboard
+                                      ?.writeText(field.state.value)
+                                      .then(() => notify.success("初始密码已复制"))
+                                      .catch(() =>
+                                        notify.error("复制失败", "请手动选择密码文本复制"),
+                                      );
+                                  }}
+                                >
+                                  <Copy />
+                                </InputGroupButton>
+                              )}
+                              <InputGroupButton
+                                size="xs"
+                                disabled={busy}
+                                onClick={() => {
+                                  field.handleChange(generatePassword());
+                                }}
+                              >
+                                <RefreshCw />
+                                随机生成
+                              </InputGroupButton>
+                            </InputGroupAddon>
+                          </InputGroup>
+                          <PasswordStrength password={field.state.value} />
+                        </>
                       )}
-                      <InputGroupButton
-                        size="xs"
-                        onClick={() => {
-                          setPassword(generatePassword());
-                          clearFieldError("password");
-                        }}
-                      >
-                        <RefreshCw />
-                        随机生成
-                      </InputGroupButton>
-                    </InputGroupAddon>
-                  </InputGroup>
-                  <PasswordStrength password={password} />
-                  {fieldErrors.password && (
-                    <FieldError id="user-password-error">
-                      密码强度不足，请按上方规则调整或使用随机生成
-                    </FieldError>
+                    </FormField>
                   )}
-                </Field>
+                </form.Field>
                 {can("users:assign-roles") && (
-                <Field>
-                  <FieldLabel>初始角色</FieldLabel>
-                  <FieldDescription>可多选，角色的权限取并集</FieldDescription>
-                  <div className="grid max-h-40 gap-1.5 overflow-y-auto sm:grid-cols-2">
-                    {roles.map((role) => {
-                      const checked = roleIds.includes(role.id);
-                      return (
-                        <label
-                          key={role.id}
-                          className={cn(
-                            "flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-sm transition-colors",
-                            checked
-                              ? "border-primary/40 bg-primary/5"
-                              : "hover:bg-muted/50",
-                          )}
-                        >
-                          <Checkbox
-                            checked={checked}
-                            onCheckedChange={(v) =>
-                              setRoleIds((prev) =>
-                                v
-                                  ? [...prev, role.id]
-                                  : prev.filter((id) => id !== role.id),
-                              )
-                            }
-                          />
-                          <ShieldCheck className="size-3.5 text-muted-foreground" />
-                          <span className="truncate">{role.name}</span>
-                          <code className="ml-auto font-mono text-[10px] text-muted-foreground">
-                            {role.code}
-                          </code>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </Field>
+                  <form.Field name="roleIds">
+                    {(field) => (
+                      <FormField field={field} label="初始角色" idPrefix="user">
+                        {() => (
+                          <>
+                            <FieldDescription>可多选，角色的权限取并集</FieldDescription>
+                            <div className="grid max-h-40 gap-1.5 overflow-y-auto sm:grid-cols-2">
+                              {roles.map((role) => {
+                                const checked = field.state.value.includes(role.id);
+                                return (
+                                  <label
+                                    key={role.id}
+                                    className={cn(
+                                      "flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-sm transition-colors",
+                                      checked
+                                        ? "border-primary/40 bg-primary/5"
+                                        : "hover:bg-muted/50",
+                                    )}
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      disabled={busy}
+                                      onCheckedChange={(v) => {
+                                        const next = v
+                                          ? [...field.state.value, role.id]
+                                          : field.state.value.filter((id) => id !== role.id);
+                                        field.handleChange(next);
+                                      }}
+                                    />
+                                    <ShieldCheck className="size-3.5 text-muted-foreground" />
+                                    <span className="truncate">{role.name}</span>
+                                    <code className="ml-auto font-mono text-[10px] text-muted-foreground">
+                                      {role.code}
+                                    </code>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
+                      </FormField>
+                    )}
+                  </form.Field>
                 )}
               </>
             )}
@@ -506,12 +535,12 @@ export function UserFormDialog({
               type="button"
               variant="outline"
               onClick={() => void requestClose()}
-              disabled={mutation.isPending}
+              disabled={busy}
             >
               取消
             </Button>
-            <Button type="submit" disabled={!canSubmit || mutation.isPending}>
-              {mutation.isPending && <Spinner />}
+            <Button type="submit" disabled={!canSubmit || busy}>
+              {busy && <Spinner />}
               {editing ? "保存修改" : "创建用户"}
             </Button>
           </DialogFooter>

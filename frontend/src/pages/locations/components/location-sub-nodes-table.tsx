@@ -440,14 +440,6 @@ export function LocationSubNodesTable({
             ? `点击上方「新建${childTypeLabel}」添加第一个${childTypeLabel}`
             : `当前位置下暂未创建${childTypeLabel}`
         }
-        emptyAction={
-          canCreate ? (
-            <Button size="sm" onClick={() => onCreateChild(childType, parentNode)}>
-              <Plus className="mr-1.5 size-3.5" />
-              新建{childTypeLabel}
-            </Button>
-          ) : undefined
-        }
       />
     </DataTableCard>
   )

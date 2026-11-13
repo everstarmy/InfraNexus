@@ -180,13 +180,7 @@ export default function LocationsPage() {
       ]
     : [{ uid: "root", name: "全部数据中心", type: null }]
 
-  // Allowed child type for current selection
-  const childType = selectedNode ? nextChildType[selectedNode.type] : "datacenter"
-  const canCreateChild =
-    childType &&
-    can("locations:nodes:create") &&
-    can(`locations:nodes:type:${childType}`) &&
-    (!selectedNode || selectedNode.status === 1)
+  // Allowed child type check moved into LocationSubNodesTable to avoid duplicate create actions
 
   return (
     <div className="table-workspace flex min-w-0 flex-col gap-2">
@@ -348,23 +342,6 @@ export default function LocationsPage() {
             {/* Node Operations Buttons */}
             {selectedNode ? (
               <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
-                {/* 1. Primary Action: Always visible */}
-                {canCreateChild && childType && (
-                  <Button
-                    size="sm"
-                    className="h-7 text-xs gap-1 shadow-2xs"
-                    onClick={() =>
-                      setFormDialog({
-                        open: true,
-                        type: childType,
-                        parent: selectedNode,
-                      })
-                    }
-                  >
-                    <Plus className="size-3" />
-                    <span>新建{locationTypeLabels[childType]}</span>
-                  </Button>
-                )}
 
                 {/* 2. Secondary Action: Edit - Always visible */}
                 {can("locations:nodes:update") && (
@@ -539,26 +516,7 @@ export default function LocationsPage() {
                   </DropdownMenu>
                 </div>
               </div>
-            ) : (
-              canCreateChild && childType === "datacenter" && (
-                <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
-                  <Button
-                    size="sm"
-                    className="h-7 text-xs gap-1 shadow-2xs"
-                    onClick={() =>
-                      setFormDialog({
-                        open: true,
-                        type: "datacenter",
-                        parent: null,
-                      })
-                    }
-                  >
-                    <Plus className="size-3" />
-                    <span>新建数据中心</span>
-                  </Button>
-                </div>
-              )
-            )}
+            ) : null}
           </div>
 
           {/* Node Summary Meta Panel if Datacenter or Room or Rack */}

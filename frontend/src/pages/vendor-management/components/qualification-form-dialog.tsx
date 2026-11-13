@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FileBadge } from "lucide-react"
+import { z } from "zod"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -11,14 +12,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { FieldGroup } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import {
   NativeSelect,
   NativeSelectOption,
 } from "@/components/ui/native-select"
-import { getErrorMessage } from "@/lib/api-error"
+import { useConfirm } from "@/components/common/confirm-dialog"
+import { FormField, useAppForm } from "@/components/form"
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes"
 import { notify } from "@/lib/notify"
 import {
   qualificationsService,
@@ -26,6 +29,78 @@ import {
   type VendorQualificationDTO,
   type QualificationKind,
 } from "@/services/vendor-management"
+
+const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
+const createQualificationSchema = (editing: boolean) =>
+  z
+    .object({
+      code: editing
+        ? z.string()
+        : z
+            .string()
+            .trim()
+            .min(2, "资质编码至少 2 个字符")
+            .max(64, "资质编码不能超过 64 个字符")
+            .regex(CODE_PATTERN, "以字母开头，仅含字母、数字及 _ . : -"),
+      name: z
+        .string()
+        .trim()
+        .min(2, "资质名称至少 2 个字符")
+        .max(128, "资质名称不能超过 128 个字符"),
+      kind: z.enum(["oem_authorization", "media_destruction"]),
+      manufacturerId: z.string(),
+      certType: z.string().trim().min(1, "资质/认证类型不能为空").max(64, "认证类型不能超过 64 个字符"),
+      certNo: z.string().trim().min(1, "证书/授权编号不能为空").max(128, "证书编号不能超过 128 个字符"),
+      level: z.string().trim().max(64, "授权等级不能超过 64 个字符"),
+      validFrom: z
+        .string()
+        .trim()
+        .regex(DATE_PATTERN, "生效起始日期必须为 YYYY-MM-DD 格式"),
+      validUntil: z
+        .string()
+        .trim()
+        .regex(DATE_PATTERN, "截止日期必须为 YYYY-MM-DD 格式"),
+      evidenceRef: z.string().trim().min(1, "证明材料文件编号/归档编号不能为空").max(256, "证明材料引用不能超过 256 个字符"),
+    })
+    .refine(
+      (data) => {
+        if (data.kind === "oem_authorization") {
+          return Boolean(data.manufacturerId)
+        }
+        return true
+      },
+      {
+        message: "原厂授权资质必须指定授权厂商",
+        path: ["manufacturerId"],
+      },
+    )
+    .refine(
+      (data) => {
+        if (DATE_PATTERN.test(data.validFrom) && DATE_PATTERN.test(data.validUntil)) {
+          return data.validUntil >= data.validFrom
+        }
+        return true
+      },
+      {
+        message: "截止日期不能早于生效起始日期",
+        path: ["validUntil"],
+      },
+    )
+
+type QualificationFormValues = {
+  code: string
+  name: string
+  kind: QualificationKind
+  manufacturerId: string
+  certType: string
+  certNo: string
+  level: string
+  validFrom: string
+  validUntil: string
+  evidenceRef: string
+}
 
 export function QualificationFormDialog({
   open,
@@ -39,272 +114,378 @@ export function QualificationFormDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
   const editing = Boolean(qualification)
 
-  const [code, setCode] = useState("")
-  const [name, setName] = useState("")
-  const [kind, setKind] = useState<QualificationKind>("oem_authorization")
-  const [manufacturerId, setManufacturerId] = useState("")
-  const [certType, setCertType] = useState("")
-  const [certNo, setCertNo] = useState("")
-  const [level, setLevel] = useState("")
-  const [validFrom, setValidFrom] = useState("")
-  const [validUntil, setValidUntil] = useState("")
-  const [evidenceRef, setEvidenceRef] = useState("")
-  const [error, setError] = useState("")
+  const qualificationSchema = useMemo(() => createQualificationSchema(editing), [editing])
+  const defaultValues = useMemo<QualificationFormValues>(
+    () => ({
+      code: qualification?.code ?? "",
+      name: qualification?.name ?? "",
+      kind: qualification?.kind ?? "oem_authorization",
+      manufacturerId: qualification?.manufacturer_id ?? "",
+      certType: qualification?.certificate_type ?? "",
+      certNo: qualification?.certificate_no ?? "",
+      level: qualification?.level ?? "",
+      validFrom: qualification?.valid_from ?? "",
+      validUntil: qualification?.valid_until ?? "",
+      evidenceRef: qualification?.evidence_ref ?? "",
+    }),
+    [qualification],
+  )
 
   const { data: mfrData } = useQuery({
     queryKey: ["manufacturers", "all"],
     queryFn: ({ signal }) => manufacturersService.list({ page_size: 100 }, signal),
-    enabled: open && kind === "oem_authorization",
+    enabled: open,
   })
 
-  useEffect(() => {
-    if (!open) return
-    setCode(qualification?.code ?? "")
-    setName(qualification?.name ?? "")
-    setKind(qualification?.kind ?? "oem_authorization")
-    setManufacturerId(qualification?.manufacturer_id ?? "")
-    setCertType(qualification?.certificate_type ?? "")
-    setCertNo(qualification?.certificate_no ?? "")
-    setLevel(qualification?.level ?? "")
-    setValidFrom(qualification?.valid_from ?? "")
-    setValidUntil(qualification?.valid_until ?? "")
-    setEvidenceRef(qualification?.evidence_ref ?? "")
-    setError("")
-  }, [open, qualification])
-
-  const canSubmit =
-    name.trim().length >= 2 &&
-    certType.trim().length >= 1 &&
-    certNo.trim().length >= 1 &&
-    validFrom.length === 10 &&
-    validUntil.length === 10 &&
-    evidenceRef.trim().length >= 1 &&
-    (kind === "media_destruction" || Boolean(manufacturerId)) &&
-    (editing || code.trim().length >= 2)
-
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (values: QualificationFormValues) => {
       const payload: Partial<VendorQualificationDTO> = {
         vendor_id: vendorId,
-        name: name.trim(),
-        kind,
-        manufacturer_id: kind === "oem_authorization" ? manufacturerId : undefined,
-        certificate_type: certType.trim(),
-        certificate_no: certNo.trim(),
-        level: level.trim() || undefined,
-        valid_from: validFrom,
-        valid_until: validUntil,
-        evidence_ref: evidenceRef.trim(),
+        name: values.name.trim(),
+        kind: values.kind,
+        manufacturer_id: values.kind === "oem_authorization" ? values.manufacturerId : undefined,
+        certificate_type: values.certType.trim(),
+        certificate_no: values.certNo.trim(),
+        level: values.level.trim() || undefined,
+        valid_from: values.validFrom,
+        valid_until: values.validUntil,
+        evidence_ref: values.evidenceRef.trim(),
       }
       if (editing && qualification) {
         return qualificationsService.update(qualification, payload)
       }
       return qualificationsService.create({
         ...payload,
-        code: code.trim(),
+        code: values.code.trim(),
       })
     },
     onSuccess: (res) => {
       notify.success(
-        editing ? "供应商资质已更新" : "供应商资质已登记",
+        editing ? "资质证书已更新" : "资质证书已录入",
         res.data.name
       )
       void queryClient.invalidateQueries({ queryKey: ["qualifications"] })
       onOpenChange(false)
     },
-    onError: (err) =>
-      setError(
-        getErrorMessage(err, editing ? "更新资质失败" : "添加资质失败")
-      ),
   })
 
+  const { form, formError, formRef, submit, hasChanges } = useAppForm<QualificationFormValues>({
+    defaultValues,
+    resetKey: qualification?.id ?? `create:${vendorId}`,
+    schema: qualificationSchema,
+    serverFieldNames: {
+      manufacturer_id: "manufacturerId",
+      certificate_type: "certType",
+      certificate_no: "certNo",
+      valid_from: "validFrom",
+      valid_until: "validUntil",
+      evidence_ref: "evidenceRef",
+    },
+    open,
+    onSubmit: async (values) => {
+      await mutation.mutateAsync(values)
+    },
+    fallbackErrorMessage: editing ? "更新资质失败" : "录入资质失败",
+  })
+
+  const isDirty = open && hasChanges
+  useUnsavedChanges(isDirty, "资质信息尚未保存，关闭后这些更改将丢失。")
+
+  const requestClose = async () => {
+    if (mutation.isPending) return
+    if (isDirty) {
+      const discard = await confirm({
+        tone: "default",
+        title: "放弃更改？",
+        description: "当前表单尚未保存，离开后未保存的更改将丢失。",
+        confirmText: "放弃更改",
+      })
+      if (!discard) return
+    }
+    onOpenChange(false)
+  }
+
+  const manufacturers = mfrData?.data.items ?? []
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) void requestClose()
+        else onOpenChange(true)
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <FileBadge className="size-5 text-primary" />
             <DialogTitle className="text-base font-semibold">
-              {editing ? "编辑供应商资质" : "登记供应商资质"}
+              {editing ? "编辑资质与认证" : "录入供应商资质认证"}
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs">
-            原厂授权函或数据介质销毁保密资质，含有效期与证明材料归档
+            原厂维保/代理授权函及国家涉密介质销毁专项资质档案
           </DialogDescription>
         </DialogHeader>
 
-        {error && (
+        {formError && (
           <Alert variant="destructive" className="py-2 text-xs">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{formError}</AlertDescription>
           </Alert>
         )}
 
         <form
+          ref={formRef}
+          noValidate
           onSubmit={(e) => {
             e.preventDefault()
-            if (canSubmit) mutation.mutate()
+            e.stopPropagation()
+            void submit()
           }}
           className="space-y-3 py-2"
         >
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">资质标识 (Code) *</FieldLabel>
-              <Input
-                placeholder="如: qual-hwh-csp"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                disabled={editing || mutation.isPending}
-                className="h-8 text-xs font-mono"
-                required
-              />
-            </Field>
+            <form.Field name="code">
+              {(field) => (
+                <FormField field={field} label="资质编码" required={!editing} idPrefix="qual">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: qual-h3c-gold"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={editing || mutation.isPending}
+                      className="h-8 text-xs font-mono"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">资质名称 *</FieldLabel>
-              <Input
-                placeholder="如: 华为金牌CSP认证"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-                required
-              />
-            </Field>
+            <form.Field name="name">
+              {(field) => (
+                <FormField field={field} label="资质证书名称" required idPrefix="qual">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: 新华三金牌维保服务商授权"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
           </FieldGroup>
 
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">资质大类 *</FieldLabel>
-              <NativeSelect
-                value={kind}
-                onChange={(e) => setKind(e.target.value as QualificationKind)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              >
-                <NativeSelectOption value="oem_authorization">
-                  原厂维保/代理授权 (OEM)
-                </NativeSelectOption>
-                <NativeSelectOption value="media_destruction">
-                  介质/数据销毁专项资质
-                </NativeSelectOption>
-              </NativeSelect>
-            </Field>
+            <form.Field name="kind">
+              {(field) => (
+                <FormField field={field} label="资质类别" required idPrefix="qual">
+                  {(props) => (
+                    <NativeSelect
+                      {...props}
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value as QualificationKind)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    >
+                      <NativeSelectOption value="oem_authorization">
+                        原厂维保/代理授权 (OEM)
+                      </NativeSelectOption>
+                      <NativeSelectOption value="media_destruction">
+                        介质/数据销毁专项资质
+                      </NativeSelectOption>
+                    </NativeSelect>
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            {kind === "oem_authorization" && (
-              <Field>
-                <FieldLabel className="text-xs">授权制造商 *</FieldLabel>
-                <NativeSelect
-                  value={manufacturerId}
-                  onChange={(e) => setManufacturerId(e.target.value)}
-                  disabled={mutation.isPending}
-                  className="h-8 text-xs"
-                  required
-                >
-                  <NativeSelectOption value="">请选择制造商</NativeSelectOption>
-                  {mfrData?.data.items.map((m) => (
-                    <NativeSelectOption key={m.id} value={m.id}>
-                      {m.name} ({m.code})
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-            )}
+            <form.Subscribe selector={(state) => [state.values.kind]}>
+              {([currentKind]) =>
+                currentKind === "oem_authorization" ? (
+                  <form.Field name="manufacturerId">
+                    {(field) => (
+                      <FormField field={field} label="授权厂商" required idPrefix="qual">
+                        {(props) => (
+                          <NativeSelect
+                            {...props}
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onBlur={field.handleBlur}
+                            disabled={mutation.isPending}
+                            className="h-8 text-xs"
+                          >
+                            <NativeSelectOption value="">
+                              -- 请选择授权厂商 --
+                            </NativeSelectOption>
+                            {manufacturers.map((m) => (
+                              <NativeSelectOption key={m.id} value={m.id}>
+                                {m.name} ({m.code})
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                        )}
+                      </FormField>
+                    )}
+                  </form.Field>
+                ) : (
+                  <div className="flex items-center text-xs text-muted-foreground pt-4">
+                    通用认证无需绑定具体厂商
+                  </div>
+                )
+              }
+            </form.Subscribe>
           </FieldGroup>
 
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">证书类型描述 *</FieldLabel>
-              <Input
-                placeholder="如: 授权服务商证书"
-                value={certType}
-                onChange={(e) => setCertType(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-                required
-              />
-            </Field>
+            <form.Field name="certType">
+              {(field) => (
+                <FormField field={field} label="资质/认证类型" required idPrefix="qual">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: ISO9001 / 五星级服务商"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">证书/授权编号 *</FieldLabel>
-              <Input
-                placeholder="如: HW-2026-CSP-092"
-                value={certNo}
-                onChange={(e) => setCertNo(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs font-mono"
-                required
-              />
-            </Field>
+            <form.Field name="certNo">
+              {(field) => (
+                <FormField field={field} label="证书 / 授权编号" required idPrefix="qual">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: CN-2026-H3C-09821"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs font-mono"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
           </FieldGroup>
 
           <FieldGroup className="grid grid-cols-3 gap-3">
-            <Field>
-              <FieldLabel className="text-xs">资质等级</FieldLabel>
-              <Input
-                placeholder="如: 钻石级 / 五星"
-                value={level}
-                onChange={(e) => setLevel(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs"
-              />
-            </Field>
+            <form.Field name="level">
+              {(field) => (
+                <FormField field={field} label="授权等级" idPrefix="qual">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      placeholder="如: 金牌 / 一级"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">生效起始日 *</FieldLabel>
-              <Input
-                type="date"
-                value={validFrom}
-                onChange={(e) => setValidFrom(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs font-mono"
-                required
-              />
-            </Field>
+            <form.Field name="validFrom">
+              {(field) => (
+                <FormField field={field} label="生效起始日" required idPrefix="qual">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      type="date"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
 
-            <Field>
-              <FieldLabel className="text-xs">到期截止日 *</FieldLabel>
-              <Input
-                type="date"
-                value={validUntil}
-                onChange={(e) => setValidUntil(e.target.value)}
-                disabled={mutation.isPending}
-                className="h-8 text-xs font-mono"
-                required
-              />
-            </Field>
+            <form.Field name="validUntil">
+              {(field) => (
+                <FormField field={field} label="有效期截止" required idPrefix="qual">
+                  {(props) => (
+                    <Input
+                      {...props}
+                      type="date"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      disabled={mutation.isPending}
+                      className="h-8 text-xs"
+                    />
+                  )}
+                </FormField>
+              )}
+            </form.Field>
           </FieldGroup>
 
-          <Field>
-            <FieldLabel className="text-xs">佐证材料与附件引用 *</FieldLabel>
-            <Input
-              placeholder="如: archive://licenses/hw-csp-2026.pdf"
-              value={evidenceRef}
-              onChange={(e) => setEvidenceRef(e.target.value)}
-              disabled={mutation.isPending}
-              className="h-8 text-xs font-mono"
-              required
-            />
-          </Field>
+          <form.Field name="evidenceRef">
+            {(field) => (
+              <FormField field={field} label="证明材料凭证 / 归档编号" required idPrefix="qual">
+                {(props) => (
+                  <Input
+                    {...props}
+                    placeholder="如: DOC-ARCHIVE-2026-0819"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={field.handleBlur}
+                    disabled={mutation.isPending}
+                    className="h-8 text-xs font-mono"
+                  />
+                )}
+              </FormField>
+            )}
+          </form.Field>
 
           <DialogFooter className="pt-2">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => onOpenChange(false)}
+              onClick={() => void requestClose()}
               disabled={mutation.isPending}
             >
               取消
             </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={!canSubmit || mutation.isPending}
-            >
-              {mutation.isPending ? <Spinner className="size-4" /> : editing ? "保存" : "确定登记"}
-            </Button>
+            <form.Subscribe selector={(state) => [state.isSubmitting]}>
+              {([isSubmitting]) => (
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={isSubmitting || mutation.isPending}
+                >
+                  {isSubmitting || mutation.isPending ? (
+                    <Spinner className="size-4" />
+                  ) : editing ? (
+                    "保存更改"
+                  ) : (
+                    "录入资质"
+                  )}
+                </Button>
+              )}
+            </form.Subscribe>
           </DialogFooter>
         </form>
       </DialogContent>

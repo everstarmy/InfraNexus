@@ -22,6 +22,8 @@ export function DepartmentSelect({
   disableInactive = true,
   className,
   id,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }: {
   nodes: DepartmentNode[]
   value?: string | null
@@ -32,6 +34,8 @@ export function DepartmentSelect({
   disableInactive?: boolean
   className?: string
   id?: string
+  "aria-invalid"?: boolean
+  "aria-describedby"?: string
 }) {
   const [open, setOpen] = React.useState(false)
   const label = departmentPathLabel(nodes, value)
@@ -55,6 +59,8 @@ export function DepartmentSelect({
           render={
             <Button
               id={id}
+              aria-invalid={ariaInvalid}
+              aria-describedby={ariaDescribedBy}
               type="button"
               variant="outline"
               className="h-8 w-full justify-between px-2.5 font-normal"
