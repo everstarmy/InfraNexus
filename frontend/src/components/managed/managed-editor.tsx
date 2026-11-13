@@ -53,7 +53,7 @@ export type EditorField<T> = {
   | { type: "text" | "date"; maxLength?: number }
   | { type: "number"; min?: number; max?: number }
   | { type: "checkbox" }
-  | { type: "select"; options: readonly { value: string; label: string }[] }
+  | { type: "select"; options: readonly { value: string | number; label: string }[] }
   | { type: "lookup"; source: ManagedLookupSource }
 )
 
@@ -190,7 +190,7 @@ export function ManagedLookup({
             <CommandInput
               value={search}
               onValueChange={setSearch}
-              placeholder={`按名称或编码搜索${label}…`}
+              placeholder={`按名称搜索${label}…`}
               className="text-xs"
             />
             <CommandList className="max-h-60 p-1">
@@ -262,16 +262,8 @@ export function ManagedLookup({
 
 function createManagedSchema<T extends ManagedBase>(
   schemaFields: readonly EditorField<T>[],
-  editing: boolean,
 ) {
   const shape: Record<string, z.ZodTypeAny> = {
-    code: editing
-      ? z.string().default("")
-      : z
-          .string()
-          .trim()
-          .min(1, "编码不能为空")
-          .max(64, "编码不能超过 64 个字符"),
     name: z
       .string()
       .trim()
@@ -284,7 +276,7 @@ function createManagedSchema<T extends ManagedBase>(
   }
 
   for (const field of schemaFields) {
-    if (field.key === "code" || field.key === "name" || field.key === "description") continue
+    if (field.key === "name" || field.key === "description") continue
 
     if (field.type === "checkbox") {
       shape[field.key] = z.boolean().default(false)
@@ -350,13 +342,6 @@ export function ManagedEditor<T extends ManagedBase>({
   const schemaFields = useMemo<EditorField<T>[]>(
     () => [
       {
-        key: "code" as EditorField<T>["key"],
-        label: "编码",
-        type: "text",
-        required: true,
-        maxLength: 64,
-      },
-      {
         key: "name" as EditorField<T>["key"],
         label: "名称",
         type: "text",
@@ -370,7 +355,6 @@ export function ManagedEditor<T extends ManagedBase>({
 
   const defaultValues = useMemo<Record<string, any>>(() => {
     const initial: Record<string, any> = {
-      code: record?.code ?? "",
       name: record?.name ?? "",
       description: record?.description ?? "",
     }
@@ -396,8 +380,8 @@ export function ManagedEditor<T extends ManagedBase>({
   })
 
   const formSchema = useMemo(
-    () => createManagedSchema(schemaFields, editing),
-    [schemaFields, editing],
+    () => createManagedSchema(schemaFields),
+    [schemaFields],
   )
 
   const { form, formRef, submit, hasChanges, formError } = useAppForm<Record<string, any>>({
@@ -410,13 +394,12 @@ export function ManagedEditor<T extends ManagedBase>({
         name: String(values.name ?? "").trim(),
         description: String(values.description ?? "").trim(),
       }
-      if (!editing) {
-        submitValues.code = String(values.code ?? "").trim()
-      }
       for (const field of fields) {
         const val = values[field.key]
         if (field.type === "checkbox") {
           submitValues[field.key] = Boolean(val)
+        } else if (field.type === "select") {
+          submitValues[field.key] = field.options.find(option => String(option.value) === String(val))?.value
         } else if (field.type === "number") {
           submitValues[field.key] = val === "" || val == null ? undefined : Number(val)
         } else {
@@ -479,14 +462,14 @@ export function ManagedEditor<T extends ManagedBase>({
           }}
         >
           {schemaFields.map((field) => {
-            const disabled = mutation.isPending || (field.key === "code" && editing)
+            const disabled = mutation.isPending
             return (
               <form.Field key={field.key} name={field.key}>
                 {(formField) => (
                   <FormField
                     field={formField}
                     label={field.label}
-                    required={field.required && (!editing || field.key !== "code")}
+                    required={field.required}
                     idPrefix={uid}
                   >
                     {(props) => {

@@ -3,7 +3,6 @@ import { expect, test, type Page, type Route } from "@playwright/test"
 const id = (number: number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`
 const entry = (number: number, name: string) => ({
   id: id(number),
-  code: `DCIM-${number}`,
   name,
   status: 1,
   version: 2,
@@ -109,21 +108,22 @@ test("四层位置树从机房直接新建机柜", async ({ page }) => {
   expect((await request).postDataJSON()).toMatchObject({ parent: id(42), type: "rack", ext: { row: "A", column: 1, height_u: 42 } })
 })
 
-test("制造商编辑保留现有编码、版本和未展示字段", async ({ page }) => {
-  const manufacturer = { ...entry(51, "制造商样例"), logo_url: "https://example.com/logo.svg" }
+test("制造商编辑只显示基本信息并保留版本", async ({ page }) => {
+  const manufacturer = { ...entry(51, "制造商样例"), type: 3, website: "https://example.com" }
   await mockAPI(page, (route, url) => {
-    if (url.pathname.endsWith("/manufacturers")) return json(route, list([manufacturer]))
-    if (url.pathname.endsWith("/manufacturers/" + manufacturer.id)) return json(route, manufacturer)
+    if (url.pathname.endsWith("/companies")) return json(route, list([manufacturer]))
+    if (url.pathname.endsWith("/companies/" + manufacturer.id)) return json(route, manufacturer)
   })
   await page.goto("/vendor-management")
-  await chooseAction(page, "编辑制造商")
+  await chooseAction(page, "编辑")
+  await expect(page.getByRole("dialog").getByLabel("序列号规则")).toHaveCount(0)
   const request = page.waitForRequest(
     (req) => req.method() === "PUT" && req.url().endsWith(manufacturer.id),
   )
-  await page.getByRole("dialog").getByRole("button", { name: "保存更改" }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "保存", exact: true }).click()
   expect((await request).postDataJSON()).toMatchObject({
     expected_version: 2,
-    data: { code: manufacturer.code, logo_url: manufacturer.logo_url },
+    data: { type: 3, website: manufacturer.website },
   })
 })
 
@@ -229,14 +229,12 @@ test("空库可以创建地址空间和安全域", async ({ page }) => {
   await page.getByRole("button", { name: "地址空间", exact: true }).click()
   await page.getByRole("button", { name: "新建地址空间" }).click()
   const scopeForm = page.getByRole("dialog", { name: "新建地址空间" })
-  await scopeForm.getByLabel("编码").fill("SCOPE-1")
   await scopeForm.getByLabel("名称").fill("生产地址空间")
   const createScope = page.waitForRequest(
     (req) => req.method() === "POST" && req.url().endsWith("/network-scopes"),
   )
   await scopeForm.getByRole("button", { name: "保存" }).click()
   expect((await createScope).postDataJSON()).toMatchObject({
-    code: "SCOPE-1",
     name: "生产地址空间",
   })
   await expect(scopeForm).toBeHidden()
@@ -244,7 +242,6 @@ test("空库可以创建地址空间和安全域", async ({ page }) => {
   await page.getByRole("button", { name: "安全域", exact: true }).click()
   await page.getByRole("button", { name: "新建安全域" }).click()
   const zoneForm = page.getByRole("dialog", { name: "新建安全域" })
-  await zoneForm.getByLabel("编码").fill("ZONE-1")
   await zoneForm.getByLabel("名称").fill("生产安全域")
   await zoneForm.getByLabel("所属数据中心", { exact: true }).selectOption(datacenter.id)
   const createZone = page.waitForRequest(
@@ -252,7 +249,6 @@ test("空库可以创建地址空间和安全域", async ({ page }) => {
   )
   await zoneForm.getByRole("button", { name: "保存" }).click()
   expect((await createZone).postDataJSON()).toMatchObject({
-    code: "ZONE-1",
     datacenter_id: datacenter.id,
   })
 })

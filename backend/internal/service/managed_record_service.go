@@ -59,7 +59,6 @@ func (s *managedService[T, P]) History(ctx context.Context, id uuid.UUID, q doma
 
 func (s *managedService[T, P]) validate(ctx context.Context, item, old *T) error {
 	b := P(item).ManagedFields()
-	b.Code = strings.ToUpper(strings.TrimSpace(b.Code))
 	b.Name = strings.TrimSpace(b.Name)
 	if err := validator.Validate(item); err != nil {
 		return err
@@ -74,24 +73,7 @@ func auditValues(base *domain.ManagedBase) domain.ManagedAuditFields {
 	if base == nil {
 		return domain.ManagedAuditFields{}
 	}
-	return domain.ManagedAuditFields{Code: base.Code, Status: base.Status, Version: base.Version}
-}
-
-// retainedCertificate exposes a version snapshot and prevents deletion of a
-// record whose evidence has to remain available after it is disabled.
-type retainedCertificate interface {
-	QualificationSnapshot() domain.QualificationAuditSnapshot
-}
-
-func managedSnapshot[T any, P domain.ManagedEntity[T]](item *T) domain.ManagedAuditFields {
-	if item == nil {
-		return domain.ManagedAuditFields{}
-	}
-	fields := auditValues(P(item).ManagedFields())
-	if cert, ok := any(item).(retainedCertificate); ok {
-		fields.Qualification = new(cert.QualificationSnapshot())
-	}
-	return fields
+	return domain.ManagedAuditFields{Name: base.Name, Status: base.Status, Version: base.Version}
 }
 
 func writeManagedAudit(ctx context.Context, uow domain.ManagedUnitOfWork, actor uuid.UUID, table string, id uuid.UUID, action string, before, after domain.ManagedAuditFields) error {
@@ -112,7 +94,7 @@ func (s *managedService[T, P]) create(ctx context.Context, actor uuid.UUID, item
 	if err := s.repo.Create(ctx, &item); err != nil {
 		return nil, err
 	}
-	return &item, writeManagedAudit(ctx, s.uow, actor, s.table, b.ID, "create", domain.ManagedAuditFields{}, managedSnapshot[T, P](&item))
+	return &item, writeManagedAudit(ctx, s.uow, actor, s.table, b.ID, "create", domain.ManagedAuditFields{}, auditValues(P(&item).ManagedFields()))
 }
 
 // managedReplay executes inside the write transaction so the result and all
@@ -183,7 +165,7 @@ func (s *managedService[T, P]) save(ctx context.Context, actor uuid.UUID, item, 
 	if err := s.repo.Update(ctx, item); err != nil {
 		return err
 	}
-	return writeManagedAudit(ctx, s.uow, actor, s.table, b.ID, action, managedSnapshot[T, P](old), managedSnapshot[T, P](item))
+	return writeManagedAudit(ctx, s.uow, actor, s.table, b.ID, action, auditValues(P(old).ManagedFields()), auditValues(P(item).ManagedFields()))
 }
 
 func (s *managedService[T, P]) Update(ctx context.Context, actor, id uuid.UUID, version int64, item T) (*T, error) {
@@ -249,10 +231,6 @@ func (s *managedService[T, P]) Delete(ctx context.Context, actor, id uuid.UUID, 
 		}
 		if err := requireNoManagedReferences(tx, s.uow, s.table, id, false); err != nil {
 			return err
-		}
-		// Certificate versions are retained. Disable the current record instead.
-		if _, retained := any(old).(retainedCertificate); retained {
-			return domain.ErrManagedReference
 		}
 		if err := s.repo.Delete(tx, id); err != nil {
 			return err

@@ -40,3 +40,5 @@ pg_restore --list infranexus-pre-upgrade.dump
 迁移 `20261111_v10_retire_managed_transfer` 清理仓储、IPAM、制造商与供应商的导入导出权限和角色授权。
 
 迁移 `20261111_v11_fix_location_parent` 固定四层节点的上级关系，并清理旧移动权限和角色授权。
+
+迁移 `20261113_v12_company_profiles` 面向全新数据库，创建 `org_company` 和 `org_company_contact`。新库从内建种子生成统一厂商和联系人权限。

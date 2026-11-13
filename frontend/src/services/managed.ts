@@ -3,7 +3,6 @@ import type { Envelope, PageData } from "./types"
 
 export interface ManagedBase {
   id: string
-  code: string
   name: string
   status: number // 1: 启用, 2: 停用
   version: number
@@ -13,6 +12,7 @@ export interface ManagedBase {
 }
 
 export interface ManagedQueryParams {
+  type?: number
   page?: number
   page_size?: number
   search?: string
@@ -28,20 +28,9 @@ export interface ManagedReferenceCount {
   count: number
 }
 
-export interface ManagedAuditSnapshot {
-  certificate_type?: string
-  certificate_no?: string
-  issuer?: string
-  level?: string
-  valid_from?: string
-  valid_until?: string
-  evidence_ref?: string
-}
-
 export interface ManagedAuditFields {
   location?: { name: string; parent: string | null; ext: Record<string, unknown>; security_zone_id?: string }
-  qualification?: ManagedAuditSnapshot
-  code?: string
+  name?: string
   status?: number
   version?: number
   reservation?: string

@@ -18,16 +18,11 @@ export const queryKeys = {
   dashboard: ["dashboard"] as const,
 
   // Vendor Management
-  manufacturers: (params?: ManagedQueryParams) => ["manufacturers", "list", params] as const,
-  manufacturersAll: ["manufacturers"] as const,
-  vendors: (params?: ManagedQueryParams) => ["vendors", "list", params] as const,
-  vendorsAll: ["vendors"] as const,
-  contacts: (params?: ManagedQueryParams) => ["contacts", "list", params] as const,
-  contactsAll: ["contacts"] as const,
-  qualifications: (params?: ManagedQueryParams) => ["qualifications", "list", params] as const,
-  qualificationsAll: ["qualifications"] as const,
-  certifications: (params?: ManagedQueryParams) => ["certifications", "list", params] as const,
-  certificationsAll: ["certifications"] as const,
+  companies: (params?: ManagedQueryParams) => ["companies", "list", params] as const,
+  companiesAll: ["companies"] as const,
+  companyContacts: (companyId: string, params?: ManagedQueryParams) =>
+    ["company-contacts", "list", companyId, params] as const,
+  companyContactsAll: ["company-contacts"] as const,
 
   // Locations
   datacenters: (params?: ManagedQueryParams) => ["datacenters", "list", params] as const,

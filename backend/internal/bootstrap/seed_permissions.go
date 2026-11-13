@@ -138,11 +138,8 @@ var permissionSeeds = []permSeed{
 		managedResourcePermissions("ipam", subnetPath, "子网"),
 	),
 	menuPerm("vendor-management", "制造商与供应商", vendorManagementPath, "Building2",
-		managedResourcePermissions("vendor-management", manufacturerPath, "制造商"),
-		managedResourcePermissions("vendor-management", vendorPath, "供应商"),
-		managedResourcePermissions("vendor-management", organizationContactPath, "联系人"),
-		managedResourcePermissions("vendor-management", vendorQualificationPath, "供应商资质"),
-		managedResourcePermissions("vendor-management", contactCertificationPath, "联系人技术证书"),
+		managedResourcePermissions("vendor-management", companyPath, "厂商档案"),
+		managedResourcePermissions("vendor-management", companyContactPath, "厂商联系人"),
 	),
 }
 

@@ -94,18 +94,15 @@ describe("SubnetFormDialog with TanStack Form", () => {
       )
     })
 
-    const codeInput = document.querySelector("input#subnet-code") as HTMLInputElement
     const nameInput = document.querySelector("input#subnet-name") as HTMLInputElement
     const cidrInput = document.querySelector("input#subnet-cidr") as HTMLInputElement
     const submitBtn = document.querySelector('button[type="submit"]') as HTMLButtonElement
 
-    expect(codeInput).not.toBeNull()
     expect(nameInput).not.toBeNull()
     expect(cidrInput).not.toBeNull()
 
     const dnsInput = document.querySelector<HTMLInputElement>("#subnet-dns_servers")!
     await act(async () => {
-      setInputValue(codeInput, "subnet-bj01")
       setInputValue(nameInput, "北京主中心网段")
       setInputValue(cidrInput, "999.20.1.0/24")
       setInputValue(dnsInput, "999.1.1.1")
@@ -156,7 +153,6 @@ describe("SubnetFormDialog with TanStack Form", () => {
             onOpenChange={vi.fn()}
             subnet={{
               id: "subnet-1",
-              code: "subnet-bj01",
               name: "北京主中心网段",
               network_scope_id: "scope-1",
               security_zone_id: "zone-1",

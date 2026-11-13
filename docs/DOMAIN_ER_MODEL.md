@@ -28,10 +28,10 @@ v1.3.2（2026-11-06）补充开发契约包并收敛重复物理字段表；v1.3
    - 机柜物理空间（数据中心 → 机房 → 机柜 → U位）与网络逻辑空间（地址空间 → 子网/IP，并关联数据中心范围、安全域及 VLAN）享有完全对等的领域地位；
    - 资产按类型记录适用的物理位置和网络地址；无备用口、无业务 IP 或无网络能力不补造地址。共享地址属于独立系统，空间与地址平级不等于必填数量相同。
 2. **设备制造商与供应商独立实体化 (Manufacturer vs. Vendor)**：
-   - 严格区分制造硬件的原厂（`org_manufacturer`）与商务供货、维保服务、涉密销毁的商业实体（`org_vendor`）；
-   - 设备型号与部件型号强外键绑定制造商，继承 Enterprise OID 与支持协议；采购入库绑定供货商；维保合同绑定服务商并可核验原厂授权；涉密介质销毁强校验销毁机构的国家保密资质备案及有效期，杜绝自由文本字符串带来的脏数据。
+   - 统一厂商档案（`org_company`），通过身份区分制造与供货；
+   - 设备型号与部件型号强外键绑定制造商，在设备类型中配置 Enterprise OID 与支持协议；采购入库绑定供货商；维保合同绑定服务商并可核验原厂授权；涉密介质销毁强校验销毁机构的国家保密资质备案及有效期，杜绝自由文本字符串带来的脏数据。
 3. **多角色联系人与合同服务团队动态履历 (Multi-Role Contacts & Contract Service Team)**：
-   - 制造商与供应商支持多角色联系人花名册（`org_contact`），涵盖客户经理、固定驻场维护人员、现场支持工程师、应急升级专家等；
+   - 制造商与供应商支持联系人花名册（`org_company_contact`），涵盖客户经理、固定驻场维护人员、现场支持工程师、应急升级专家等；
    - 登记机房出入准入审批所需的脱敏证件号与原厂技术认证资质；
    - 维保合同支持绑定专属服务团队（`war_contract_contact`），在人员轮岗或离职时记录连续的交接时段 `[valid_from, valid_until)`；现场工单自动生成当时指派人员的快照存证，杜绝历史事实被覆盖。
 4. **不可篡改历史与时序履历 (Append-Only Audit)**：
@@ -54,12 +54,12 @@ v1.3.2（2026-11-06）补充开发契约包并收敛重复物理字段表；v1.3
 
 ```mermaid
 erDiagram
-    ORG_MANUFACTURER ||--o{ AST_DEVICE_MODEL : defines
+    ORG_COMPANY ||--o{ AST_DEVICE_MODEL : defines
     AST_DEVICE_MODEL ||--o{ AST_DEVICE : instantiates
-    ORG_VENDOR ||--o{ WAR_CONTRACT : services
+    ORG_COMPANY ||--o{ WAR_CONTRACT : services
     WAR_CONTRACT ||--o{ WAR_CONTRACT_COVERAGE : covers
     AST_DEVICE ||--o{ WAR_CONTRACT_COVERAGE : covered_by
-    ORG_CONTACT ||--o{ WAR_CONTRACT_CONTACT : assigned
+    ORG_COMPANY_CONTACT ||--o{ WAR_CONTRACT_CONTACT : assigned
     WAR_CONTRACT ||--o{ WAR_CONTRACT_CONTACT : team
     AST_TICKET ||--o{ AST_TICKET_PARTICIPANT : records
     RES_OBJECT ||--o| AST_DEVICE : device_identity
@@ -97,19 +97,14 @@ erDiagram
 
 ### 模块 0：设备制造商与供应商/服务商底座 (Manufacturer & Vendor Foundation)
 
-#### 0.1 `org_manufacturer` (设备制造商 OEM)
-`org_manufacturer` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
+#### 0.1 `org_company`（厂商档案）
 
-#### 0.2 `org_vendor` (供应商 / 服务商 / 销毁机构)
-`org_vendor` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
+厂商以 UUID 标识。身份字段 `type` 只能是 1（制造商）、2（供应商）或 3（双身份）。双身份厂商只有一条记录。保存名称、英文名、简称、官网、统一社会信用代码和备注。
 
-#### 0.3 `org_vendor_qualification` (供应商厂商授权与专业资质认证)
-`org_vendor_qualification` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
+#### 0.2 `org_company_contact`（厂商联系人）
 
-`org_vendor_qualification_version`: id, qualification_id FK, revision, certificate_no, qual_type, manufacturer_id?, auth_level, valid_from, valid_until, revocation_effective_at?, verified_by, verified_at, attachment_id, recorded_at。证书内容及效力版本追加保存，qualification 的状态/日期仅作当前投影；`(qualification_id, revision)` 唯一。日期按业务时区解释含首尾日，核销核验执行时刻对应的效力及已知撤销记录。
+`company_id` 外键指向 `org_company.id`。每个厂商可有多位联系人，记录姓名、电话、邮箱、职务和备注。同一厂商允许同名联系人。
 
-#### 0.4 `org_contact` (组织与商务联系人表)
-`org_contact` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
 
 ---
 
@@ -129,18 +124,18 @@ erDiagram
 `dc_space_reservation`: id, ticket_item_id?, pre_receipt_id?, owner_id, expires_at, execution_started_at?, status, version；工单/预入库计划恰一非空，U 位/槽位预留引用它。开始执行后仅由验收/现场复原动作结束，未执行到期释放与计划版本校验同事务。与 IP 预留是不同资源记录，但由同一 ReserveResources 事务编排。
 
 #### 1.5 `dc_warehouse` 与 `dc_shelf` (备件库房与货架)
-- `dc_warehouse`: `id`, `datacenter_id`, `name`, `code`, `contact_person`, `status`
-- `dc_shelf`: `id`, `warehouse_id`, `code`, `layer_count`, `capacity`, `status`
+- `dc_warehouse`: `id`, `datacenter_id`, `name`, `contact_person`, `status`
+- `dc_shelf`: `id`, `warehouse_id`, `layer_count`, `capacity`, `status`
 
 ---
 
 #### 1.6 `ipam_security_zone` (网络安全域)
 `ipam_security_zone` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
 
-> **复合唯一约束**：`uk_ipam_zone_dc_code (datacenter_id, code)`
+安全域通过数据中心 ID 关联所属中心。
 
 #### 1.7 `ipam_network_scope`、`ipam_subnet` (地址空间与子网)
-- `ipam_network_scope`: `id`, `code`（唯一）, `name`, `routing_domain_ref`, `status`, `version`。地址唯一范围独立于数据中心授权；关联 `res_object_scope` 表示归属范围；地址空间 ID 同时登记为 res_object。
+- `ipam_network_scope`: `id`, `name`, `routing_domain_ref`, `status`, `version`。地址唯一范围独立于数据中心授权；关联 `res_object_scope` 表示归属范围；地址空间 ID 同时登记为 res_object。
 - `ipam_subnet`: `id`, `network_scope_id` FK, `security_zone_id` FK, `cidr`, `prefix_length`, `network_start`, `network_end`, `gateway`（可空）, `vlan_id`（可空）, `usage_type`, `dns_servers`（强类型列表）, `is_allocatable`, `version`。
 - `(network_scope_id, 规范化 cidr)` 唯一。同一地址空间内可分配子网不得重叠，创建/变更时锁定地址空间后检查数值区间；父级规划前缀 `is_allocatable=false` 不生成地址池。网段、网关、可用边界按前缀及用途校验，CIDR/掩码/边界只从一个规范化值推导。
 - VLAN 号是现网属性，不作为跨数据中心唯一身份。网段有占用时不能直接改地址空间/CIDR，需受控迁移。地址利用率按分配投影统计，冲突与系统保留单独计数；缓存可重建，不能作为分配判断依据。
@@ -200,7 +195,7 @@ erDiagram
 - `ast_decommission_item` (整机报废拆解清单):
   - `id`, `ticket_id`, `device_id`, `configuration_item_id`, `item_type` (`chassis_frame`, `fru_reusable`, `storage_media`), `part_item_id?`, `serial_number?`, `media_technology`, `contains_sensitive_data`, `has_nonvolatile_cache`, `source_slot`, `planned_destination`, `disposal_method`, `disposal_status`, `version`。清单归属 1A、实物流转归属 1B，在 B7 联合交付并关联稳定实物身份；历史清单只补齐关联、不重复扣库；去向与处理方法分离，不能把 reuse_to_warehouse 当数据清除方法。无介质也须明确核验记录。
 - `ast_disposal_proof` (涉密销毁证明不可篡改存证):
-  - `id`, `decommission_item_id`, `vendor_id` (FK to `org_vendor`, 具备涉密资质的销毁服务商), `qualification_no` (资格编号快照), `proof_type` (`shred_certificate`, `degauss_report`, `photo_evidence`), `attachment_id` (FK), `qualification_version_id` (FK), `policy_version_id`, `sha256_hash` (证明文件 SHA256 校验值), `operator_id`, `reviewer_id`, `operator_name_snapshot`, `witness_name_snapshot`, `executed_at`, `created_at`, `supersedes_proof_id?`。操作与复核用户不同；处置证明追加存证，作废/更正留原件。
+  - `id`, `decommission_item_id`, `vendor_id` (FK to `org_company`, 具备涉密资质的销毁服务商), `qualification_no` (资格编号快照), `proof_type` (`shred_certificate`, `degauss_report`, `photo_evidence`), `attachment_id` (FK), `qualification_version_id` (FK), `policy_version_id`, `sha256_hash` (证明文件 SHA256 校验值), `operator_id`, `reviewer_id`, `operator_name_snapshot`, `witness_name_snapshot`, `executed_at`, `created_at`, `supersedes_proof_id?`。操作与复核用户不同；处置证明追加存证，作废/更正留原件。
 
 - `ast_data_treatment`: id, decommission_item_id?（或利旧工单对象）, item_object_id?, method, policy_version_id, executed_at, result, operator_id, evidence_ids, verified_by；记录清除/销毁/验证方法及其适用介质。`ast_quality_inspection` 记录实物/清单项、检查结果、证据、核验人及时间。SSD 消磁、涉密介质还厂、带数据缓存未验证的利旧均阻断；通过数据处理与质检后才可转可用库存。
 
@@ -221,7 +216,7 @@ erDiagram
 
 合同人员区间须在合同有效范围内，结束大于开始；同合同/职责只允许一个同时有效的主责人员，普通支持人员允许多个。锁定合同后校验区间重叠；变更记录追加 `war_contact_handover`（原/新绑定、动作、生效时刻、登记时刻、原因）。联系人的组织归属不允许直接改写跨公司任职历史；新任职建立新联系记录并保留关联。外部协作人员须记录获批服务组织关系，不能任意把其他供应商人员挂入合同。
 
-`org_contact_certification`: id, contact_id, certificate_type, issuer, certificate_no, valid_from, valid_until, attachment_id, verification_status；用于有效期校验，不用字符串列表替代证书事实。
+后续合同模块的人员资质记录： id, contact_id, certificate_type, issuer, certificate_no, valid_from, valid_until, attachment_id, verification_status；用于有效期校验，不用字符串列表替代证书事实。
 
 #### 3.3 `part_model` (部件型号字典)
 `part_model` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
@@ -237,7 +232,7 @@ erDiagram
 > **业务排他约束**：对 removed_at IS NULL 的记录，分别约束 `(device_id, slot_name)` 唯一和 `part_item_id` 唯一；同时校验部件/槽位兼容性。结束安装关系可更新关系投影，原始拆装事实始终追加保存。
 
 #### 3.6 库存余额、预留与流水
-- `part_stock_bucket`: `id`, `part_model_id`, `custody_location_id`, `owner_id`, `batch_id`, `quality_state`, `custody_state`, `quantity`, `version`。owner_id 引用 `part_owner`（行内/供应商，供应商引用 org_vendor）；以上维度唯一，数量非负；序列化件移动必须同时转移对应实物状态和桶计数，数量件余额与已实物化部分不能重复累加。custody_location_id 引用 ast_custody_location，库房/货架由层级解析；在途/领用使用明确保管位置，不以 NULL 破坏唯一维度。
+- `part_stock_bucket`: `id`, `part_model_id`, `custody_location_id`, `owner_id`, `batch_id`, `quality_state`, `custody_state`, `quantity`, `version`。owner_id 引用 `part_owner`（行内/供应商，供应商引用 org_company）；以上维度唯一，数量非负；序列化件移动必须同时转移对应实物状态和桶计数，数量件余额与已实物化部分不能重复累加。custody_location_id 引用 ast_custody_location，库房/货架由层级解析；在途/领用使用明确保管位置，不以 NULL 破坏唯一维度。
 - `part_batch`: `id`, `source_type`, `supplier_id?`, `owner_id`, `receipt_ref`, `received_at`, `quantity_received`；数量件先按批次记录。`part_item` 增加 `batch_id`, `owner_id`, `quality_state`, `custodian_id?`, `custody_location_id`, `source_decommission_item_id?`, `internal_label`（唯一）。所有权独立于位置/质量，调拨不改产权。
 - `part_reservation`: `id`, `ticket_item_id`, `bucket_id`, `part_item_id?`, `quantity`, `status`, `expires_at?`, `version`。原子将可用量转预留量，领取转已领；重复取消只释放一次，已领后必须实际退回并验收。
 - `part_inventory_tx`: `id`, `action_id`, `line_no`, `part_item_id?`, `batch_id`, `from_bucket_id?`, `to_bucket_id?`, `quantity`（正数）, `tx_type`, `ticket_item_id`, `actor_id`, `effective_at`, `recorded_at`, `scope_snapshot`。`(action_id, line_no)` 唯一，追加写；内部转移两端同事务减增，外部入/出必须有收货/退厂/处置依据。
@@ -406,7 +401,7 @@ erDiagram
 
 | 阶段 | 必须冻结的实体/规则 | 基础与联合边界 |
 | --- | --- | --- |
-| 1A | 完整制造商/供应商、联系人及资质基础档案（B2）、共享身份、采购/导入、空间/位置、IP 分配/历史、工单/动作/证据、审计/Outbox、角色权限 | 系统身份可人工维护，不依赖采集；资质档案在 B2 管理，维修/处置动作在 B7 校验有效版本，不得无资质放行；线路与 FRU 用有稳定 ID 的清单，未接入不伪装自动成功 |
+| 1A | 完整制造商/供应商、联系人基础档案（B2）、共享身份、采购/导入、空间/位置、IP 分配/历史、工单/动作/证据、审计/Outbox、角色权限 | 系统身份可人工维护，不依赖采集；资质由后续业务模块管理，维修/处置动作在 B7 校验有效版本，不得无资质放行；线路与 FRU 用有稳定 ID 的清单，未接入不伪装自动成功 |
 | 1B | 复用 B2 基础档案、合同服务团队绑定、合同覆盖与 SLA、备件/FRU/库存、人工维修验收 | 复用 1A 清单身份；历史接入只关联，不重复扣库；自动健康关单由 2B 联合验收 |
 | 1C | 端口、两端连接、ODF/纤芯、路由与 claim | 与资产验收同事务；未拆部分留清理项；物理逻辑对账由 3A 联合验收 |
 | 2A | 探针、适配器、凭据、端点/责任、任务/观测/差异、时序 | 接入既有系统身份，先计算已有停采原因；实机与生产容量独立验证 |

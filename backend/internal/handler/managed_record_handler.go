@@ -90,6 +90,15 @@ func (h *managedHandler[T]) list(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	if _, company := any(new(T)).(*domain.Company); company {
+		if raw := c.Query("type"); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < domain.CompanyManufacturer || value > domain.CompanyBoth {
+				return coreerrors.ErrParamInvalid.WithMessage("type 须为 1、2 或 3")
+			}
+			q.CompanyType = value
+		}
+	}
 	items, total, err := h.service.List(c.Context(), q)
 	if err != nil {
 		return managedError(err)

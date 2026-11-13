@@ -15,13 +15,12 @@
 | `/ipam/network-scopes` | 地址唯一性的边界。可填 `routing_domain_ref` |
 | `/ipam/security-zones` | `datacenter_id` |
 | `/ipam/subnets` | `network_scope_id`、`security_zone_id`、IPv4 `cidr`、`usage_type`、`is_allocatable`。可填 `gateway`、`vlan_id`、`dns_servers` |
-| `/vendor-management/manufacturers` | 可填 `english_name`、`logo_url`、`website`、`support_url`、`support_phone`、`enterprise_oid`、`protocols`、`serial_number_pattern` |
-| `/vendor-management/vendors` | `credit_code`、`service_types`、`cooperation_status`。可填 `short_name`、`primary_contact_id`、派单渠道及分钟制响应时限 |
-| `/vendor-management/contacts` | `manufacturer_id` 或 `vendor_id` 二选一，以及 `roles`。可填电话、邮箱、职务、证件类型、脱敏标识和准入申请引用 |
-| `/vendor-management/qualifications` | `vendor_id`、`kind`、`certificate_type`、`certificate_no`、`valid_from`、`valid_until`、`evidence_ref`。原厂授权须填 `manufacturer_id` |
-| `/vendor-management/contact-certifications` | `contact_id`、`issuer`、`certificate_no`、`valid_from`、`valid_until`，可填 `evidence_ref` |
+| `/vendor-management/companies` | 名称、身份 `type`、备注，可填英文名、简称、官网和统一社会信用代码 |
+| `/vendor-management/company-contacts` | `company_id` 外键、姓名、电话、邮箱、职务和备注，使用 `parent_id` 查询指定厂商的联系人 |
 
-日期格式为 `YYYY-MM-DD`。网段用途支持 `bmc`、`storage_management`、`business_management`、`production`、`heartbeat`、`vip`、`other`。供应商服务类型支持 `hardware_supplier`、`oem_service`、`third_party_maintenance`、`spare_parts`、`data_destruction`，合作状态支持 `active`、`suspended`、`terminated`。主联系人须为该供应商启用的 `account_manager`。联系人其余角色为 `resident_engineer`、`onsite_engineer`、`escalation_lead`、`commercial_contact`。资质类型为 `oem_authorization` 或 `media_destruction`。
+厂商身份 `1` 为制造商，`2` 为供应商，`3` 为双身份。列表过滤 `type=1` 返回 1 和 3，`type=2` 返回 2 和 3，`type=3` 仅返回 3。厂商与联系人分别使用 `vendor-management:companies` 和 `vendor-management:company-contacts` 权限。
+
+网段用途支持 `bmc`、`storage_management`、`business_management`、`production`、`heartbeat`、`vip`、`other`。
 
 ## 四层位置接口
 
@@ -49,16 +48,16 @@
 
 | 方法与路径 | 请求和结果 |
 | --- | --- |
-| `GET {collection}` | `page`、`page_size`、`search`、`status`、`parent_id`。搜索按编码及名称，分页稳定排序 |
+| `GET {collection}` | `page`、`page_size`、`search`、`status`、`parent_id`。按名称搜索，按名称、创建时间和 ID 稳定排序 |
 | `GET {collection}/:id` | 返回记录及当前 `version` |
 | `GET {collection}/:id/references` | 按引用资源及字段返回计数 |
 | `GET {collection}/:id/history` | 分页返回操作人、请求 ID、版本及操作时间。证书历史含版本快照 |
-| `POST {collection}` | 对象 JSON，包含 `code`、`name`、可选 `description` 和资源字段。新增状态为 1，版本为 1 |
+| `POST {collection}` | 对象 JSON，包含 `name`、可选 `description` 和资源字段。新增状态为 1，版本为 1 |
 | `PUT {collection}/:id` | `{"expected_version":1,"data":{...}}`。完整替换可编辑字段，成功后版本递增 |
 | `PATCH {collection}/:id/status` | `{"expected_version":1,"status":2}`。1 为启用，2 为停用 |
 | `DELETE {collection}/:id?expected_version=1` | 仅可删除无引用及保留要求的记录。证书使用停用保留版本 |
 
-创建也可传 `Idempotency-Key`。同一操作者、操作及键的重复请求返回原结果，请求内容变化返回 409。并发编辑使用版本检查。受引用的上级不能删除或重挂，有启用子项的上级须先停用子项。响应码 `404007` 表示基础记录不存在，版本或引用冲突返回 `409001`。
+创建也可传 `Idempotency-Key`。同一操作者、操作及键的重复请求返回原结果，请求内容变化返回 409。并发编辑使用版本检查。受引用的上级不能删除或重挂，有启用子项的上级须先停用子项。厂商可以在关联联系人仍启用时停用，联系人状态和归属保持原样。有联系人关联的厂商仍受删除保护。响应码 `404007` 表示基础记录不存在，版本或引用冲突返回 `409001`。
 
 ## 机柜和 IPAM
 

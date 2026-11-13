@@ -156,7 +156,7 @@ Go 层按类型定义 DatacenterExt、BuildingExt、RoomExt、RackExt；持久�
 
 位置 Handler → domain.LocationTreeService → domain.LocationNodeRepository，继续在 bootstrap/location.go 装配。位置模块仍是普通业务模块。
 
-通用分页、响应、认证、审计和幂等设施可复用；父子校验、类型化 ext 和 U 位限制放入专用 LocationService。现有 ManagedBase 强制 code/id，不应为了套用它而扭曲新模型，也不应让 Handler 越层查询数据库。
+通用分页、响应、认证、审计和幂等设施可复用；父子校验、类型化 ext 和 U 位限制放入专用 LocationService。四层位置节点使用 UID 和按类型校验的扩展字段，由专用服务处理。
 
 ### 4.2 创建
 

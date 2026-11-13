@@ -28,6 +28,10 @@ export function ManagedCatalog<T extends ManagedBase>({
   fields,
   columns: extraColumns = [],
   retain,
+  parentID,
+  companyType,
+  createDefaults,
+  onContacts,
 }: {
   label: string
   permission: string
@@ -36,6 +40,10 @@ export function ManagedCatalog<T extends ManagedBase>({
   fields: readonly EditorField<T>[]
   columns?: ColumnDef<T>[]
   retain?: boolean
+  parentID?: string
+  companyType?: number
+  createDefaults?: Partial<T>
+  onContacts?: (record: T) => void
 }) {
   const { can } = useAuth()
   const canRead = can(`${permission}:read`)
@@ -47,9 +55,9 @@ export function ManagedCatalog<T extends ManagedBase>({
   const [history, setHistory] = useState<T | null>(null)
   const [reference, setReference] = useState<T | null>(null)
   const term = useDebouncedValue(search.trim(), 250)
-  const filters = { search: term }
+  const filters = { search: term, parent_id: parentID, type: companyType }
   const query = useQuery({
-    queryKey: [resourceKey, "catalog", pagination, term],
+    queryKey: [resourceKey, "catalog", parentID, companyType, pagination, term],
     queryFn: ({ signal }) =>
       service.list(
         { ...filters, page: pagination.pageIndex + 1, page_size: pagination.pageSize },
@@ -84,7 +92,6 @@ export function ManagedCatalog<T extends ManagedBase>({
     }
   }
   const columns: ColumnDef<T>[] = [
-    { id: "code", accessorKey: "code", header: "编码" },
     { id: "name", accessorKey: "name", header: "名称" },
     ...extraColumns,
     {
@@ -104,6 +111,7 @@ export function ManagedCatalog<T extends ManagedBase>({
     },
     createActionsColumn<T>({
       actions: (record) => [
+        ...(onContacts ? [{ key: "contacts", label: "管理联系人", onSelect: () => onContacts(record) }] : []),
         {
           key: "edit",
           label: "编辑",
@@ -183,7 +191,7 @@ export function ManagedCatalog<T extends ManagedBase>({
           fields={fields}
           save={async (changes) => {
             const result = await (editing === "new"
-              ? service.create(changes)
+              ? service.create({ ...createDefaults, ...changes })
               : service.update(editing, changes))
             refresh()
             return result

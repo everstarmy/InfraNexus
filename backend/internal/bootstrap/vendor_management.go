@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"infranexus/internal/domain"
@@ -9,24 +10,17 @@ import (
 )
 
 type vendorManagementServices struct {
-	manufacturer         domain.ManagedService[domain.Manufacturer]
-	vendor               domain.ManagedService[domain.Vendor]
-	organizationContact  domain.ManagedService[domain.OrganizationContact]
-	vendorQualification  domain.ManagedService[domain.VendorQualification]
-	contactCertification domain.ManagedService[domain.ContactCertification]
+	companies domain.ManagedService[domain.Company]
+	contacts  domain.ManagedService[domain.CompanyContact]
 }
 
 func assembleVendorManagement(db *gorm.DB, uow domain.ManagedUnitOfWork) vendorManagementServices {
-	manufacturerRepo := repository.NewManagedRepository[domain.Manufacturer](db, "")
-	vendorRepo := repository.NewManagedRepository[domain.Vendor](db, "")
-	organizationContactRepo := repository.NewOrganizationContactRepository(db)
-	vendorQualificationRepo := repository.NewManagedRepository[domain.VendorQualification](db, "vendor_id")
-	contactCertificationRepo := repository.NewManagedRepository[domain.ContactCertification](db, "contact_id")
+	companies := repository.NewCompanyRepository(db)
+	contacts := repository.NewManagedRepository[domain.CompanyContact](db, "company_id")
 	return vendorManagementServices{
-		manufacturer:         service.NewManagedService(manufacturerRepo, uow, service.ManufacturerRule),
-		vendor:               service.NewManagedService(vendorRepo, uow, service.VendorRule(organizationContactRepo)),
-		organizationContact:  service.NewManagedService(organizationContactRepo, uow, service.OrganizationContactRule(uow, manufacturerRepo, vendorRepo)),
-		vendorQualification:  service.NewManagedService(vendorQualificationRepo, uow, service.VendorQualificationRule(vendorRepo, manufacturerRepo)),
-		contactCertification: service.NewManagedService(contactCertificationRepo, uow, service.ContactCertificationRule(organizationContactRepo)),
+		companies: service.NewManagedService(companies, uow, service.CompanyRule),
+		contacts: service.NewManagedService(contacts, uow, service.ManagedParentRule(uow, companies, func(contact *domain.CompanyContact) uuid.UUID {
+			return contact.CompanyID
+		})),
 	}
 }

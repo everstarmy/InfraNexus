@@ -76,7 +76,7 @@ export const navGroups: NavGroup[] = [
         url: "/vendor-management",
         icon: Building2,
         permission: "vendor-management",
-        description: "原厂设备制造商标准档案、第三方维保供应商资质与 SLA",
+        description: "硬件制造商、供应商及联系人档案",
       },
     ],
   },

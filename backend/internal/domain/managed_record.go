@@ -17,7 +17,7 @@ var (
 
 type ManagedBase struct {
 	BaseEntity
-	Code        string `gorm:"size:64;not null" json:"code" validate:"required,slug,max=64"`
+
 	Name        string `gorm:"size:128;not null" json:"name" validate:"required,max=128"`
 	Status      int    `gorm:"not null;check:status IN (1,2)" json:"status"`
 	Version     int64  `gorm:"not null;check:version > 0" json:"version"`
@@ -33,6 +33,7 @@ type ManagedEntity[T any] interface {
 }
 
 type ManagedQuery struct {
+	CompanyType    int
 	SecurityZoneID *uuid.UUID
 	UsageType      string
 	Page, PageSize int
@@ -41,26 +42,16 @@ type ManagedQuery struct {
 	ParentID       *uuid.UUID
 }
 
-type QualificationAuditSnapshot struct {
-	CertificateType string `json:"certificate_type,omitempty"`
-	CertificateNo   string `json:"certificate_no"`
-	Issuer          string `json:"issuer,omitempty"`
-	Level           string `json:"level,omitempty"`
-	ValidFrom       string `json:"valid_from"`
-	ValidUntil      string `json:"valid_until"`
-	EvidenceRef     string `json:"evidence_ref,omitempty"`
-}
-
 type ManagedAuditFields struct {
-	Location      *LocationNode               `json:"location,omitempty"`
-	Qualification *QualificationAuditSnapshot `json:"qualification,omitempty"`
-	Code          string                      `json:"code,omitempty"`
-	Status        int                         `json:"status,omitempty"`
-	Version       int64                       `json:"version,omitempty"`
-	Reservation   string                      `json:"reservation,omitempty"`
-	EvidenceRef   string                      `json:"evidence_ref,omitempty"`
-	Reason        string                      `json:"reason,omitempty"`
-	ConflictID    *uuid.UUID                  `json:"conflict_id,omitempty"`
+	Name     string        `json:"name,omitempty"`
+	Location *LocationNode `json:"location,omitempty"`
+
+	Status      int        `json:"status,omitempty"`
+	Version     int64      `json:"version,omitempty"`
+	Reservation string     `json:"reservation,omitempty"`
+	EvidenceRef string     `json:"evidence_ref,omitempty"`
+	Reason      string     `json:"reason,omitempty"`
+	ConflictID  *uuid.UUID `json:"conflict_id,omitempty"`
 }
 
 type ManagedAudit struct {
@@ -116,17 +107,12 @@ func LegacyManagedReferences() []ManagedReference {
 		{"ipam_ip_address", "subnet_id", "ipam_subnet"},
 		{"ipam_ip_address", "network_scope_id", "ipam_network_scope"},
 		{"ipam_conflict", "address_id", "ipam_ip_address"},
-		{"org_contact", "manufacturer_id", "org_manufacturer"},
-		{"org_contact", "vendor_id", "org_vendor"},
-		{"org_vendor", "primary_contact_id", "org_contact"},
-		{"org_vendor_qualification", "vendor_id", "org_vendor"},
-		{"org_vendor_qualification", "manufacturer_id", "org_manufacturer"},
-		{"org_contact_certification", "contact_id", "org_contact"},
 	}
 }
 
 func ManagedReferences() []ManagedReference {
 	out := []ManagedReference{
+		{"org_company_contact", "company_id", "org_company"},
 		{"dc_location", "parent", "dc_location"},
 		{"dc_rack_security_zone", "rack_id", "dc_location"},
 		{"dc_rack_security_zone", "security_zone_id", "ipam_security_zone"},

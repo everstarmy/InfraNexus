@@ -75,9 +75,9 @@ func TestManagementLocationsAndRolePermissions(t *testing.T) {
 	}
 
 	zone := managedCreate[domain.SecurityZone](t, app, admin, "/api/v1/ipam/security-zones",
-		map[string]any{"name": "同中心安全域", "code": "same-center", "datacenter_id": center.UID})
+		map[string]any{"name": "同中心安全域", "datacenter_id": center.UID})
 	otherZone := managedCreate[domain.SecurityZone](t, app, admin, "/api/v1/ipam/security-zones",
-		map[string]any{"name": "异地安全域", "code": "other-center", "datacenter_id": otherCenter.UID})
+		map[string]any{"name": "异地安全域", "datacenter_id": otherCenter.UID})
 	expectCode(t, call(t, app, "PUT", rackURL+"/security-zone", admin, map[string]any{"version": 2, "security_zone_id": otherZone.ID}), 409, response.CodeResourceConflict)
 	expectCode(t, call(t, app, "PUT", rackURL+"/security-zone", admin, map[string]any{"version": 2, "security_zone_id": zone.ID}), 200, response.CodeSuccess)
 	expectCode(t, call(t, app, "PATCH", "/api/v1/ipam/security-zones/"+zone.ID.String()+"/status", admin,
@@ -98,11 +98,11 @@ func TestManagementLocationsAndRolePermissions(t *testing.T) {
 		}
 	}
 	role := managedCreate[domain.Role](t, app, admin, "/api/v1/roles", map[string]any{"code": "dcim-reader", "name": "数据中心只读"})
-	read := permissionIDs(t, container, "locations:nodes:type:datacenter", domain.APIPermissionCode("GET", locations+"/nodes"), domain.APIPermissionCode("GET", "/api/v1/ipam/subnets"), domain.APIPermissionCode("GET", "/api/v1/vendor-management/manufacturers"))
+	read := permissionIDs(t, container, "locations:nodes:type:datacenter", domain.APIPermissionCode("GET", locations+"/nodes"), domain.APIPermissionCode("GET", "/api/v1/ipam/subnets"), domain.APIPermissionCode("GET", "/api/v1/vendor-management/companies"))
 	expectCode(t, assignRolePermissions(t, app, admin, role.ID, read), 200, response.CodeSuccess)
 	createLocalUser(t, app, admin, "dcim-reader", map[string]any{"role_ids": []uuid.UUID{role.ID}})
 	reader := tokenFor(t, app, "dcim-reader", "Str0ng!pass")
-	for _, path := range []string{locations + "/nodes", "/api/v1/ipam/subnets", "/api/v1/vendor-management/manufacturers"} {
+	for _, path := range []string{locations + "/nodes", "/api/v1/ipam/subnets", "/api/v1/vendor-management/companies"} {
 		expectCode(t, call(t, app, "GET", path, reader, nil), 200, response.CodeSuccess)
 		expectCode(t, call(t, app, "POST", path, reader, map[string]any{}), 403, response.CodePermissionDenied)
 	}
@@ -126,12 +126,12 @@ func TestManagementIPAMIsolationReservationAndConflict(t *testing.T) {
 	admin := adminToken(t, app)
 	const ipam = "/api/v1/ipam"
 	center := createTestLocation(t, app, admin, "datacenter", "机房", nil, map[string]any{"address": "测试地址", "contact": map[string]any{"name": "联系人"}})
-	zone := managedCreate[domain.SecurityZone](t, app, admin, ipam+"/security-zones", map[string]any{"code": "prod", "name": "生产", "datacenter_id": center.UID})
-	scope := managedCreate[domain.NetworkScope](t, app, admin, ipam+"/network-scopes", map[string]any{"code": "vrf-a", "name": "VRF A"})
-	scopeB := managedCreate[domain.NetworkScope](t, app, admin, ipam+"/network-scopes", map[string]any{"code": "vrf-b", "name": "VRF B"})
-	fields := func(code, cidr string, id uuid.UUID) map[string]any {
+	zone := managedCreate[domain.SecurityZone](t, app, admin, ipam+"/security-zones", map[string]any{"name": "生产", "datacenter_id": center.UID})
+	scope := managedCreate[domain.NetworkScope](t, app, admin, ipam+"/network-scopes", map[string]any{"name": "VRF A"})
+	scopeB := managedCreate[domain.NetworkScope](t, app, admin, ipam+"/network-scopes", map[string]any{"name": "VRF B"})
+	fields := func(name, cidr string, id uuid.UUID) map[string]any {
 		return map[string]any{
-			"code": code, "name": code, "network_scope_id": id, "security_zone_id": zone.ID, "cidr": cidr, "usage_type": "bmc", "is_allocatable": true,
+			"name": name, "network_scope_id": id, "security_zone_id": zone.ID, "cidr": cidr, "usage_type": "bmc", "is_allocatable": true,
 		}
 	}
 	first := fields("prod-a", "10.0.0.5/29", scope.ID)
@@ -144,8 +144,8 @@ func TestManagementIPAMIsolationReservationAndConflict(t *testing.T) {
 	managedCreate[domain.Subnet](t, app, admin, ipam+"/subnets", fields("isolated", "10.0.0.0/29", scopeB.ID))
 	var wg sync.WaitGroup
 	out := make(chan apiResult, 2)
-	for _, code := range []string{"race-a", "race-b"} {
-		wg.Go(func() { out <- call(t, app, "POST", ipam+"/subnets", admin, fields(code, "10.1.0.0/24", scope.ID)) })
+	for _, name := range []string{"race-a", "race-b"} {
+		wg.Go(func() { out <- call(t, app, "POST", ipam+"/subnets", admin, fields(name, "10.1.0.0/24", scope.ID)) })
 	}
 	wg.Wait()
 	close(out)
@@ -223,37 +223,74 @@ func managedRequest(t *testing.T, app *fiber.App, path, bearer, key string, inpu
 	return apiResult{Status: resp.StatusCode, Code: env.Code, Message: env.Message, Data: env.Data}
 }
 
-func TestManagementOrganizationAndIdempotentCreate(t *testing.T) {
-	_, app, cleanup := setupTestApp(t)
+func TestManagementCompanyProfiles(t *testing.T) {
+	container, app, cleanup := setupTestApp(t)
 	defer cleanup()
 	admin := adminToken(t, app)
-	const org = "/api/v1/vendor-management"
-	data := map[string]any{"code": "mfr-a", "name": "制造商 A", "protocols": []string{"snmpv3"}, "enterprise_oid": 674, "serial_number_pattern": "^[A-Z0-9]+$"}
-	first := managedRequest(t, app, org+"/manufacturers", admin, "mfr-a", data)
-	expectCode(t, first, 200, response.CodeSuccess)
-	mfr := decode[domain.Manufacturer](t, first.Data)
-	replay := managedRequest(t, app, org+"/manufacturers", admin, "mfr-a", data)
-	expectCode(t, replay, 200, response.CodeSuccess)
-	if decode[domain.Manufacturer](t, replay.Data).ID != mfr.ID {
-		t.Fatal("create replay generated another identity")
+	const root = "/api/v1/vendor-management"
+	const companies = root + "/companies"
+	const contacts = root + "/company-contacts"
+	create := func(name string, kind int) domain.Company {
+		return managedCreate[domain.Company](t, app, admin, companies, map[string]any{"name": name, "type": kind})
 	}
-	data["name"] = "Different"
-	expectCode(t, managedRequest(t, app, org+"/manufacturers", admin, "mfr-a", data), 409, response.CodeResourceConflict)
-	vendor := managedCreate[domain.Vendor](t, app, admin, org+"/vendors", map[string]any{"code": "vendor-a", "name": "供应商 A", "credit_code": "9131011571786564XW", "service_types": []string{"oem_service"}, "cooperation_status": "active"})
-	contact := map[string]any{"code": "support", "name": "技术支持", "vendor_id": vendor.ID, "roles": []string{"onsite_engineer"}, "id_document_type": "national_id", "masked_id": "310000199001011234"}
-	expectCode(t, call(t, app, "POST", org+"/contacts", admin, contact), 400, response.CodeParamInvalid)
-	contact["masked_id"] = "3100********1234"
-	managedCreate[domain.OrganizationContact](t, app, admin, org+"/contacts", contact)
-	qualification := map[string]any{"code": "auth", "name": "原厂授权", "vendor_id": vendor.ID, "manufacturer_id": mfr.ID, "kind": "oem_authorization", "certificate_type": "authorization", "certificate_no": "OEM-1", "valid_from": "2026-01-01", "valid_until": "2026-12-31", "evidence_ref": "qualification-case-1"}
-	cert := managedCreate[domain.VendorQualification](t, app, admin, org+"/qualifications", qualification)
-	qualification["certificate_no"] = "OEM-2"
-	certURL := org + "/qualifications/" + cert.ID.String()
-	expectCode(t, call(t, app, "PUT", certURL, admin, map[string]any{"expected_version": 1, "data": qualification}), 200, response.CodeSuccess)
-	history := call(t, app, "GET", certURL+"/history", admin, nil)
-	expectCode(t, history, 200, response.CodeSuccess)
-	versions := decode[response.PageData[domain.ManagedAudit]](t, history.Data)
-	if versions.Total != 2 || versions.Items[0].Before.Data().Qualification.CertificateNo != "OEM-1" || versions.Items[0].After.Data().Qualification.CertificateNo != "OEM-2" {
-		t.Fatalf("qualification history not preserved: %+v", versions)
+	manufacturer := create("mfr-a", 1)
+	supplier := create("supplier-a", 2)
+	both := create("both-a", 3)
+	for _, filter := range []struct {
+		kind string
+		want []uuid.UUID
+	}{
+		{"1", []uuid.UUID{both.ID, manufacturer.ID}},
+		{"2", []uuid.UUID{both.ID, supplier.ID}},
+		{"3", []uuid.UUID{both.ID}},
+	} {
+		result := call(t, app, "GET", companies+"?type="+filter.kind, admin, nil)
+		expectCode(t, result, 200, response.CodeSuccess)
+		page := decode[response.PageData[domain.Company]](t, result.Data)
+		if len(page.Items) != len(filter.want) {
+			t.Fatalf("wrong companies for type %s: %+v", filter.kind, page)
+		}
+		for i, id := range filter.want {
+			if page.Items[i].ID != id {
+				t.Fatalf("wrong company ID for type %s", filter.kind)
+			}
+		}
 	}
-	expectCode(t, call(t, app, "DELETE", certURL+"?expected_version=2", admin, nil), 409, response.CodeResourceConflict)
+	for _, owner := range []uuid.UUID{manufacturer.ID, both.ID} {
+		for range 2 {
+			managedCreate[domain.CompanyContact](t, app, admin, contacts, map[string]any{"name": "联系人", "company_id": owner, "title": "经理", "description": "工作日联系"})
+		}
+		result := call(t, app, "GET", contacts+"?parent_id="+owner.String(), admin, nil)
+		expectCode(t, result, 200, response.CodeSuccess)
+		page := decode[response.PageData[domain.CompanyContact]](t, result.Data)
+		if page.Total != 2 || page.Items[0].CompanyID != owner || page.Items[0].Title != "经理" {
+			t.Fatalf("wrong contacts: %+v", page)
+		}
+	}
+	expectCode(t, call(t, app, "POST", companies, admin, map[string]any{"name": "invalid", "type": 4}), 400, response.CodeParamInvalid)
+	expectCode(t, call(t, app, "DELETE", companies+"/"+both.ID.String()+"?expected_version=1", admin, nil), 409, response.CodeResourceConflict)
+	companyURL := companies + "/" + both.ID.String()
+	stopped := call(t, app, "PATCH", companyURL+"/status", admin, map[string]any{"expected_version": 1, "status": domain.StatusDisabled})
+	expectCode(t, stopped, 200, response.CodeSuccess)
+	if company := decode[domain.Company](t, stopped.Data); company.Status != domain.StatusDisabled || company.Version != 2 {
+		t.Fatalf("unexpected company after disabling: %+v", company)
+	}
+	list := call(t, app, "GET", contacts+"?parent_id="+both.ID.String(), admin, nil)
+	expectCode(t, list, 200, response.CodeSuccess)
+	page := decode[response.PageData[domain.CompanyContact]](t, list.Data)
+	if page.Total != 2 || len(page.Items) != 2 {
+		t.Fatalf("company lost contacts after disabling: %+v", page)
+	}
+	for _, contact := range page.Items {
+		if contact.CompanyID != both.ID || contact.Status != domain.StatusEnabled {
+			t.Fatalf("company disable changed contact: %+v", contact)
+		}
+	}
+	expectCode(t, call(t, app, "DELETE", companyURL+"?expected_version=2", admin, nil), 409, response.CodeResourceConflict)
+	expectCode(t, call(t, app, "PATCH", companyURL+"/status", admin, map[string]any{"expected_version": 2, "status": domain.StatusEnabled}), 200, response.CodeSuccess)
+	for _, table := range []string{"org_manufacturer", "org_vendor", "org_contact"} {
+		if container.DB.Migrator().HasTable(table) {
+			t.Errorf("unexpected old table %s", table)
+		}
+	}
 }

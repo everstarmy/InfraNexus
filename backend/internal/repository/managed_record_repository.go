@@ -37,12 +37,12 @@ func (r *managedRepository[T, P]) List(ctx context.Context, q domain.ManagedQuer
 	db := r.DB(ctx).Model(new(T))
 	if q.Search != "" {
 		pattern := containsPattern(q.Search)
-		db = db.Where(`(LOWER(code) LIKE LOWER(?) ESCAPE '\' OR LOWER(name) LIKE LOWER(?) ESCAPE '\')`, pattern, pattern)
+		db = db.Where(`(LOWER(name) LIKE LOWER(?) ESCAPE '\')`, pattern)
 	}
 	if q.Status != 0 {
 		db = db.Where("status = ?", q.Status)
 	}
-	return managedPage[T](r.filter(db, q), q, "code, id")
+	return managedPage[T](r.filter(db, q), q, "name, created_at, id")
 }
 
 func (r *managedRepository[T, P]) Update(ctx context.Context, record *T) error {
@@ -105,6 +105,9 @@ func (r *managedUnitOfWork) HasReferences(ctx context.Context, table string, id 
 		db := r.connection(ctx).Table(ref.Table).Where(ref.Column+" = ?", id)
 		if activeOnly {
 			switch ref.Table {
+			case "org_company_contact":
+				// Contact details remain available after a company is disabled.
+				continue
 			case "dc_rack_unit_allocation", "dc_rack_security_zone":
 				// Every persisted U position is an occupied or reserved slot.
 			case "ipam_ip_address":
@@ -132,7 +135,8 @@ func (r *managedUnitOfWork) References(ctx context.Context, table string, id uui
 			continue
 		}
 		var count int64
-		if err := r.connection(ctx).Table(ref.Table).Where(ref.Column+" = ?", id).Count(&count).Error; err != nil {
+		query := r.connection(ctx).Table(ref.Table).Where(ref.Column+" = ?", id)
+		if err := query.Count(&count).Error; err != nil {
 			return nil, err
 		}
 		if count > 0 {

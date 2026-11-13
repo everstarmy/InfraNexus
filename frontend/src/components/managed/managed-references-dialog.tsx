@@ -24,10 +24,8 @@ const resourceLabels: Record<string, string> = {
   ipam_subnet: "子网",
   ipam_ip_address: "IP 地址记录",
   ipam_conflict: "IP 冲突事件",
-  org_contact: "组织联系人",
-  org_vendor: "供应商/服务商",
-  org_vendor_qualification: "供应商资质",
-  org_contact_certification: "联系人证书",
+  org_company_contact: "组织联系人",
+  org_company: "供应商/服务商",
   users: "系统用户",
 }
 

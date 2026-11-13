@@ -58,20 +58,17 @@ var authenticatedRoutes = map[string]struct{}{
 const (
 	locationPath = "/locations"
 
-	warehousePath            = "/warehouses"
-	shelfPath                = "/shelves"
-	binPath                  = "/bins"
-	temporaryLocationPath    = "/temporary-locations"
-	ipamPath                 = "/ipam"
-	networkScopePath         = "/network-scopes"
-	securityZonePath         = "/security-zones"
-	subnetPath               = "/subnets"
-	vendorManagementPath     = "/vendor-management"
-	manufacturerPath         = "/manufacturers"
-	vendorPath               = "/vendors"
-	organizationContactPath  = "/contacts"
-	vendorQualificationPath  = "/qualifications"
-	contactCertificationPath = "/contact-certifications"
+	warehousePath         = "/warehouses"
+	shelfPath             = "/shelves"
+	binPath               = "/bins"
+	temporaryLocationPath = "/temporary-locations"
+	ipamPath              = "/ipam"
+	networkScopePath      = "/network-scopes"
+	securityZonePath      = "/security-zones"
+	subnetPath            = "/subnets"
+	vendorManagementPath  = "/vendor-management"
+	companyPath           = "/companies"
+	companyContactPath    = "/company-contacts"
 )
 
 var rbacRouteRoots = []string{
@@ -183,11 +180,8 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	handler.RegisterAddressPoolRoutes(subnetRouter, d.ipam.addresses)
 
 	vendorManagement := rbac.Group(vendorManagementPath)
-	handler.RegisterManagedRoutes(vendorManagement.Group(manufacturerPath), d.vendorManagement.manufacturer)
-	handler.RegisterManagedRoutes(vendorManagement.Group(vendorPath), d.vendorManagement.vendor)
-	handler.RegisterManagedRoutes(vendorManagement.Group(organizationContactPath), d.vendorManagement.organizationContact)
-	handler.RegisterManagedRoutes(vendorManagement.Group(vendorQualificationPath), d.vendorManagement.vendorQualification)
-	handler.RegisterManagedRoutes(vendorManagement.Group(contactCertificationPath), d.vendorManagement.contactCertification)
+	handler.RegisterManagedRoutes(vendorManagement.Group(companyPath), d.vendorManagement.companies)
+	handler.RegisterManagedRoutes(vendorManagement.Group(companyContactPath), d.vendorManagement.contacts)
 
 	users := rbac.Group("/users")
 	users.Get("", d.users.List)

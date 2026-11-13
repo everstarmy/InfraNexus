@@ -1410,10 +1410,6 @@
           {
             "type": "object",
             "properties": {
-              "code": {
-                "type": "string",
-                "maxLength": 64
-              },
               "name": {
                 "type": "string",
                 "maxLength": 128
@@ -1432,53 +1428,14 @@
               }
             },
             "required": [
-              "code",
               "name"
             ]
           }
         ]
       },
-      "QualificationAuditSnapshot": {
-        "type": "object",
-        "properties": {
-          "certificate_type": {
-            "type": "string"
-          },
-          "certificate_no": {
-            "type": "string"
-          },
-          "issuer": {
-            "type": "string"
-          },
-          "level": {
-            "type": "string"
-          },
-          "valid_from": {
-            "type": "string"
-          },
-          "valid_until": {
-            "type": "string"
-          },
-          "evidence_ref": {
-            "type": "string"
-          }
-        }
-      },
       "ManagedAuditFields": {
         "type": "object",
         "properties": {
-          "qualification": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/QualificationAuditSnapshot"
-              }
-            ],
-            "nullable": true,
-            "type": "object"
-          },
-          "code": {
-            "type": "string"
-          },
           "status": {
             "type": "integer",
             "format": "int32"
@@ -1503,6 +1460,9 @@
           },
           "location": {
             "$ref": "#/components/schemas/LocationNode"
+          },
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -2551,308 +2511,6 @@
           }
         }
       },
-      "Manufacturer": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/ManagedBase"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "english_name": {
-                "type": "string",
-                "maxLength": 128
-              },
-              "logo_url": {
-                "type": "string",
-                "maxLength": 512
-              },
-              "website": {
-                "type": "string",
-                "maxLength": 512
-              },
-              "support_url": {
-                "type": "string",
-                "maxLength": 512
-              },
-              "support_phone": {
-                "type": "string",
-                "maxLength": 64
-              },
-              "enterprise_oid": {
-                "type": "integer",
-                "format": "int64",
-                "nullable": true,
-                "minimum": 1,
-                "maximum": 4294967295
-              },
-              "protocols": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "redfish",
-                    "rest",
-                    "snmpv2c",
-                    "snmpv3"
-                  ]
-                },
-                "maxItems": 4
-              },
-              "serial_number_pattern": {
-                "type": "string",
-                "maxLength": 512
-              }
-            }
-          }
-        ]
-      },
-      "Vendor": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/ManagedBase"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "primary_contact_id": {
-                "type": "string",
-                "format": "uuid",
-                "nullable": true
-              },
-              "credit_code": {
-                "type": "string"
-              },
-              "short_name": {
-                "type": "string",
-                "maxLength": 128
-              },
-              "service_types": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "hardware_supplier",
-                    "oem_service",
-                    "third_party_maintenance",
-                    "spare_parts",
-                    "data_destruction"
-                  ]
-                },
-                "minItems": 1,
-                "maxItems": 5
-              },
-              "cooperation_status": {
-                "type": "string",
-                "enum": [
-                  "active",
-                  "suspended",
-                  "terminated"
-                ]
-              },
-              "emergency_phone": {
-                "type": "string",
-                "maxLength": 64
-              },
-              "dispatch_email": {
-                "type": "string",
-                "maxLength": 128
-              },
-              "dispatch_url": {
-                "type": "string",
-                "maxLength": 512
-              },
-              "emergency_response_minutes": {
-                "type": "integer",
-                "format": "int32",
-                "minimum": 0,
-                "maximum": 525600
-              },
-              "parts_response_minutes": {
-                "type": "integer",
-                "format": "int32",
-                "minimum": 0,
-                "maximum": 525600
-              },
-              "engineer_response_minutes": {
-                "type": "integer",
-                "format": "int32",
-                "minimum": 0,
-                "maximum": 525600
-              }
-            },
-            "required": [
-              "credit_code",
-              "service_types",
-              "cooperation_status"
-            ]
-          }
-        ]
-      },
-      "OrganizationContact": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/ManagedBase"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "manufacturer_id": {
-                "type": "string",
-                "format": "uuid",
-                "nullable": true
-              },
-              "vendor_id": {
-                "type": "string",
-                "format": "uuid",
-                "nullable": true
-              },
-              "roles": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "account_manager",
-                    "resident_engineer",
-                    "onsite_engineer",
-                    "escalation_lead",
-                    "commercial_contact"
-                  ]
-                },
-                "minItems": 1,
-                "maxItems": 5
-              },
-              "phone": {
-                "type": "string",
-                "maxLength": 64
-              },
-              "email": {
-                "type": "string",
-                "maxLength": 128
-              },
-              "title": {
-                "type": "string",
-                "maxLength": 128
-              },
-              "id_document_type": {
-                "type": "string",
-                "maxLength": 32
-              },
-              "masked_id": {
-                "type": "string",
-                "maxLength": 32
-              },
-              "access_request_ref": {
-                "type": "string",
-                "maxLength": 128
-              }
-            },
-            "required": [
-              "roles"
-            ]
-          }
-        ]
-      },
-      "VendorQualification": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/ManagedBase"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "vendor_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "manufacturer_id": {
-                "type": "string",
-                "format": "uuid",
-                "nullable": true
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "oem_authorization",
-                  "media_destruction"
-                ]
-              },
-              "certificate_type": {
-                "type": "string",
-                "maxLength": 64
-              },
-              "certificate_no": {
-                "type": "string",
-                "maxLength": 128
-              },
-              "level": {
-                "type": "string",
-                "maxLength": 64
-              },
-              "valid_from": {
-                "type": "string"
-              },
-              "valid_until": {
-                "type": "string"
-              },
-              "evidence_ref": {
-                "type": "string",
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "vendor_id",
-              "kind",
-              "certificate_type",
-              "certificate_no",
-              "valid_from",
-              "valid_until",
-              "evidence_ref"
-            ]
-          }
-        ]
-      },
-      "ContactCertification": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/ManagedBase"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "contact_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "issuer": {
-                "type": "string",
-                "maxLength": 128
-              },
-              "certificate_no": {
-                "type": "string",
-                "maxLength": 128
-              },
-              "valid_from": {
-                "type": "string"
-              },
-              "valid_until": {
-                "type": "string"
-              },
-              "evidence_ref": {
-                "type": "string",
-                "maxLength": 256
-              }
-            },
-            "required": [
-              "contact_id",
-              "issuer",
-              "certificate_no",
-              "valid_from",
-              "valid_until"
-            ]
-          }
-        ]
-      },
       "RouteInfo": {
         "type": "object",
         "properties": {
@@ -3804,6 +3462,75 @@
           "page",
           "page_size",
           "total"
+        ]
+      },
+      "Company": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ManagedBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "english_name": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "website": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "credit_code": {
+                "type": "string"
+              },
+              "short_name": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "type": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2,
+                  3
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "CompanyContact": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ManagedBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "phone": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "email": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "company_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "company_id"
+            ]
+          }
         ]
       }
     },
@@ -18801,13 +18528,13 @@
         }
       }
     },
-    "/api/v1/vendor-management/contact-certifications": {
+    "/api/v1/vendor-management/companies": {
       "get": {
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "查询 ContactCertification",
-        "operationId": "getApiV1VendorManagementContactCertifications",
+        "summary": "查询 厂商档案",
+        "operationId": "getApiV1VendorManagementCompanies",
         "responses": {
           "200": {
             "description": "成功",
@@ -18842,7 +18569,7 @@
                         "items": {
                           "type": "array",
                           "items": {
-                            "$ref": "#/components/schemas/ContactCertification"
+                            "$ref": "#/components/schemas/Company"
                           }
                         },
                         "total": {
@@ -18897,7 +18624,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/contact-certifications",
+        "x-required-api-permission": "api:GET:/api/v1/vendor-management/companies",
         "parameters": [
           {
             "name": "page",
@@ -18947,6 +18674,19 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                1,
+                2,
+                3
+              ]
+            },
+            "description": "1 包含制造商及双身份，2 包含供应商及双身份，3 仅双身份。"
           }
         ]
       },
@@ -18954,8 +18694,8 @@
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "创建 ContactCertification",
-        "operationId": "postApiV1VendorManagementContactCertifications",
+        "summary": "创建 厂商档案",
+        "operationId": "postApiV1VendorManagementCompanies",
         "responses": {
           "200": {
             "description": "成功",
@@ -18979,7 +18719,7 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/ContactCertification"
+                      "$ref": "#/components/schemas/Company"
                     },
                     "request_id": {
                       "type": "string"
@@ -19021,7 +18761,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:POST:/api/v1/vendor-management/contact-certifications",
+        "x-required-api-permission": "api:POST:/api/v1/vendor-management/companies",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -19056,20 +18796,20 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ContactCertification"
+                "$ref": "#/components/schemas/Company"
               }
             }
           }
         }
       }
     },
-    "/api/v1/vendor-management/contact-certifications/{id}": {
+    "/api/v1/vendor-management/companies/{id}": {
       "get": {
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "查看 ContactCertification",
-        "operationId": "getApiV1VendorManagementContactCertificationsId",
+        "summary": "查看 厂商档案",
+        "operationId": "getApiV1VendorManagementCompaniesId",
         "responses": {
           "200": {
             "description": "成功",
@@ -19093,7 +18833,7 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/ContactCertification"
+                      "$ref": "#/components/schemas/Company"
                     },
                     "request_id": {
                       "type": "string"
@@ -19135,7 +18875,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/contact-certifications/:id",
+        "x-required-api-permission": "api:GET:/api/v1/vendor-management/companies/:id",
         "parameters": [
           {
             "name": "id",
@@ -19152,8 +18892,8 @@
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "更新 ContactCertification",
-        "operationId": "putApiV1VendorManagementContactCertificationsId",
+        "summary": "更新 厂商档案",
+        "operationId": "putApiV1VendorManagementCompaniesId",
         "responses": {
           "200": {
             "description": "成功",
@@ -19177,7 +18917,7 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/ContactCertification"
+                      "$ref": "#/components/schemas/Company"
                     },
                     "request_id": {
                       "type": "string"
@@ -19219,7 +18959,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:PUT:/api/v1/vendor-management/contact-certifications/:id",
+        "x-required-api-permission": "api:PUT:/api/v1/vendor-management/companies/:id",
         "parameters": [
           {
             "name": "id",
@@ -19265,7 +19005,7 @@
                     "minimum": 1
                   },
                   "data": {
-                    "$ref": "#/components/schemas/ContactCertification"
+                    "$ref": "#/components/schemas/Company"
                   }
                 }
               }
@@ -19277,8 +19017,8 @@
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "删除 ContactCertification",
-        "operationId": "deleteApiV1VendorManagementContactCertificationsId",
+        "summary": "删除 厂商档案",
+        "operationId": "deleteApiV1VendorManagementCompaniesId",
         "responses": {
           "200": {
             "description": "成功",
@@ -19344,7 +19084,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:DELETE:/api/v1/vendor-management/contact-certifications/:id",
+        "x-required-api-permission": "api:DELETE:/api/v1/vendor-management/companies/:id",
         "parameters": [
           {
             "name": "id",
@@ -19385,13 +19125,13 @@
         ]
       }
     },
-    "/api/v1/vendor-management/contact-certifications/{id}/history": {
+    "/api/v1/vendor-management/companies/{id}/history": {
       "get": {
         "tags": [
           "制造商与供应商"
         ],
         "summary": "查询变更历史",
-        "operationId": "getApiV1VendorManagementContactCertificationsIdHistory",
+        "operationId": "getApiV1VendorManagementCompaniesIdHistory",
         "responses": {
           "200": {
             "description": "成功",
@@ -19481,7 +19221,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/contact-certifications/:id/history",
+        "x-required-api-permission": "api:GET:/api/v1/vendor-management/companies/:id/history",
         "parameters": [
           {
             "name": "id",
@@ -19514,13 +19254,13 @@
         ]
       }
     },
-    "/api/v1/vendor-management/contact-certifications/{id}/references": {
+    "/api/v1/vendor-management/companies/{id}/references": {
       "get": {
         "tags": [
           "制造商与供应商"
         ],
         "summary": "查询引用",
-        "operationId": "getApiV1VendorManagementContactCertificationsIdReferences",
+        "operationId": "getApiV1VendorManagementCompaniesIdReferences",
         "responses": {
           "200": {
             "description": "成功",
@@ -19589,7 +19329,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/contact-certifications/:id/references",
+        "x-required-api-permission": "api:GET:/api/v1/vendor-management/companies/:id/references",
         "parameters": [
           {
             "name": "id",
@@ -19603,13 +19343,13 @@
         ]
       }
     },
-    "/api/v1/vendor-management/contact-certifications/{id}/status": {
+    "/api/v1/vendor-management/companies/{id}/status": {
       "patch": {
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "启停 ContactCertification",
-        "operationId": "patchApiV1VendorManagementContactCertificationsIdStatus",
+        "summary": "启停 厂商档案",
+        "operationId": "patchApiV1VendorManagementCompaniesIdStatus",
         "responses": {
           "200": {
             "description": "成功",
@@ -19633,7 +19373,7 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/ContactCertification"
+                      "$ref": "#/components/schemas/Company"
                     },
                     "request_id": {
                       "type": "string"
@@ -19675,7 +19415,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:PATCH:/api/v1/vendor-management/contact-certifications/:id/status",
+        "x-required-api-permission": "api:PATCH:/api/v1/vendor-management/companies/:id/status",
         "parameters": [
           {
             "name": "id",
@@ -19717,13 +19457,13 @@
         }
       }
     },
-    "/api/v1/vendor-management/contacts": {
+    "/api/v1/vendor-management/company-contacts": {
       "get": {
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "查询 OrganizationContact",
-        "operationId": "getApiV1VendorManagementContacts",
+        "summary": "查询 厂商联系人",
+        "operationId": "getApiV1VendorManagementCompanyContacts",
         "responses": {
           "200": {
             "description": "成功",
@@ -19758,7 +19498,7 @@
                         "items": {
                           "type": "array",
                           "items": {
-                            "$ref": "#/components/schemas/OrganizationContact"
+                            "$ref": "#/components/schemas/CompanyContact"
                           }
                         },
                         "total": {
@@ -19813,7 +19553,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/contacts",
+        "x-required-api-permission": "api:GET:/api/v1/vendor-management/company-contacts",
         "parameters": [
           {
             "name": "page",
@@ -19870,8 +19610,8 @@
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "创建 OrganizationContact",
-        "operationId": "postApiV1VendorManagementContacts",
+        "summary": "创建 厂商联系人",
+        "operationId": "postApiV1VendorManagementCompanyContacts",
         "responses": {
           "200": {
             "description": "成功",
@@ -19895,7 +19635,7 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/OrganizationContact"
+                      "$ref": "#/components/schemas/CompanyContact"
                     },
                     "request_id": {
                       "type": "string"
@@ -19937,7 +19677,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:POST:/api/v1/vendor-management/contacts",
+        "x-required-api-permission": "api:POST:/api/v1/vendor-management/company-contacts",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -19972,20 +19712,20 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OrganizationContact"
+                "$ref": "#/components/schemas/CompanyContact"
               }
             }
           }
         }
       }
     },
-    "/api/v1/vendor-management/contacts/{id}": {
+    "/api/v1/vendor-management/company-contacts/{id}": {
       "get": {
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "查看 OrganizationContact",
-        "operationId": "getApiV1VendorManagementContactsId",
+        "summary": "查看 厂商联系人",
+        "operationId": "getApiV1VendorManagementCompanyContactsId",
         "responses": {
           "200": {
             "description": "成功",
@@ -20009,7 +19749,7 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/OrganizationContact"
+                      "$ref": "#/components/schemas/CompanyContact"
                     },
                     "request_id": {
                       "type": "string"
@@ -20051,7 +19791,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/contacts/:id",
+        "x-required-api-permission": "api:GET:/api/v1/vendor-management/company-contacts/:id",
         "parameters": [
           {
             "name": "id",
@@ -20068,8 +19808,8 @@
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "更新 OrganizationContact",
-        "operationId": "putApiV1VendorManagementContactsId",
+        "summary": "更新 厂商联系人",
+        "operationId": "putApiV1VendorManagementCompanyContactsId",
         "responses": {
           "200": {
             "description": "成功",
@@ -20093,7 +19833,7 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/OrganizationContact"
+                      "$ref": "#/components/schemas/CompanyContact"
                     },
                     "request_id": {
                       "type": "string"
@@ -20135,7 +19875,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:PUT:/api/v1/vendor-management/contacts/:id",
+        "x-required-api-permission": "api:PUT:/api/v1/vendor-management/company-contacts/:id",
         "parameters": [
           {
             "name": "id",
@@ -20181,7 +19921,7 @@
                     "minimum": 1
                   },
                   "data": {
-                    "$ref": "#/components/schemas/OrganizationContact"
+                    "$ref": "#/components/schemas/CompanyContact"
                   }
                 }
               }
@@ -20193,8 +19933,8 @@
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "删除 OrganizationContact",
-        "operationId": "deleteApiV1VendorManagementContactsId",
+        "summary": "删除 厂商联系人",
+        "operationId": "deleteApiV1VendorManagementCompanyContactsId",
         "responses": {
           "200": {
             "description": "成功",
@@ -20260,7 +20000,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:DELETE:/api/v1/vendor-management/contacts/:id",
+        "x-required-api-permission": "api:DELETE:/api/v1/vendor-management/company-contacts/:id",
         "parameters": [
           {
             "name": "id",
@@ -20301,13 +20041,13 @@
         ]
       }
     },
-    "/api/v1/vendor-management/contacts/{id}/history": {
+    "/api/v1/vendor-management/company-contacts/{id}/history": {
       "get": {
         "tags": [
           "制造商与供应商"
         ],
         "summary": "查询变更历史",
-        "operationId": "getApiV1VendorManagementContactsIdHistory",
+        "operationId": "getApiV1VendorManagementCompanyContactsIdHistory",
         "responses": {
           "200": {
             "description": "成功",
@@ -20397,7 +20137,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/contacts/:id/history",
+        "x-required-api-permission": "api:GET:/api/v1/vendor-management/company-contacts/:id/history",
         "parameters": [
           {
             "name": "id",
@@ -20430,13 +20170,13 @@
         ]
       }
     },
-    "/api/v1/vendor-management/contacts/{id}/references": {
+    "/api/v1/vendor-management/company-contacts/{id}/references": {
       "get": {
         "tags": [
           "制造商与供应商"
         ],
         "summary": "查询引用",
-        "operationId": "getApiV1VendorManagementContactsIdReferences",
+        "operationId": "getApiV1VendorManagementCompanyContactsIdReferences",
         "responses": {
           "200": {
             "description": "成功",
@@ -20505,7 +20245,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/contacts/:id/references",
+        "x-required-api-permission": "api:GET:/api/v1/vendor-management/company-contacts/:id/references",
         "parameters": [
           {
             "name": "id",
@@ -20519,13 +20259,13 @@
         ]
       }
     },
-    "/api/v1/vendor-management/contacts/{id}/status": {
+    "/api/v1/vendor-management/company-contacts/{id}/status": {
       "patch": {
         "tags": [
           "制造商与供应商"
         ],
-        "summary": "启停 OrganizationContact",
-        "operationId": "patchApiV1VendorManagementContactsIdStatus",
+        "summary": "启停 厂商联系人",
+        "operationId": "patchApiV1VendorManagementCompanyContactsIdStatus",
         "responses": {
           "200": {
             "description": "成功",
@@ -20549,7 +20289,7 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/OrganizationContact"
+                      "$ref": "#/components/schemas/CompanyContact"
                     },
                     "request_id": {
                       "type": "string"
@@ -20591,2755 +20331,7 @@
             "$ref": "#/components/responses/Error502"
           }
         },
-        "x-required-api-permission": "api:PATCH:/api/v1/vendor-management/contacts/:id/status",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ManagedStatusRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/vendor-management/manufacturers": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查询 Manufacturer",
-        "operationId": "getApiV1VendorManagementManufacturers",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "object",
-                      "required": [
-                        "items",
-                        "total",
-                        "page",
-                        "page_size"
-                      ],
-                      "properties": {
-                        "items": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/Manufacturer"
-                          }
-                        },
-                        "total": {
-                          "type": "integer",
-                          "format": "int64"
-                        },
-                        "page": {
-                          "type": "integer"
-                        },
-                        "page_size": {
-                          "type": "integer"
-                        }
-                      }
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/manufacturers",
-        "parameters": [
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100
-            }
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 256
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "enum": [
-                1,
-                2
-              ]
-            }
-          },
-          {
-            "name": "parent_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "创建 Manufacturer",
-        "operationId": "postApiV1VendorManagementManufacturers",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Manufacturer"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:POST:/api/v1/vendor-management/manufacturers",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 128
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Manufacturer"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/vendor-management/manufacturers/{id}": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查看 Manufacturer",
-        "operationId": "getApiV1VendorManagementManufacturersId",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Manufacturer"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/manufacturers/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "更新 Manufacturer",
-        "operationId": "putApiV1VendorManagementManufacturersId",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Manufacturer"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:PUT:/api/v1/vendor-management/manufacturers/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "expected_version",
-                  "data"
-                ],
-                "properties": {
-                  "expected_version": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "data": {
-                    "$ref": "#/components/schemas/Manufacturer"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "删除 Manufacturer",
-        "operationId": "deleteApiV1VendorManagementManufacturersId",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/DeletedResult"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:DELETE:/api/v1/vendor-management/manufacturers/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "expected_version",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/vendor-management/manufacturers/{id}/history": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查询变更历史",
-        "operationId": "getApiV1VendorManagementManufacturersIdHistory",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "object",
-                      "required": [
-                        "items",
-                        "total",
-                        "page",
-                        "page_size"
-                      ],
-                      "properties": {
-                        "items": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/ManagedAudit"
-                          }
-                        },
-                        "total": {
-                          "type": "integer",
-                          "format": "int64"
-                        },
-                        "page": {
-                          "type": "integer"
-                        },
-                        "page_size": {
-                          "type": "integer"
-                        }
-                      }
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/manufacturers/:id/history",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/vendor-management/manufacturers/{id}/references": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查询引用",
-        "operationId": "getApiV1VendorManagementManufacturersIdReferences",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ManagedReferenceCount"
-                      }
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/manufacturers/:id/references",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/vendor-management/manufacturers/{id}/status": {
-      "patch": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "启停 Manufacturer",
-        "operationId": "patchApiV1VendorManagementManufacturersIdStatus",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Manufacturer"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:PATCH:/api/v1/vendor-management/manufacturers/:id/status",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ManagedStatusRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/vendor-management/qualifications": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查询 VendorQualification",
-        "operationId": "getApiV1VendorManagementQualifications",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "object",
-                      "required": [
-                        "items",
-                        "total",
-                        "page",
-                        "page_size"
-                      ],
-                      "properties": {
-                        "items": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/VendorQualification"
-                          }
-                        },
-                        "total": {
-                          "type": "integer",
-                          "format": "int64"
-                        },
-                        "page": {
-                          "type": "integer"
-                        },
-                        "page_size": {
-                          "type": "integer"
-                        }
-                      }
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/qualifications",
-        "parameters": [
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100
-            }
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 256
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "enum": [
-                1,
-                2
-              ]
-            }
-          },
-          {
-            "name": "parent_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "创建 VendorQualification",
-        "operationId": "postApiV1VendorManagementQualifications",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/VendorQualification"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:POST:/api/v1/vendor-management/qualifications",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 128
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VendorQualification"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/vendor-management/qualifications/{id}": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查看 VendorQualification",
-        "operationId": "getApiV1VendorManagementQualificationsId",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/VendorQualification"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/qualifications/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "更新 VendorQualification",
-        "operationId": "putApiV1VendorManagementQualificationsId",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/VendorQualification"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:PUT:/api/v1/vendor-management/qualifications/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "expected_version",
-                  "data"
-                ],
-                "properties": {
-                  "expected_version": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "data": {
-                    "$ref": "#/components/schemas/VendorQualification"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "删除 VendorQualification",
-        "operationId": "deleteApiV1VendorManagementQualificationsId",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/DeletedResult"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:DELETE:/api/v1/vendor-management/qualifications/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "expected_version",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/vendor-management/qualifications/{id}/history": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查询变更历史",
-        "operationId": "getApiV1VendorManagementQualificationsIdHistory",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "object",
-                      "required": [
-                        "items",
-                        "total",
-                        "page",
-                        "page_size"
-                      ],
-                      "properties": {
-                        "items": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/ManagedAudit"
-                          }
-                        },
-                        "total": {
-                          "type": "integer",
-                          "format": "int64"
-                        },
-                        "page": {
-                          "type": "integer"
-                        },
-                        "page_size": {
-                          "type": "integer"
-                        }
-                      }
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/qualifications/:id/history",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/vendor-management/qualifications/{id}/references": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查询引用",
-        "operationId": "getApiV1VendorManagementQualificationsIdReferences",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ManagedReferenceCount"
-                      }
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/qualifications/:id/references",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/vendor-management/qualifications/{id}/status": {
-      "patch": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "启停 VendorQualification",
-        "operationId": "patchApiV1VendorManagementQualificationsIdStatus",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/VendorQualification"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:PATCH:/api/v1/vendor-management/qualifications/:id/status",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ManagedStatusRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/vendor-management/vendors": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查询 Vendor",
-        "operationId": "getApiV1VendorManagementVendors",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "object",
-                      "required": [
-                        "items",
-                        "total",
-                        "page",
-                        "page_size"
-                      ],
-                      "properties": {
-                        "items": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/Vendor"
-                          }
-                        },
-                        "total": {
-                          "type": "integer",
-                          "format": "int64"
-                        },
-                        "page": {
-                          "type": "integer"
-                        },
-                        "page_size": {
-                          "type": "integer"
-                        }
-                      }
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/vendors",
-        "parameters": [
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100
-            }
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 256
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "enum": [
-                1,
-                2
-              ]
-            }
-          },
-          {
-            "name": "parent_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "创建 Vendor",
-        "operationId": "postApiV1VendorManagementVendors",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Vendor"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:POST:/api/v1/vendor-management/vendors",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 128
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Vendor"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/vendor-management/vendors/{id}": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查看 Vendor",
-        "operationId": "getApiV1VendorManagementVendorsId",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Vendor"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/vendors/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "更新 Vendor",
-        "operationId": "putApiV1VendorManagementVendorsId",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Vendor"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:PUT:/api/v1/vendor-management/vendors/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "expected_version",
-                  "data"
-                ],
-                "properties": {
-                  "expected_version": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "data": {
-                    "$ref": "#/components/schemas/Vendor"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "删除 Vendor",
-        "operationId": "deleteApiV1VendorManagementVendorsId",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/DeletedResult"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:DELETE:/api/v1/vendor-management/vendors/:id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "expected_version",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "Cookie 写请求及登录/初始化请求须提供可信 Origin 或 Referer；Bearer 请求不受此要求限制。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Referer",
-            "in": "header",
-            "required": false,
-            "description": "未提供 Origin 时，可使用可信 Referer。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/vendor-management/vendors/{id}/history": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查询变更历史",
-        "operationId": "getApiV1VendorManagementVendorsIdHistory",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "object",
-                      "required": [
-                        "items",
-                        "total",
-                        "page",
-                        "page_size"
-                      ],
-                      "properties": {
-                        "items": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/ManagedAudit"
-                          }
-                        },
-                        "total": {
-                          "type": "integer",
-                          "format": "int64"
-                        },
-                        "page": {
-                          "type": "integer"
-                        },
-                        "page_size": {
-                          "type": "integer"
-                        }
-                      }
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/vendors/:id/history",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/vendor-management/vendors/{id}/references": {
-      "get": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "查询引用",
-        "operationId": "getApiV1VendorManagementVendorsIdReferences",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ManagedReferenceCount"
-                      }
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:GET:/api/v1/vendor-management/vendors/:id/references",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/vendor-management/vendors/{id}/status": {
-      "patch": {
-        "tags": [
-          "制造商与供应商"
-        ],
-        "summary": "启停 Vendor",
-        "operationId": "patchApiV1VendorManagementVendorsIdStatus",
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "code",
-                    "message",
-                    "data",
-                    "request_id",
-                    "timestamp"
-                  ],
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 200000
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Vendor"
-                    },
-                    "request_id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "integer",
-                      "format": "int64"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error409"
-          },
-          "500": {
-            "$ref": "#/components/responses/Error500"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error503"
-          },
-          "429": {
-            "$ref": "#/components/responses/Error429"
-          },
-          "502": {
-            "$ref": "#/components/responses/Error502"
-          }
-        },
-        "x-required-api-permission": "api:PATCH:/api/v1/vendor-management/vendors/:id/status",
+        "x-required-api-permission": "api:PATCH:/api/v1/vendor-management/company-contacts/:id/status",
         "parameters": [
           {
             "name": "id",

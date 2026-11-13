@@ -106,6 +106,14 @@ export function ManagedHistorySheet({
 
                       {/* Detail diffs */}
                       <div className="rounded-md border bg-muted/40 p-2.5 text-xs space-y-1 font-mono">
+                        {audit.before?.name && audit.after?.name && audit.before.name !== audit.after.name && (
+                          <div className="flex items-center gap-1.5">
+                            <span>名称：</span>
+                            <span>{audit.before.name}</span>
+                            <ArrowRight className="size-3 text-muted-foreground" />
+                            <span>{audit.after.name}</span>
+                          </div>
+                        )}
                         {audit.after?.status !== undefined && audit.before?.status !== undefined && audit.after.status !== audit.before.status && (
                           <div className="flex items-center gap-1.5 text-foreground/80">
                             <span className="text-muted-foreground font-sans">状态：</span>

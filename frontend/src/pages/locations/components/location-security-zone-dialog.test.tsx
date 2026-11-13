@@ -19,8 +19,8 @@ vi.mock("@/services/ipam", () => ({
     list: vi.fn().mockResolvedValue({
       data: {
         items: [
-          { id: "zone-dmz", name: "DMZ 隔离区", code: "DMZ-01" },
-          { id: "zone-core", name: "核心内网区", code: "CORE-01" },
+          { id: "zone-dmz", name: "DMZ 隔离区" },
+          { id: "zone-core", name: "核心内网区" },
         ],
         total: 2,
       },

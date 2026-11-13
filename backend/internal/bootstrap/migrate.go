@@ -37,6 +37,7 @@ var migrations = []migration{
 	{version: migrationLocationTransferRetirement, apply: migrateLocationTransferRetirement},
 	{version: migrationManagedTransferRetirement, apply: migrateManagedTransferRetirement},
 	{version: migrationLocationParentFixed, apply: migrateLocationParentFixed},
+	{version: migrationCompanyProfiles, apply: migrateCompanyProfiles},
 }
 
 var legacyIndexes = []legacyIndex{

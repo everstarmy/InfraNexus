@@ -93,10 +93,6 @@ describe("ManagedEditor with TanStack Form", () => {
 
     expect(saveFn).not.toHaveBeenCalled()
 
-    const codeError = document.querySelector('[id$="-code-error"]')
-    expect(codeError).not.toBeNull()
-    expect(codeError?.textContent).toContain("编码不能为空")
-
     const nameError = document.querySelector('[id$="-name-error"]')
     expect(nameError).not.toBeNull()
     expect(nameError?.textContent).toContain("名称不能为空")
@@ -114,7 +110,7 @@ describe("ManagedEditor with TanStack Form", () => {
         data: {
           code: 400001,
           message: "参数校验失败",
-          data: [{ field: "code", message: "备件库房编码已被占用" }],
+          data: [{ field: "name", message: "库房名称不符合要求" }],
         },
       },
     }
@@ -134,17 +130,14 @@ describe("ManagedEditor with TanStack Form", () => {
       )
     })
 
-    const codeInput = document.querySelector('input[id$="-code"]') as HTMLInputElement
     const nameInput = document.querySelector('input[id$="-name"]') as HTMLInputElement
     const contactInput = document.querySelector('input[id$="-contact_person"]') as HTMLInputElement
     const submitBtn = document.querySelector('button[type="submit"]') as HTMLButtonElement
 
-    expect(codeInput).not.toBeNull()
     expect(nameInput).not.toBeNull()
     expect(contactInput).not.toBeNull()
 
     await act(async () => {
-      setInputValue(codeInput, "WH-BJ-01")
       setInputValue(nameInput, "北京主备件库房")
       setInputValue(contactInput, "张三")
     })
@@ -155,7 +148,6 @@ describe("ManagedEditor with TanStack Form", () => {
 
     expect(saveFn).toHaveBeenCalledWith(
       expect.objectContaining({
-        code: "WH-BJ-01",
         name: "北京主备件库房",
         contact_person: "张三",
       }),
@@ -166,15 +158,15 @@ describe("ManagedEditor with TanStack Form", () => {
       await new Promise((r) => setTimeout(r, 20))
     })
 
-    const codeError = document.querySelector('[id$="-code-error"]')
-    expect(codeError).not.toBeNull()
-    expect(codeError?.textContent).toContain("备件库房编码已被占用")
+    const serverNameError = document.querySelector('[id$="-name-error"]')
+    expect(serverNameError).not.toBeNull()
+    expect(serverNameError?.textContent).toContain("库房名称不符合要求")
 
     // 修改输入后自愈
     await act(async () => {
-      setInputValue(codeInput, "WH-BJ-02")
+      setInputValue(nameInput, "另一处库房")
     })
 
-    expect(document.querySelector('[id$="-code-error"]')).toBeNull()
+    expect(document.querySelector('[id$="-name-error"]')).toBeNull()
   })
 })

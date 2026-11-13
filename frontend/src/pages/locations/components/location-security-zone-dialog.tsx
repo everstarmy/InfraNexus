@@ -214,7 +214,6 @@ export function LocationSecurityZoneDialog({
                             />
                             <div className="flex-1">
                               <div className="font-medium">{zone.name}</div>
-                              <div className="text-[11px] text-muted-foreground">编码: {zone.code}</div>
                             </div>
                           </label>
                         ))}

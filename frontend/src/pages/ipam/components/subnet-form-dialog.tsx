@@ -34,7 +34,6 @@ import {
   type SubnetUsageType,
 } from "@/services/ipam"
 
-const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
 const ipv4 = z.ipv4()
 const ipAddress = z.union([ipv4, z.ipv6()])
 
@@ -52,16 +51,8 @@ const USAGE_TYPE_OPTIONS: { id: SubnetUsageType; label: string }[] = [
   { id: "other", label: "其他规划网段 (Other)" },
 ]
 
-const createSubnetSchema = (editing: boolean) =>
+const createSubnetSchema = () =>
   z.object({
-    code: editing
-      ? z.string()
-      : z
-          .string()
-          .trim()
-          .min(2, "子网编码至少 2 个字符")
-          .max(64, "子网编码不能超过 64 个字符")
-          .regex(CODE_PATTERN, "以字母开头，仅含字母、数字及 _ . : -"),
     name: z
       .string()
       .trim()
@@ -111,7 +102,6 @@ const createSubnetSchema = (editing: boolean) =>
   })
 
 type SubnetFormValues = {
-  code: string
   name: string
   network_scope_id: string
   security_zone_id: string
@@ -137,10 +127,9 @@ export function SubnetFormDialog({
   const confirm = useConfirm()
   const editing = Boolean(subnet)
 
-  const subnetSchema = useMemo(() => createSubnetSchema(editing), [editing])
+  const subnetSchema = useMemo(() => createSubnetSchema(), [])
   const defaultValues = useMemo<SubnetFormValues>(
     () => ({
-      code: subnet?.code ?? "",
       name: subnet?.name ?? "",
       network_scope_id: subnet?.network_scope_id ?? "",
       security_zone_id: subnet?.security_zone_id ?? "",
@@ -176,7 +165,6 @@ export function SubnetFormDialog({
       }
       return subnetsService.create({
         ...payload,
-        code: values.code.trim(),
       })
     },
     onSuccess: (res) => {
@@ -255,28 +243,6 @@ export function SubnetFormDialog({
           className="space-y-3 py-2"
         >
           <FieldGroup className="grid grid-cols-2 gap-3">
-            <form.Field name="code">
-              {(field) => (
-                <FormField
-                  field={field}
-                  label="子网编码"
-                  required={!editing}
-                  idPrefix="subnet"
-                >
-                  {(props) => (
-                    <Input
-                      {...props}
-                      placeholder="如: subnet-prod-bj01"
-                      value={field.state.value}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      onBlur={field.handleBlur}
-                      disabled={editing || mutation.isPending}
-                      className="h-8 text-xs font-mono"
-                    />
-                  )}
-                </FormField>
-              )}
-            </form.Field>
 
             <form.Field name="name">
               {(field) => (
