@@ -4,6 +4,8 @@
 
 位置、IPAM、制造商与供应商接口见 [基础管理 API](DCIM_MANAGEMENT_API.md)。
 
+下一批模型、到货清单、验收及设备/组件实物的 [API 设计契约](ASSET_RECEIVING_API.md) 已接入后端路由和 OpenAPI，前端业务页面尚未建设；存储和事务依据见 [领域设计](ASSET_RECEIVING_DOMAIN.md)。
+
 ## OpenAPI 接口文档
 
 后端启动后可访问 `/api/docs` 查看 Swagger UI，或访问 `/api/docs/openapi.json` 获取接口定义。开发环境默认开启，测试和生产环境默认关闭。可以通过 `app.swagger_enabled` 或环境变量 `APP_APP_SWAGGER_ENABLED` 显式启停。Swagger UI 的浏览器资源由上游中间件从 CDN 加载。

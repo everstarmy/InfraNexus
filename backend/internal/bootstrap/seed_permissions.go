@@ -35,7 +35,7 @@ func menuPerm(code, name, path, icon string, children ...permSeed) permSeed {
 	return permSeed{Code: code, Name: name, Type: domain.PermTypeMenu, Path: path, Icon: icon, Children: children}
 }
 
-var permissionSeeds = []permSeed{
+var permissionSeeds = append([]permSeed{
 	menuPerm("dashboard", "仪表盘", "/dashboard", "LayoutDashboard",
 		apiPerm("GET", "/dashboard/overview", "查看概览指标"),
 	),
@@ -141,7 +141,7 @@ var permissionSeeds = []permSeed{
 		managedResourcePermissions("vendor-management", companyPath, "厂商档案"),
 		managedResourcePermissions("vendor-management", companyContactPath, "厂商联系人"),
 	),
-}
+}, receivingPermissionSeeds()...)
 
 func seedPermissions(tx *gorm.DB) error {
 	return upsertPermissionSeeds(tx, nil, permissionSeeds)

@@ -30,6 +30,7 @@ var openAPISpec []byte
 func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 	fiberApp := fiber.New(fiber.Config{
 		AppName:            app.Config.App.Name,
+		BodyLimit:          11 * 1024 * 1024,
 		ErrorHandler:       errors.GlobalErrorHandler,
 		WriteTimeout:       30 * time.Second,
 		TrustProxy:         true,
@@ -122,10 +123,11 @@ func NewFiberApp(app *AppContainer) (*fiber.App, error) {
 		return nil, err
 	}
 	registerRoutes(fiberApp, routeDeps{
-		health:  handler.NewHealthHandler(service.NewHealthService(repository.NewHealthRepository(sqlDB, app.Redis, app.Config.App.Env == "production"))),
-		cfg:     app.Config,
-		authSvc: authSvc,
-		authz:   authzSvc,
+		receiving: service.NewReceivingService(repository.NewReceivingUnitOfWork(app.DB)),
+		health:    handler.NewHealthHandler(service.NewHealthService(repository.NewHealthRepository(sqlDB, app.Redis, app.Config.App.Env == "production"))),
+		cfg:       app.Config,
+		authSvc:   authSvc,
+		authz:     authzSvc,
 		casbin: middleware.NewCasbin(middleware.CasbinConfig{
 			Enforcer:  enforcer,
 			Authorize: authzSvc.Enforce,

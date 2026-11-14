@@ -112,6 +112,11 @@ func LegacyManagedReferences() []ManagedReference {
 
 func ManagedReferences() []ManagedReference {
 	out := []ManagedReference{
+		{"part_model", "manufacturer_id", "org_company"},
+		{"ast_device_model", "manufacturer_id", "org_company"},
+		{"ast_purchase_batch", "supplier_id", "org_company"},
+		{"ast_custody_location", "warehouse_id", "dc_warehouse"},
+		{"ast_custody_location", "bin_id", "dc_bin"},
 		{"org_company_contact", "company_id", "org_company"},
 		{"dc_location", "parent", "dc_location"},
 		{"dc_rack_security_zone", "rack_id", "dc_location"},

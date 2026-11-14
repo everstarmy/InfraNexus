@@ -13,6 +13,8 @@
 
 旧文引用的 `contracts/dcim-v1/` 契约包当前工作区缺失，不能声明完整字段、DDL、接口或可执行测试已提供。本文保留关系与规则设计；对应批次开工前须补齐字段字典、迁移、API/事件、角色权限及测试，评审后作为实现依据。
 
+2026-11-14 到货验收专项设计见 [领域模型](ASSET_RECEIVING_DOMAIN.md) 与 [API 契约](ASSET_RECEIVING_API.md)。本批按用户确认在验收成功提交后创建设备及逐件组件实物，冻结原始配置；安装关系和当前位置与原始基线分离，组件 SN 后补不改基线。模型版本、到货计划和验收的新字段、命名及有效安装判定以专项设计为准；文中其他未落地实体继续作为后续规划，不代表迁移已实现。
+
 ### 本版修订
 
 v1.3.3（2026-11-09）明确正式项目分批实施、角色权限与业务归属区别，纠正缺失契约引用；以下历史版本说明不代表当前工作区交付状态。
@@ -165,7 +167,7 @@ erDiagram
 ### 模块 2：设备台账、型号模板与资产工单
 
 #### 2.1 `ast_device_model` (设备型号模板)
-`ast_device_model` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
+`ast_device_model` 稳定身份与 `ast_device_model_revision` 发布版本拆分，槽位/端口/标准组件/兼容关系绑定版本。字段、发布与冻结规则见 [专项设计 §4](ASSET_RECEIVING_DOMAIN.md#4-模型聚合)，仍需在实现阶段形成并验证迁移。
 
 > **复合唯一约束**：`uk_ast_model_mfr_name (manufacturer_id, model_name)`
 
@@ -219,7 +221,7 @@ erDiagram
 后续合同模块的人员资质记录： id, contact_id, certificate_type, issuer, certificate_no, valid_from, valid_until, attachment_id, verification_status；用于有效期校验，不用字符串列表替代证书事实。
 
 #### 3.3 `part_model` (部件型号字典)
-`part_model` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
+`part_model` 稳定身份与 `part_model_revision` 规格版本拆分，实际组件 `part_item` 引用确定版本。字段与约束见 [专项设计](ASSET_RECEIVING_DOMAIN.md)，不将型号数量当作逐件实物身份。
 
 > **复合唯一约束**：`uk_part_model_mfr_no (manufacturer_id, part_no)`
 
@@ -229,7 +231,7 @@ erDiagram
 #### 3.5 `part_slot_allocation` (在机部件安装槽位关系)
 `part_slot_allocation` 的完整字段类型、可空性、默认值、外键和索引尚待在所属批次补齐字段字典；以下保留业务关系与规则，不能直接当作完整迁移规格。
 
-> **业务排他约束**：对 removed_at IS NULL 的记录，分别约束 `(device_id, slot_name)` 唯一和 `part_item_id` 唯一；同时校验部件/槽位兼容性。结束安装关系可更新关系投影，原始拆装事实始终追加保存。
+> **业务排他约束（2026-11-14 细化）**：对 `ended_recorded_at IS NULL` 的有效关系，约束 `part_item_id` 唯一及非空 `(device_id, slot_key)` 唯一；实际安装/拆除时间未知时可空，不再用 `removed_at IS NULL` 判断关系是否有效。同时校验兼容性及 `part_current_placement` 一致性。结束安装关系可更新投影，原始事实始终追加保存，详见专项设计 §8。
 
 #### 3.6 库存余额、预留与流水
 - `part_stock_bucket`: `id`, `part_model_id`, `custody_location_id`, `owner_id`, `batch_id`, `quality_state`, `custody_state`, `quantity`, `version`。owner_id 引用 `part_owner`（行内/供应商，供应商引用 org_company）；以上维度唯一，数量非负；序列化件移动必须同时转移对应实物状态和桶计数，数量件余额与已实物化部分不能重复累加。custody_location_id 引用 ast_custody_location，库房/货架由层级解析；在途/领用使用明确保管位置，不以 NULL 破坏唯一维度。

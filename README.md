@@ -277,6 +277,8 @@ npm --prefix frontend run test:perf
 | [正式开发路线](docs/DCIM_DEVELOPMENT_ROADMAP.md) | 基础管理优先、模块依赖、B0～B11 开发顺序及交付要求 |
 | [DCIM + SAN 业务需求规格](docs/DCIM_SAN_REQUIREMENTS.md) | 项目范围、前置验证、七个业务阶段的依赖及验收条件 |
 | [领域数据模型规格](docs/DOMAIN_ER_MODEL.md) | 涵盖 DCIM、IPAM、资产工单、备件库存、布线路由、采集监控与 SAN 拓扑的完整 ER 模型与数据字典 |
+| [到货验收领域设计](docs/ASSET_RECEIVING_DOMAIN.md) | 后端模型、到货单、验收、不可变原始配置、实物身份与当前安装关系 |
+| [到货验收 API 契约](docs/ASSET_RECEIVING_API.md) | 前端接口、请求响应、权限、幂等与冲突处理；后端已实现 |
 | [开发协作规范](AGENTS.md) | 分层架构、开发约定和验证要求 |
 | [API 文档](docs/API.md) | 平台接口、权限与实时事件契约 |
 | [Docker 部署](docs/DOCKER.md) | 构建、初始化、持久化及操作命令 |

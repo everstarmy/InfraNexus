@@ -15,6 +15,7 @@ import (
 )
 
 type routeDeps struct {
+	receiving        domain.ReceivingService
 	authz            domain.AuthorizationService
 	health           *handler.HealthHandler
 	cfg              *config.Config
@@ -72,6 +73,7 @@ const (
 )
 
 var rbacRouteRoots = []string{
+	"/api/v1/model-management", "/api/v1/arrival-orders", "/api/v1/receipts", "/api/v1/assets", "/api/v1/asset-attachments", "/api/v1/asset-management",
 	"/api/v1/dashboard",
 	"/api/v1/users",
 	"/api/v1/departments",
@@ -162,6 +164,7 @@ func registerRoutes(app *fiber.App, d routeDeps) {
 	authRequired.Get("/sse/notifications", d.casbin.RequiresPermissions([]string{"/api/v1/ldap/sync-logs:GET"}), d.sse.StreamNotifications)
 
 	rbac := authRequired.Group("", d.casbin.RoutePermission())
+	handler.RegisterReceivingRoutes(rbac, d.receiving, d.authz)
 
 	rbac.Get("/dashboard/overview", d.dashboard.Overview)
 

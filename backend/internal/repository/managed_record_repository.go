@@ -105,11 +105,11 @@ func (r *managedUnitOfWork) HasReferences(ctx context.Context, table string, id 
 		db := r.connection(ctx).Table(ref.Table).Where(ref.Column+" = ?", id)
 		if activeOnly {
 			switch ref.Table {
-			case "org_company_contact":
-				// Contact details remain available after a company is disabled.
+			case "org_company_contact", "part_model", "ast_device_model", "ast_purchase_batch":
+				// Contacts and receiving history remain available after a company is disabled.
 				continue
-			case "dc_rack_unit_allocation", "dc_rack_security_zone":
-				// Every persisted U position is an occupied or reserved slot.
+			case "dc_rack_unit_allocation", "dc_rack_security_zone", "ast_custody_location":
+				// Persisted allocations and custody locations block disabling their location.
 			case "ipam_ip_address":
 				// Historical facts survive a stop. Live allocations block it.
 				db = db.Where("allocation_state <> ?", "free")
