@@ -123,6 +123,19 @@ test("failed sign-in keeps the account, clears only the password and has no stal
   await expect(page).not.toHaveURL(/\/login/);
 });
 
+test("pressing Enter inside sign-in inputs submits the login form", async ({ page }) => {
+  const mocks = await installMocks(page, { permissions: ["*"], loggedIn: false });
+  await page.goto("/login");
+  const username = page.getByLabel("用户名", { exact: true });
+  const password = page.getByLabel("登录密码", { exact: true });
+
+  await username.fill("admin");
+  await password.fill("Right!Pass1");
+  await password.press("Enter");
+  await expect(page).not.toHaveURL(/\/login/);
+  expect(mocks.logins).toHaveLength(1);
+});
+
 test("a page whose code cannot be loaded shows a recoverable error inside the shell", async ({ page }) => {
   await installMocks(page, { permissions: ["*"] });
   await page.route("**/src/pages/roles/index.tsx*", (route) => route.abort());

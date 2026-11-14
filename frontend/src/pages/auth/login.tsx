@@ -49,6 +49,7 @@ export default function LoginPage() {
   const [capsLock, setCapsLock] = useState(false)
   const usernameRef = useRef<HTMLInputElement>(null)
   const passwordRef = useRef<HTMLInputElement>(null)
+  const submittingRef = useRef(false)
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
@@ -100,6 +101,7 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (submittingRef.current) return
     setTouched(true)
     if (!username.trim()) {
       usernameRef.current?.focus()
@@ -110,6 +112,7 @@ export default function LoginPage() {
       return
     }
     if (noDomains) return
+    submittingRef.current = true
     setSubmitting(true)
     setError("")
     try {
@@ -129,10 +132,10 @@ export default function LoginPage() {
         setPassword("")
         setTouched(false)
       }
+    } finally {
+      submittingRef.current = false
       setSubmitting(false)
-      return
     }
-    setSubmitting(false)
   }
 
   return (
@@ -206,7 +209,17 @@ export default function LoginPage() {
             </TabsList>
           </Tabs>
 
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <form
+            onSubmit={handleSubmit}
+            onKeyDown={(event) => {
+              // Ignore held-Enter auto-repeat without interfering with native form submission or IME commits.
+              if (event.key === "Enter" && event.repeat) {
+                event.preventDefault()
+              }
+            }}
+            className="space-y-4"
+            noValidate
+          >
             {error && (
               <Alert id="login-form-error" variant="destructive" role="alert" aria-live="assertive" className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1">
                 <AlertCircle />
