@@ -3816,6 +3816,15 @@
             "type": "string",
             "format": "uuid"
           },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
           "revision_no": {
             "type": "integer"
           },
@@ -3859,6 +3868,7 @@
           "created_at",
           "updated_at",
           "model_id",
+          "status",
           "revision_no",
           "state",
           "height_u",
@@ -5442,6 +5452,15 @@
             "type": "string",
             "format": "uuid"
           },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
           "revision_no": {
             "type": "integer"
           },
@@ -5509,6 +5528,7 @@
           "created_at",
           "updated_at",
           "model_id",
+          "status",
           "revision_no",
           "state",
           "height_u",
@@ -6200,6 +6220,151 @@
           "capabilities",
           "accepted_image_types",
           "states"
+        ]
+      },
+      "ReceivingdeviceRevisionOption": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "model_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "revision_no": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "tracking_mode": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "mounting_type": {
+            "type": "string"
+          },
+          "height_u": {
+            "type": "integer",
+            "nullable": true
+          },
+          "rated_power_w": {
+            "type": "integer",
+            "nullable": true
+          },
+          "spec": {
+            "$ref": "#/components/schemas/ReceivingAssetSpec"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "published_by": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "standard_components": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivingModelComponent"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "created_at",
+          "updated_at",
+          "model_id",
+          "status",
+          "revision_no",
+          "state",
+          "height_u",
+          "rated_power_w",
+          "spec",
+          "published_at",
+          "published_by",
+          "standard_components"
+        ]
+      },
+      "ReceivingcompatibleComponentOption": {
+        "type": "object",
+        "properties": {
+          "part_model_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "part_model_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "manufacturer_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "part_no": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "revision_no": {
+            "type": "integer"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/ReceivingAssetSpec"
+          },
+          "slot_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allows_unassigned": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "part_model_id",
+          "part_model_revision_id",
+          "manufacturer_id",
+          "name",
+          "part_no",
+          "kind",
+          "revision_no",
+          "spec",
+          "slot_keys",
+          "allows_unassigned"
         ]
       }
     },
@@ -25547,6 +25712,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                1,
+                2
+              ]
+            }
+          },
+          {
+            "name": "selectable",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -25570,7 +25753,7 @@
                         "items": {
                           "type": "array",
                           "items": {
-                            "$ref": "#/components/schemas/ReceivingCatalogRevision"
+                            "$ref": "#/components/schemas/ReceivingdeviceRevisionOption"
                           }
                         },
                         "total": {
@@ -25975,6 +26158,14 @@
                         "items": {
                           "$ref": "#/components/schemas/ReceivingcompatInput"
                         }
+                      },
+                      "name": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true
                       }
                     },
                     "required": [
@@ -31864,6 +32055,286 @@
                     },
                     "data": {
                       "$ref": "#/components/schemas/ReceivingreceivingMetadataView"
+                    },
+                    "request_id": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "request_id",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/api/v1/model-management/device-models/{id}/revisions/{childID}/status": {
+      "patch": {
+        "tags": [
+          "到货验收与实物资产"
+        ],
+        "summary": "model.device.revisions.status",
+        "operationId": "model_device_revisions_status",
+        "x-required-api-permission": "api:PATCH:/api/v1/model-management/device-models/:id/revisions/:childID/status",
+        "x-button-permission": "model-management:device-models:status",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "childID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200000
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ReceivingrevisionView"
+                    },
+                    "request_id": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "data",
+                    "request_id",
+                    "timestamp"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                  },
+                  "status": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  }
+                },
+                "required": [
+                  "expected_version",
+                  "status"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/model-management/device-models/{id}/revisions/{childID}/compatible-components": {
+      "get": {
+        "tags": [
+          "到货验收与实物资产"
+        ],
+        "summary": "model.device.revisions.compatible.list",
+        "operationId": "model_device_revisions_compatible_list",
+        "x-required-api-permission": "api:GET:/api/v1/model-management/device-models/:id/revisions/:childID/compatible-components",
+        "x-button-permission": "model-management:device-models:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "childID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slot_key",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 200000
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ReceivingcompatibleComponentOption"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "page_size": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "total",
+                        "page",
+                        "page_size"
+                      ]
                     },
                     "request_id": {
                       "type": "string"

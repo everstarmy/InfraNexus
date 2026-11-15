@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,8 @@ type catalogNameInput struct {
 	Description string `json:"description"`
 }
 type revisionInput struct {
+	Name               *string          `json:"name"`
+	Description        *string          `json:"description"`
 	TrackingMode       string           `json:"tracking_mode"`
 	Unit               string           `json:"unit"`
 	MountingType       string           `json:"mounting_type"`
@@ -249,7 +252,10 @@ func (s *receivingService) model(ctx context.Context, r domain.ReceivingReposito
 		if v := c.Query["state"]; v != "" {
 			q.Filters = append(q.Filters, domain.AssetFilter{Field: "state", Value: v})
 		}
-		return revs.List(ctx, q)
+		if component {
+			return revs.List(ctx, q)
+		}
+		return listDeviceRevisions(ctx, r, c, *m, q)
 	case "revisions.create":
 		in, e := assetDecode[struct {
 			FromRevisionID *uuid.UUID `json:"from_revision_id"`
@@ -266,6 +272,10 @@ func (s *receivingService) model(ctx context.Context, r domain.ReceivingReposito
 			next = max(next, v.RevisionNo+1)
 		}
 		v := domain.CatalogRevision{ModelID: m.ID, RevisionNo: next, State: "draft", Spec: datatypes.NewJSONType(domain.AssetSpec{SchemaVersion: 1})}
+		v.Status = domain.StatusEnabled
+		if !component {
+			v.Name = "版本 " + strconv.Itoa(next)
+		}
 		if component {
 			v.TrackingMode = "individual"
 			v.Unit = "piece"
@@ -287,6 +297,7 @@ func (s *receivingService) model(ctx context.Context, r domain.ReceivingReposito
 			v.TrackingMode = src.TrackingMode
 			v.Unit = src.Unit
 			v.MountingType = src.MountingType
+			v.Description = src.Description
 			v.HeightU = src.HeightU
 			v.RatedPowerW = src.RatedPowerW
 			v.Spec = src.Spec
@@ -316,6 +327,14 @@ func (s *receivingService) model(ctx context.Context, r domain.ReceivingReposito
 	if op == "revisions.get" {
 		return revisionDetails(ctx, r, *v, component)
 	}
+	if !component {
+		switch op {
+		case "revisions.status":
+			return setDeviceRevisionStatus(ctx, r, c, v)
+		case "revisions.compatible.list":
+			return listCompatibleComponents(ctx, r, c, *v)
+		}
+	}
 	if v.State != "draft" {
 		return nil, assetErr("IMMUTABLE_RECORD", "已发布版本不能修改")
 	}
@@ -343,6 +362,18 @@ func (s *receivingService) model(ctx context.Context, r domain.ReceivingReposito
 		} else {
 			if !slices.Contains([]string{"rack", "blade", "standalone"}, in.MountingType) || in.MountingType == "rack" && (in.HeightU == nil || *in.HeightU < 1) || in.MountingType != "rack" && in.HeightU != nil || in.RatedPowerW != nil && *in.RatedPowerW <= 0 {
 				return nil, assetErr("VALIDATION_FAILED", "安装形态、高度或功率无效")
+			}
+			if in.Name != nil {
+				v.Name = strings.TrimSpace(*in.Name)
+			}
+			if in.Description != nil {
+				v.Description = *in.Description
+			}
+			if e = assetText(v.Name, 128, true); e != nil {
+				return nil, e
+			}
+			if e = assetText(v.Description, 1024, false); e != nil {
+				return nil, e
 			}
 			v.MountingType = in.MountingType
 			v.HeightU = in.HeightU
@@ -652,9 +683,20 @@ func componentCompatible(ctx context.Context, r domain.ReceivingRepositories, de
 	if e != nil {
 		return e
 	}
+	var slots []domain.ModelSlot
+	if slot != nil {
+		slots, e = assetAll(ctx, r.ModelSlots, "revision_id", deviceRev)
+		if e != nil {
+			return e
+		}
+	}
+	return validateCompatibleComponent(*m, *p, rows, slots, slot)
+}
+
+func validateCompatibleComponent(m domain.CatalogModel, p domain.CatalogRevision, rows []domain.ModelCompatibility, slots []domain.ModelSlot, slot *string) error {
 	confirmed := false
 	for _, v := range rows {
-		if v.PartModelRevisionID != partRev {
+		if v.PartModelRevisionID != p.ID {
 			continue
 		}
 		same := v.SlotKey == nil && slot == nil || v.SlotKey != nil && slot != nil && *v.SlotKey == *slot
@@ -669,10 +711,6 @@ func componentCompatible(ctx context.Context, r domain.ReceivingRepositories, de
 		return assetErr("INCOMPATIBLE_COMPONENT", "缺少已确认的组件兼容关系")
 	}
 	if slot != nil {
-		slots, e := assetAll(ctx, r.ModelSlots, "revision_id", deviceRev)
-		if e != nil {
-			return e
-		}
 		for _, v := range slots {
 			if v.StableKey == *slot {
 				if v.Kind != m.Kind {

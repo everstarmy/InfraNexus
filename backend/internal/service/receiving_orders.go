@@ -153,7 +153,7 @@ func (s *receivingService) order(ctx context.Context, r domain.ReceivingReposito
 		if in.PlannedQuantity < 1 || in.PlannedQuantity > 10000 {
 			return nil, assetErr("VALIDATION_FAILED", "计划数量须为 1～10000")
 		}
-		if _, _, e = catalogPublished(ctx, r, in.DeviceModelRevisionID, false); e != nil {
+		if e = requireSelectableDeviceRevision(ctx, r, in.DeviceModelRevisionID); e != nil {
 			return nil, e
 		}
 		all, e := assetAll(ctx, r.ArrivalLines, "purchase_batch_id", order.ID)

@@ -33,6 +33,8 @@ func ReceivingRoutes() []ReceivingRoute {
 		{Method: "PUT", Path: "/model-management/device-models/:id/revisions/:childID", Operation: "model.device.revisions.update", Permission: "model-management:device-models:update"},
 		{Method: "DELETE", Path: "/model-management/device-models/:id/revisions/:childID", Operation: "model.device.revisions.delete", Permission: "model-management:device-models:delete"},
 		{Method: "POST", Path: "/model-management/device-models/:id/revisions/:childID/publish", Operation: "model.device.revisions.publish", Permission: "model-management:device-models:publish"},
+		{Method: "PATCH", Path: "/model-management/device-models/:id/revisions/:childID/status", Operation: "model.device.revisions.status", Permission: "model-management:device-models:status"},
+		{Method: "GET", Path: "/model-management/device-models/:id/revisions/:childID/compatible-components", Operation: "model.device.revisions.compatible.list", Permission: "model-management:device-models:read"},
 		{Method: "GET", Path: "/arrival-orders", Operation: "order.list", Permission: "arrival-orders:read"},
 		{Method: "POST", Path: "/arrival-orders", Operation: "order.create", Permission: "arrival-orders:create"},
 		{Method: "GET", Path: "/arrival-orders/:id", Operation: "order.get", Permission: "arrival-orders:read"},

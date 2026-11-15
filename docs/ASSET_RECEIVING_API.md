@@ -345,3 +345,16 @@ preview 对应 receipts:complete API 权限。metadata 对应 asset-management:r
 - API 路径中的 childID 是对应 revisionID/lineID，componentID 在 photos 路径表示附件 ID；这些是路由模板参数名，不影响实际 URL。
 - 本批组件 PATCH 的 data 是该组件可编辑字段的完整对象（serial_number、slot_key、initial_placement、location），未提供必要的放置方式会被拒绝。前端先读取当前值再提交完整对象。
 - 预检响应 data.summary使用 accepted_device_count、rejected_device_count、created_part_count；逐项 errors/warnings 含 item_id、component_id、field、reason、message。缺少组件序列号按实物逐条提示。
+
+## 13. 设备配置版本选用
+
+以下路径省略 `/api/v1`。版本仍使用 `device_model_revision_id` 引用，同一设备型号可有多个可选配置版本。
+
+| 方法和路径 | 契约 |
+| --- | --- |
+| GET `/model-management/device-models/:id/revisions` | 分页，支持 `state`、`status=1/2`、`selectable=true`。选用时只返回所属型号及厂商可用、已发布且启用的版本，列表含名称、说明和标配明细。 |
+| PUT `/model-management/device-models/:id/revisions/:childID` | 版本草稿的 `data` 支持 `name`（必有值，最多 128 字节）和 `description`（最多 1024 字节）。省略时保留原值。新草稿与迁移的已有版本默认以版本号命名。 |
+| PATCH `/model-management/device-models/:id/revisions/:childID/status` | 请求 `{ "expected_version": 3, "status": 2 }`。仅已发布版本可启停，1 启用、2 停用；返回版本详情。沿用 `model-management:device-models:status`。 |
+| GET `/model-management/device-models/:id/revisions/:childID/compatible-components` | 分页，支持 `slot_key`、`kind`、`search`（组件名称或料号）。返回已确认兼容的组件型号版本、规格、可用槽位 `slot_keys` 和是否可不指定槽位 `allows_unassigned`。沿用 `model-management:device-models:read`。 |
+
+指定槽位时，候选须适用于该槽位。省略槽位时，候选至少有一个可用槽位，或允许不指定槽位；前端依据返回值引导选择。保存到货行仍逐项校验兼容性。停用版本只禁止新到货明细选用，已有明细仍可查看和继续执行。已发布版本的名称、说明和配置内容仍不可变。

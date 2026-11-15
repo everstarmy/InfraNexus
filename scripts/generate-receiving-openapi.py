@@ -102,13 +102,13 @@ def request(op):
             return selected('catalogInput', fields + ['description'], fields)
         if action == 'update':
             return edited(selected('catalogNameInput', ['name', 'description'], ['name']))
-        if action == 'status':
+        if action in ('status', 'revisions.status'):
             return obj({'expected_version': version, 'status': {'type': 'integer', 'enum': [1, 2]}}, ['expected_version', 'status'])
         if action == 'revisions.create':
             return obj({'from_revision_id': {**uuid, 'nullable': True}})
         if action == 'revisions.update':
             fields = ['tracking_mode', 'unit', 'spec'] if component else ['mounting_type', 'height_u', 'rated_power_w', 'spec', 'slots', 'ports', 'standard_components', 'compatibilities']
-            return edited(selected('revisionInput', fields, fields))
+            return edited(selected('revisionInput', fields if component else fields + ['name', 'description'], fields))
         return command
     if op == 'order.create':
         return selected('arrivalInput', ['name','supplier_id','external_order_no','expected_arrival_date','description'], ['name','supplier_id'])
@@ -150,6 +150,8 @@ def result(op):
             return obj({'revisions': {'type':'integer'}}, ['revisions'])
         if op.endswith('.delete'):
             return obj({'deleted': {'type':'boolean'}}, ['deleted'])
+        if op == 'model.device.revisions.compatible.list': return page(ref('compatibleComponentOption'))
+        if op == 'model.device.revisions.list': return page(ref('deviceRevisionOption'))
         if '.revisions.' in op:
             return page(ref('CatalogRevision')) if op.endswith('.list') else ref('revisionView')
         return page(ref('catalogView')) if op.endswith('.list') else ref('catalogView') if op.endswith('.get') else ref('CatalogModel')
@@ -201,11 +203,14 @@ for method, path, op, permission in routes:
         elif op=='asset.devices.list': filters=['manufacturer_id','supplier_id','lifecycle_state','device_model_id','warehouse_id','source_receipt_id','search']
         elif op=='asset.components.list': filters=['part_model_id','source_device_id','current_device_id','warehouse_id','placement_kind','serial_status','search']
         elif op=='receipt.components.list': filters=['serial_status','kind','placement_kind']
+        elif op=='model.device.revisions.compatible.list': filters=['kind','slot_key','search']
+        elif op=='model.device.revisions.list': filters=['state','status','selectable']
         elif op.endswith('revisions.list'): filters=['state']
         if op.startswith('asset.devices.current.') or op=='asset.devices.diff': filters+=['expected_configuration_version']
         if op=='asset.devices.diff': filters+=['filter']
         if op=='asset.devices.original.items.list': filters+=['include_current_identity']
-        params += [{'name':name,'in':'query','schema':uuid if name.endswith('_id') else {'type':'string'}} for name in filters]
+        revision_filters = {'status': {'type':'integer','enum':[1,2]}, 'selectable': {'type':'boolean'}} if op=='model.device.revisions.list' else {}
+        params += [{'name':name,'in':'query','schema':revision_filters.get(name, uuid if name.endswith('_id') else {'type':'string'})} for name in filters]
     envelope=obj({'code':{'type':'integer','example':200000},'message':{'type':'string'},'data':result(op),'request_id':{'type':'string'},'timestamp':{'type':'integer','format':'int64'}}, ['code','message','data','request_id','timestamp'])
     operation={'tags':['到货验收与实物资产'],'summary':op,'operationId':op.replace('.','_'),'x-required-api-permission':'api:'+method+':'+re.sub(r'{(\w+)}',r':\1',path),'x-button-permission':permission,'parameters':params,'responses':{'200':{'description':'成功','content':{'application/json':{'schema':envelope}}}}}
     for status in ('400','401','403','404','409','500','503'):

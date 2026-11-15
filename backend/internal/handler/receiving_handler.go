@@ -60,7 +60,7 @@ func RegisterReceivingRoutes(router fiber.Router, svc domain.ReceivingService, a
 					*ptr = id
 				}
 			}
-			for _, key := range []string{"page", "page_size", "search", "status", "state", "kind", "category", "manufacturer_id", "supplier_id", "purchase_batch_id", "device_model_id", "part_model_id", "source_device_id", "current_device_id", "warehouse_id", "lifecycle_state", "source_receipt_id", "serial_status", "placement_kind", "expected_version", "expected_configuration_version", "include_current_identity", "filter", "created_from", "created_to"} {
+			for _, key := range []string{"page", "page_size", "search", "selectable", "slot_key", "status", "state", "kind", "category", "manufacturer_id", "supplier_id", "purchase_batch_id", "device_model_id", "part_model_id", "source_device_id", "current_device_id", "warehouse_id", "lifecycle_state", "source_receipt_id", "serial_status", "placement_kind", "expected_version", "expected_configuration_version", "include_current_identity", "filter", "created_from", "created_to"} {
 				if v := c.Query(key); v != "" {
 					call.Query[key] = strings.Clone(v)
 				}

@@ -89,6 +89,9 @@ func (CatalogModel) TableName() string { return "ast_device_model" }
 type CatalogRevision struct {
 	AssetRecord
 	ModelID      uuid.UUID                     `gorm:"type:uuid;not null" json:"model_id"`
+	Name         string                        `gorm:"size:128;not null;default:''" json:"name,omitempty"`
+	Description  string                        `gorm:"size:1024;not null;default:''" json:"description,omitempty"`
+	Status       int                           `gorm:"not null;default:1" json:"status"`
 	RevisionNo   int                           `gorm:"not null" json:"revision_no"`
 	State        string                        `gorm:"size:16;not null" json:"state"`
 	TrackingMode string                        `gorm:"size:16" json:"tracking_mode,omitempty"`
