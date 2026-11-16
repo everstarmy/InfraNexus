@@ -22,7 +22,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { routePages } from "@/routing/pages"
+import { detailRoutePages, routePages } from "@/routing/pages"
 import { RouteError } from "@/routing/route-error"
 import { RoutePage, RoutePageSkeleton } from "@/routing/route-page"
 import ForbiddenPage from "@/pages/errors/forbidden"
@@ -178,6 +178,22 @@ const router = createBrowserRouter([
                 <RequirePermission code={item.permission}>
                   <Suspense fallback={<RoutePageSkeleton />}>
                     <RoutePage key={item.url}>
+                      <Page />
+                    </RoutePage>
+                  </Suspense>
+                </RequirePermission>
+              ),
+            }
+          }),
+          ...detailRoutePages.map((route) => {
+            const Page = route.Page
+            return {
+              path: route.path,
+              errorElement: <RouteError />,
+              element: (
+                <RequirePermission code={route.permission}>
+                  <Suspense fallback={<RoutePageSkeleton />}>
+                    <RoutePage key={route.path}>
                       <Page />
                     </RoutePage>
                   </Suspense>

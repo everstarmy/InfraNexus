@@ -1,7 +1,22 @@
+export interface ReceiptIssueDTO {
+  reason: string
+  item_id?: string | null
+  component_id?: string | null
+  field: string
+  message: string
+}
+
+export interface ReceivingErrorData {
+  reason: string
+  current_version?: number
+  fields?: ReceiptIssueDTO[]
+}
+
 export interface ApiErrorBody {
   code?: number
   message?: string
   data?: unknown
+  request_id?: string
 }
 
 interface AxiosLike {
@@ -20,11 +35,14 @@ export const BizCode = {
   AccountDisabled: 403002,
   BuiltinProtected: 403003,
   SelfOperationDenied: 403004,
+  NotFound: 404007,
   ResourceConflict: 409001,
   DepartmentHasChildren: 409002,
   DepartmentHasMembers: 409003,
   SyncInProgress: 409005,
   ExternalAccountManaged: 409007,
+  PayloadTooLarge: 413000,
+  UnsupportedMediaType: 415000,
   DirectoryUnavailable: 502001,
 } as const
 
@@ -63,4 +81,28 @@ export function getFieldErrors(error: unknown): Record<string, string> {
     }
   }
   return out
+}
+
+export function getReceivingError(error: unknown): ReceivingErrorData | undefined {
+  const data = apiErrorBody(error)?.data
+  if (data && typeof data === "object" && !Array.isArray(data) && "reason" in data) {
+    return data as ReceivingErrorData
+  }
+  return undefined
+}
+
+export function isVersionConflict(error: unknown): boolean {
+  return getReceivingError(error)?.reason === "VERSION_CONFLICT"
+}
+
+export function getRequestId(error: unknown): string | undefined {
+  return apiErrorBody(error)?.request_id
+}
+
+export function isNetworkOrUnknownError(error: unknown): boolean {
+  const axios = asAxios(error)
+  if (!axios) return false
+  if (!axios.response) return true
+  const status = axios.response.status ?? 0
+  return status >= 500
 }

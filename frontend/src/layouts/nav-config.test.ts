@@ -37,4 +37,13 @@ describe("Navigation Route Config and Highlighting", () => {
     expect(findNavByPath("/roles")?.item.title).toBe("角色管理")
     expect(findNavByPath("/permissions")?.item.title).toBe("权限清单")
   })
+
+  it("resolves model management, arrival orders, receipts, and asset detail paths", () => {
+    expect(findNavByPath("/model-management/component-models/123")?.item.url).toBe("/model-management/component-models")
+    expect(findNavByPath("/model-management/device-models/456")?.item.url).toBe("/model-management/device-models")
+    expect(findNavByPath("/arrival-orders/789")?.item.url).toBe("/arrival-orders")
+    expect(findNavByPath("/receipts/abc")?.item.url).toBe("/receipts")
+    expect(findNavByPath("/assets/devices/def")?.item.url).toBe("/assets/devices")
+    expect(findNavByPath("/assets/components/ghi")?.item.url).toBe("/assets/components")
+  })
 })
